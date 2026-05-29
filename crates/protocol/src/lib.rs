@@ -45,6 +45,8 @@ pub enum Message {
 pub enum Input {
     /// Absolute pointer position within the streamed frame.
     MouseMove { x: f32, y: f32 },
+    /// Relative pointer motion in points (used in pointer-locked control mode).
+    MouseMoveRelative { dx: f32, dy: f32 },
     /// A mouse button changed state.
     MouseButton { button: Button, pressed: bool },
     /// Wheel scroll in lines (positive `dy` scrolls up, positive `dx` right).
@@ -175,6 +177,7 @@ mod tests {
     fn input_messages_round_trip() {
         let inputs = vec![
             Input::MouseMove { x: 0.25, y: 0.75 },
+            Input::MouseMoveRelative { dx: -3.5, dy: 8.0 },
             Input::MouseButton { button: Button::Left, pressed: true },
             Input::MouseButton { button: Button::Right, pressed: false },
             Input::Scroll { dx: -1.0, dy: 2.5 },

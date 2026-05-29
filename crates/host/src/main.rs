@@ -182,6 +182,11 @@ fn inject(input: Input, bounds: (f64, f64, f64, f64), cursor: &mut (f64, f64)) {
             );
             post_mouse(source, CGEventType::MouseMoved, *cursor, CGMouseButton::Left);
         }
+        Input::MouseMoveRelative { dx, dy } => {
+            cursor.0 = (cursor.0 + f64::from(dx)).clamp(bounds.0, bounds.0 + bounds.2 - 1.0);
+            cursor.1 = (cursor.1 + f64::from(dy)).clamp(bounds.1, bounds.1 + bounds.3 - 1.0);
+            post_mouse(source, CGEventType::MouseMoved, *cursor, CGMouseButton::Left);
+        }
         Input::MouseButton { button, pressed } => {
             let (event_type, cg_button) = match (button, pressed) {
                 (Button::Left, true) => (CGEventType::LeftMouseDown, CGMouseButton::Left),

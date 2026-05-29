@@ -23,10 +23,12 @@ use videotoolbox::{DecodedFrame, DecompressionSession, PixelTransferSession};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 
@@ -569,6 +571,8 @@ struct App {
     shared: Shared,
     gpu: Option<Gpu>,
     input_tx: Sender<Input>,
+    /// Whether the pointer is locked and we're forwarding input to the host.
+    grabbed: bool,
 }
 
 impl ApplicationHandler for App {
@@ -596,26 +600,27 @@ impl ApplicationHandler for App {
                 gpu.render(&self.shared);
                 gpu.window.request_redraw();
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                let size = gpu.window.inner_size();
-                if size.width > 0 && size.height > 0 {
-                    let x = (position.x / f64::from(size.width)) as f32;
-                    let y = (position.y / f64::from(size.height)) as f32;
-                    let _ = self.input_tx.send(Input::MouseMove {
-                        x: x.clamp(0.0, 1.0),
-                        y: y.clamp(0.0, 1.0),
-                    });
-                }
-            }
             WindowEvent::MouseInput { state, button, .. } => {
-                if let Some(button) = map_button(button) {
-                    let _ = self.input_tx.send(Input::MouseButton {
-                        button,
-                        pressed: state == ElementState::Pressed,
-                    });
+                if self.grabbed {
+                    if let Some(button) = map_button(button) {
+                        let _ = self.input_tx.send(Input::MouseButton {
+                            button,
+                            pressed: state == ElementState::Pressed,
+                        });
+                    }
+                } else if state == ElementState::Pressed && button == MouseButton::Left {
+                    // First click grabs the pointer to enter control mode.
+                    match gpu.window.set_cursor_grab(CursorGrabMode::Locked) {
+                        Ok(()) => {
+                            gpu.window.set_cursor_visible(false);
+                            self.grabbed = true;
+                            println!("control mode ON (pointer locked) — press Esc to release");
+                        }
+                        Err(e) => eprintln!("could not lock the pointer: {e}"),
+                    }
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, .. } if self.grabbed => {
                 let (dx, dy) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => (x, y),
                     MouseScrollDelta::PixelDelta(p) => ((p.x / 10.0) as f32, (p.y / 10.0) as f32),
@@ -623,16 +628,38 @@ impl ApplicationHandler for App {
                 let _ = self.input_tx.send(Input::Scroll { dx, dy });
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if let Some(code) = key_to_hid(code) {
-                        let _ = self.input_tx.send(Input::Key {
-                            code,
-                            pressed: event.state == ElementState::Pressed,
-                        });
+                if event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                    && event.state == ElementState::Pressed
+                    && self.grabbed
+                {
+                    let _ = gpu.window.set_cursor_grab(CursorGrabMode::None);
+                    gpu.window.set_cursor_visible(true);
+                    self.grabbed = false;
+                    println!("control mode OFF");
+                } else if self.grabbed {
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        if let Some(code) = key_to_hid(code) {
+                            let _ = self.input_tx.send(Input::Key {
+                                code,
+                                pressed: event.state == ElementState::Pressed,
+                            });
+                        }
                     }
                 }
             }
             _ => {}
+        }
+    }
+
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: DeviceId, event: DeviceEvent) {
+        // In control mode, raw mouse motion drives the virtual cursor as deltas
+        // (the OS cursor is locked, so WindowEvent::CursorMoved won't fire).
+        if self.grabbed {
+            if let DeviceEvent::MouseMotion { delta } = event {
+                let _ = self
+                    .input_tx
+                    .send(Input::MouseMoveRelative { dx: delta.0 as f32, dy: delta.1 as f32 });
+            }
         }
     }
 }
@@ -649,6 +676,6 @@ fn main() {
 
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App { shared, gpu: None, input_tx };
+    let mut app = App { shared, gpu: None, input_tx, grabbed: false };
     event_loop.run_app(&mut app).expect("run app");
 }
