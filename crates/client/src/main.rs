@@ -12,17 +12,18 @@
 use std::io::BufReader;
 use std::net::TcpStream;
 use std::ptr;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use apple_cf::cm::{CMBlockBuffer, CMFormatDescription, CMSampleBuffer};
 use apple_cf::cv::{CVPixelBuffer, CVPixelBufferLockFlags};
 use apple_cf::raw;
-use extender_protocol::{self as protocol, Codec as WireCodec, Message};
+use extender_protocol::{self as protocol, Button, Codec as WireCodec, Input, Message};
 use videotoolbox::{DecodedFrame, DecompressionSession, PixelTransferSession};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -41,17 +42,24 @@ type Shared = Arc<Mutex<Option<Frame>>>;
 
 /// Connect to the host and feed decoded frames into `shared` until the stream
 /// ends. Runs on its own thread; errors are reported, not propagated.
-fn run_network(addr: String, shared: Shared) {
-    match connect_and_stream(&addr, &shared) {
+fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>) {
+    match connect_and_stream(&addr, &shared, input_rx) {
         Ok(()) => println!("stream ended"),
         Err(e) => eprintln!("client error: {e}"),
     }
 }
 
-fn connect_and_stream(addr: &str, shared: &Shared) -> Result<(), Box<dyn std::error::Error>> {
+fn connect_and_stream(
+    addr: &str,
+    shared: &Shared,
+    input_rx: Receiver<Input>,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("connecting to {addr}...");
     let stream = TcpStream::connect(addr)?;
     println!("connected to {addr}");
+    // A second handle on the same socket carries our input upstream.
+    let input_stream = stream.try_clone()?;
+    std::thread::spawn(move || input_writer(input_stream, input_rx));
     let mut reader = BufReader::new(stream);
 
     let mut format: Option<CMFormatDescription> = None;
@@ -83,6 +91,26 @@ fn connect_and_stream(addr: &str, shared: &Shared) -> Result<(), Box<dyn std::er
                 decoder.decode(&sample)?;
             }
         }
+    }
+}
+
+/// Drain captured input events and write them upstream until the channel closes
+/// (window closed) or the socket errors (host gone).
+fn input_writer(mut stream: TcpStream, rx: Receiver<Input>) {
+    while let Ok(input) = rx.recv() {
+        if protocol::write_framed(&mut stream, &input).is_err() {
+            break; // host gone
+        }
+    }
+}
+
+/// Map a winit mouse button to the protocol button, ignoring extra buttons.
+fn map_button(button: MouseButton) -> Option<Button> {
+    match button {
+        MouseButton::Left => Some(Button::Left),
+        MouseButton::Right => Some(Button::Right),
+        MouseButton::Middle => Some(Button::Middle),
+        _ => None,
     }
 }
 
@@ -501,6 +529,7 @@ impl Gpu {
 struct App {
     shared: Shared,
     gpu: Option<Gpu>,
+    input_tx: Sender<Input>,
 }
 
 impl ApplicationHandler for App {
@@ -528,6 +557,25 @@ impl ApplicationHandler for App {
                 gpu.render(&self.shared);
                 gpu.window.request_redraw();
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                let size = gpu.window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    let x = (position.x / f64::from(size.width)) as f32;
+                    let y = (position.y / f64::from(size.height)) as f32;
+                    let _ = self.input_tx.send(Input::MouseMove {
+                        x: x.clamp(0.0, 1.0),
+                        y: y.clamp(0.0, 1.0),
+                    });
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(button) = map_button(button) {
+                    let _ = self.input_tx.send(Input::MouseButton {
+                        button,
+                        pressed: state == ElementState::Pressed,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -536,14 +584,15 @@ impl ApplicationHandler for App {
 fn main() {
     let addr = std::env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.to_string());
     let shared: Shared = Arc::new(Mutex::new(None));
+    let (input_tx, input_rx) = mpsc::channel::<Input>();
 
     {
         let shared = shared.clone();
-        std::thread::spawn(move || run_network(addr, shared));
+        std::thread::spawn(move || run_network(addr, shared, input_rx));
     }
 
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App { shared, gpu: None };
+    let mut app = App { shared, gpu: None, input_tx };
     event_loop.run_app(&mut app).expect("run app");
 }

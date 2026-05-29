@@ -11,10 +11,14 @@ use std::ptr;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+use std::thread;
 
 use apple_cf::iosurface::IOSurface;
 use apple_cf::raw;
-use extender_protocol::{self as protocol, Codec as WireCodec, Message};
+use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use core_graphics::geometry::CGPoint;
+use extender_protocol::{self as protocol, Button, Codec as WireCodec, Input, Message};
 use screencapturekit::prelude::*;
 use videotoolbox::prelude::*;
 
@@ -99,10 +103,56 @@ fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // A second handle on the same socket carries client -> host input, injected
+    // on its own thread for as long as the client stays connected.
+    let input_stream = stream.try_clone()?;
+    let input_thread = thread::spawn(move || receive_and_inject(input_stream, width, height));
+
     sc.start_capture()?;
     let result = stream_to_client(stream, &rx, width, height);
     let _ = sc.stop_capture();
+    let _ = input_thread.join();
     result
+}
+
+/// Read input events from the client and inject them into the OS until the
+/// client disconnects. Pointer coordinates map from normalized frame space to
+/// the captured display's pixels.
+fn receive_and_inject(mut stream: TcpStream, width: u32, height: u32) {
+    let (w, h) = (f64::from(width), f64::from(height));
+    let mut cursor = (0.0_f64, 0.0_f64);
+    while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
+        inject(input, w, h, &mut cursor);
+    }
+}
+
+/// Inject one input event via CoreGraphics. `cursor` tracks the last pointer
+/// position so button events fire where the pointer is.
+fn inject(input: Input, w: f64, h: f64, cursor: &mut (f64, f64)) {
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
+    let (event_type, button) = match input {
+        Input::MouseMove { x, y } => {
+            *cursor = (f64::from(x) * w, f64::from(y) * h);
+            (CGEventType::MouseMoved, CGMouseButton::Left)
+        }
+        Input::MouseButton { button, pressed } => match (button, pressed) {
+            (Button::Left, true) => (CGEventType::LeftMouseDown, CGMouseButton::Left),
+            (Button::Left, false) => (CGEventType::LeftMouseUp, CGMouseButton::Left),
+            (Button::Right, true) => (CGEventType::RightMouseDown, CGMouseButton::Right),
+            (Button::Right, false) => (CGEventType::RightMouseUp, CGMouseButton::Right),
+            (Button::Middle, true) => (CGEventType::OtherMouseDown, CGMouseButton::Center),
+            (Button::Middle, false) => (CGEventType::OtherMouseUp, CGMouseButton::Center),
+        },
+        // Scroll and keyboard arrive in M2d.
+        Input::Scroll { .. } | Input::Key { .. } => return,
+    };
+    if let Ok(event) =
+        CGEvent::new_mouse_event(source, event_type, CGPoint::new(cursor.0, cursor.1), button)
+    {
+        event.post(CGEventTapLocation::HID);
+    }
 }
 
 /// Drain encoded frames and write them to the client. Returns `Ok` on a clean
