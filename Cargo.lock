@@ -492,6 +492,7 @@ name = "extender-host"
 version = "0.1.0"
 dependencies = [
  "apple-cf",
+ "core-graphics",
  "extender-core",
  "extender-protocol",
  "pollster",
