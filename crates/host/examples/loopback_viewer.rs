@@ -92,9 +92,9 @@ fn start_capture(shared: Shared) -> Option<SCStream> {
             let Ok(guard) = buffer.lock(CVPixelBufferLockFlags::READ_ONLY) else {
                 return;
             };
-            let w = guard.width() as usize;
-            let h = guard.height() as usize;
-            let stride = guard.bytes_per_row() as usize;
+            let w = guard.width();
+            let h = guard.height();
+            let stride = guard.bytes_per_row();
             let row = w * 4;
             let src = guard.as_slice();
             if w == 0 || h == 0 || stride < row || src.len() < stride * h {

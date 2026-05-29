@@ -62,9 +62,53 @@ pub fn read_message<R: Read>(r: &mut R) -> io::Result<Message> {
     postcard::from_bytes(&body).map_err(io::Error::other)
 }
 
+/// Report whether an AVCC bitstream contains a keyframe (an IRAP access unit):
+/// an H.264 IDR slice (NAL type 5) or an HEVC IRAP NAL (types 16..=23).
+///
+/// `data` is the length-prefixed NAL stream VideoToolbox emits (4-byte
+/// big-endian prefixes). The host uses this to set [`Message::Frame`]'s
+/// `keyframe` flag; the client uses it to know when it can start decoding.
+/// Malformed or truncated input reports `false` (unknown ⇒ not a keyframe).
+#[must_use]
+pub fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
+    nal_units(data).any(|nal| match codec {
+        // H.264: nal_unit_type is the low 5 bits; 5 = IDR slice.
+        Codec::H264 => nal.first().is_some_and(|&b| b & 0x1F == 5),
+        // HEVC: nal_unit_type is bits 1..=6 of the first header byte; the
+        // IRAP range 16..=23 (BLA/IDR/CRA) are the random-access pictures.
+        Codec::Hevc => nal.first().is_some_and(|&b| (16..=23).contains(&((b >> 1) & 0x3F))),
+    })
+}
+
+/// Iterate the NAL unit payloads in an AVCC buffer (each prefixed by a 4-byte
+/// big-endian length). Stops at the first truncated or zero-length prefix.
+fn nal_units(mut data: &[u8]) -> impl Iterator<Item = &[u8]> {
+    core::iter::from_fn(move || {
+        let (len_bytes, rest) = data.split_at_checked(4)?;
+        let len = u32::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+        let (nal, tail) = rest.split_at_checked(len)?;
+        if nal.is_empty() {
+            return None;
+        }
+        data = tail;
+        Some(nal)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build an AVCC buffer (4-byte big-endian length prefix per NAL) from a
+    /// list of raw NAL unit payloads.
+    fn avcc(nals: &[&[u8]]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for nal in nals {
+            out.extend_from_slice(&u32::try_from(nal.len()).unwrap().to_be_bytes());
+            out.extend_from_slice(nal);
+        }
+        out
+    }
 
     #[test]
     fn message_roundtrip_over_a_buffer() {
@@ -99,5 +143,41 @@ mod tests {
             let got = read_message(&mut cursor).unwrap();
             assert_eq!(&got, expected);
         }
+    }
+
+    #[test]
+    fn h264_idr_access_unit_is_a_keyframe() {
+        // SPS (type 7), PPS (type 8), IDR slice (type 5).
+        let au = avcc(&[&[0x67, 0x42, 0x00], &[0x68, 0xce], &[0x65, 0x88, 0x84]]);
+        assert!(is_keyframe(Codec::H264, &au));
+    }
+
+    #[test]
+    fn h264_non_idr_slice_is_not_a_keyframe() {
+        // A single non-IDR coded slice (type 1).
+        let au = avcc(&[&[0x41, 0x9a, 0x00]]);
+        assert!(!is_keyframe(Codec::H264, &au));
+    }
+
+    #[test]
+    fn hevc_idr_is_a_keyframe_but_trailing_picture_is_not() {
+        // IDR_W_RADL is NAL type 19 -> first header byte (19 << 1) = 0x26.
+        assert!(is_keyframe(Codec::Hevc, &avcc(&[&[0x26, 0x01, 0x00]])));
+        // TRAIL_R is type 1 -> 0x02; not in the IRAP range.
+        assert!(!is_keyframe(Codec::Hevc, &avcc(&[&[0x02, 0x01, 0x00]])));
+    }
+
+    #[test]
+    fn keyframe_in_a_later_nal_is_still_found() {
+        let au = avcc(&[&[0x06, 0x00], &[0x65, 0x88]]); // SEI (type 6) then IDR (type 5)
+        assert!(is_keyframe(Codec::H264, &au));
+    }
+
+    #[test]
+    fn malformed_or_truncated_streams_report_not_a_keyframe() {
+        assert!(!is_keyframe(Codec::H264, &[]));
+        assert!(!is_keyframe(Codec::H264, &[0, 0, 0])); // shorter than one length prefix
+        // Length prefix claims 9 bytes but only one follows — stop, don't peek.
+        assert!(!is_keyframe(Codec::H264, &[0, 0, 0, 9, 0x65]));
     }
 }

@@ -471,8 +471,13 @@ dependencies = [
 name = "extender-client"
 version = "0.1.0"
 dependencies = [
+ "apple-cf",
  "extender-core",
  "extender-protocol",
+ "pollster",
+ "videotoolbox",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
