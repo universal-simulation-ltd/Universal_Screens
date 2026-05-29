@@ -8,7 +8,24 @@
 
 fn main() {
     #[cfg(target_os = "macos")]
-    configure_swift_runtime();
+    {
+        compile_virtual_display_shim();
+        configure_swift_runtime();
+    }
+}
+
+/// Compile the Objective-C shim over the private CGVirtualDisplay API and link
+/// the frameworks it needs.
+#[cfg(target_os = "macos")]
+fn compile_virtual_display_shim() {
+    println!("cargo:rerun-if-changed=shim/virtual_display.m");
+    cc::Build::new()
+        .file("shim/virtual_display.m")
+        .flag("-fobjc-arc")
+        .compile("extender_vdisplay_shim");
+    // CGVirtualDisplay lives in CoreGraphics; Foundation provides the ObjC runtime + NSArray.
+    println!("cargo:rustc-link-lib=framework=CoreGraphics");
+    println!("cargo:rustc-link-lib=framework=Foundation");
 }
 
 #[cfg(target_os = "macos")]
