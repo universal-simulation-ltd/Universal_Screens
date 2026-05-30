@@ -9,7 +9,7 @@ use std::io::{BufWriter, Write};
 use std::net::{TcpListener, TcpStream};
 use std::ptr;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread;
 
@@ -117,6 +117,7 @@ fn serve(
     capture: (u32, u32),
     bounds: Bounds,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = stream.set_nodelay(true); // disable Nagle — low latency for video + input
     let content = SCShareableContent::get()?;
     let display = content
         .displays()
@@ -147,7 +148,10 @@ fn serve(
         .with_height(height)
         .with_fps(FPS as u32);
 
-    let (tx, rx) = mpsc::channel::<EncodedFrame>();
+    // Bounded so a slow network back-pressures the encoder (ScreenCaptureKit then
+    // drops capture frames) instead of growing latency — we can't drop *encoded*
+    // frames mid-GOP without breaking H.264 continuity.
+    let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(2);
     let frame_no = Arc::new(AtomicI64::new(0));
 
     let mut sc = SCStream::new(&filter, &config);
@@ -329,7 +333,7 @@ fn capture_and_encode(
     sample: &CMSampleBuffer,
     encoder: &CompressionSession,
     frame_no: &AtomicI64,
-    tx: &Sender<EncodedFrame>,
+    tx: &SyncSender<EncodedFrame>,
 ) {
     let Some(pixel_buffer) = sample.image_buffer() else {
         return; // ScreenCaptureKit emits occasional status frames with no image

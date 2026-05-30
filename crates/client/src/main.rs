@@ -59,6 +59,7 @@ fn connect_and_stream(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("connecting to {addr}...");
     let stream = TcpStream::connect(addr)?;
+    let _ = stream.set_nodelay(true); // disable Nagle — low latency for input + video
     println!("connected to {addr}");
     // A second handle on the same socket carries our input upstream.
     let input_stream = stream.try_clone()?;
