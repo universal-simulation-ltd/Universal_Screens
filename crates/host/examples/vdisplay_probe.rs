@@ -16,14 +16,14 @@ use core_graphics::display::CGDisplay;
 
 extern "C" {
     /// Create a virtual display; returns its `CGDirectDisplayID` (0 on failure).
-    fn extender_vdisplay_create(width: u32, height: u32, hidpi: u32) -> u32;
+    fn extender_vdisplay_create(width: u32, height: u32) -> u32;
 }
 
 fn main() {
     let before = CGDisplay::active_displays().unwrap_or_default();
     println!("active displays before: {before:?}");
 
-    let id = unsafe { extender_vdisplay_create(1920, 1080, 2) };
+    let id = unsafe { extender_vdisplay_create(1920, 1080) };
     if id == 0 {
         eprintln!(
             "FAILED to create a virtual display — CGVirtualDisplay initWithDescriptor/applySettings \

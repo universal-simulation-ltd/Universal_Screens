@@ -1,10 +1,16 @@
-// Minimal Objective-C shim over the *private* CoreGraphics CGVirtualDisplay API,
-// for the M3 feasibility spike. Declares just enough of the reverse-engineered
-// interface to create one virtual display and return its CGDirectDisplayID.
+// Minimal Objective-C shim over the *private* CoreGraphics CGVirtualDisplay API.
+// Declares just enough of the reverse-engineered interface to create one virtual
+// display and return its CGDirectDisplayID.
 //
 // The created display is retained in a file-global so it lives for the process
 // lifetime; macOS tears it down when the process exits. Interface shape follows
 // the widely-used reverse-engineering (e.g. Chromium's virtual_display_mac_util).
+//
+// NOTE: this creates a standard (non-HiDPI) display at the requested size. True
+// Retina/HiDPI was attempted (settings.hiDPI + explicit CGDisplaySetDisplayMode)
+// but a standalone virtual display doesn't reliably adopt a HiDPI mode without
+// being mirrored to a physical display (the force-hidpi approach), which doesn't
+// fit a capture workflow — so it's deferred. See docs/M4-hidpi-deferred.md.
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
@@ -47,22 +53,14 @@
 
 static CGVirtualDisplay *g_display = nil;
 
-// Create one virtual display. width/height are the LOGICAL (point) size; when
-// `hidpi` is non-zero the display is Retina (2x): the mode is created at the
-// native backing resolution (logical x 2) and settings.hiDPI = 1, which makes
-// the OS present it at the logical size (= backing / 2). Recipe per the
-// maintained force-hidpi project. Retained for the process lifetime; returns its
-// CGDirectDisplayID, or 0 on failure.
-uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, uint32_t hidpi) {
-    uint32_t scale = hidpi ? 2 : 1;
-    uint32_t backing_w = width * scale;
-    uint32_t backing_h = height * scale;
-
+// Create one virtual display at the given pixel size. Retained for the process
+// lifetime. Returns its CGDirectDisplayID, or 0 on failure.
+uint32_t extender_vdisplay_create(uint32_t width, uint32_t height) {
     CGVirtualDisplayDescriptor *descriptor = [[CGVirtualDisplayDescriptor alloc] init];
     descriptor.queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0);
     descriptor.name = @"ExtenderScreen Virtual Display";
-    descriptor.maxPixelsWide = backing_w * 2;
-    descriptor.maxPixelsHigh = backing_h * 2;
+    descriptor.maxPixelsWide = width;
+    descriptor.maxPixelsHigh = height;
     descriptor.sizeInMillimeters = CGSizeMake(25.4 * width / 109.0, 25.4 * height / 109.0);
     descriptor.productID = 0x1234;
     descriptor.vendorID = 0x3456;
@@ -77,13 +75,11 @@ uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, uint32_t hidp
         return 0;
     }
 
-    // The mode is at the native backing resolution; settings.hiDPI = 1 makes it a
-    // Retina mode the OS presents at half (the logical) size.
-    CGVirtualDisplayMode *mode = [[CGVirtualDisplayMode alloc] initWithWidth:backing_w
-                                                                      height:backing_h
+    CGVirtualDisplayMode *mode = [[CGVirtualDisplayMode alloc] initWithWidth:width
+                                                                      height:height
                                                                  refreshRate:60.0];
     CGVirtualDisplaySettings *settings = [[CGVirtualDisplaySettings alloc] init];
-    settings.hiDPI = hidpi ? 1 : 0;
+    settings.hiDPI = 0;
     settings.modes = @[ mode ];
 
     if (![display applySettings:settings]) {

@@ -30,12 +30,11 @@ const BITRATE: i32 = 20_000_000;
 const DEFAULT_ADDR: &str = "0.0.0.0:9000";
 const VDISPLAY_WIDTH: u32 = 1920;
 const VDISPLAY_HEIGHT: u32 = 1080;
-const VDISPLAY_SCALE: u32 = 2; // backing scale: 2 = Retina/HiDPI (native px = logical x 2)
 
 extern "C" {
-    /// Create a virtual display (Objective-C shim); returns its CGDirectDisplayID
-    /// (0 on failure). The display is retained for the process lifetime.
-    fn extender_vdisplay_create(width: u32, height: u32, hidpi: u32) -> u32;
+    /// Create a virtual display (Objective-C shim) at the given pixel size;
+    /// returns its CGDirectDisplayID (0 on failure). Retained for the process lifetime.
+    fn extender_vdisplay_create(width: u32, height: u32) -> u32;
 }
 
 /// A display's global bounds: origin x/y and width/height, in points.
@@ -43,19 +42,22 @@ type Bounds = (f64, f64, f64, f64);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    // Optional 2nd arg: the virtual display's logical size, e.g. "2560x1440".
+    let (logical_w, logical_h) = std::env::args()
+        .nth(2)
+        .and_then(|s| parse_resolution(&s))
+        .unwrap_or((VDISPLAY_WIDTH, VDISPLAY_HEIGHT));
 
     // Create the virtual display we extend onto and wait for the window server to
     // register it, so capture can find it and input can target its bounds.
-    let virtual_id = unsafe { extender_vdisplay_create(VDISPLAY_WIDTH, VDISPLAY_HEIGHT, VDISPLAY_SCALE) };
+    let virtual_id = unsafe { extender_vdisplay_create(logical_w, logical_h) };
     if virtual_id == 0 {
         return Err("failed to create the virtual display (CGVirtualDisplay rejected it)".into());
     }
-    let (bounds, capture) = wait_for_display(virtual_id)
+    let bounds = wait_for_display(virtual_id)
         .ok_or("virtual display did not register with the window server")?;
-    println!(
-        "created virtual display {virtual_id}: {VDISPLAY_WIDTH}x{VDISPLAY_HEIGHT} pt @ {VDISPLAY_SCALE}x, capturing {}x{} px",
-        capture.0, capture.1
-    );
+    let capture = (logical_w, logical_h);
+    println!("created virtual display {virtual_id}: capturing {logical_w}x{logical_h} px");
 
     let listener = TcpListener::bind(&addr)?;
     println!(
@@ -85,23 +87,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Parse a "WIDTHxHEIGHT" resolution string (e.g. "2560x1440").
+fn parse_resolution(s: &str) -> Option<(u32, u32)> {
+    let (w, h) = s.split_once(['x', 'X'])?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+}
+
 /// Poll until display `id` is registered, returning its global bounds (origin
-/// x/y, width, height — in points, for input mapping) and its native backing
-/// size (pixels, for capture — 2x the logical size on a HiDPI display).
-fn wait_for_display(id: u32) -> Option<(Bounds, (u32, u32))> {
+/// x/y, width, height — in points) for input mapping.
+fn wait_for_display(id: u32) -> Option<Bounds> {
     for _ in 0..50 {
         if CGDisplay::active_displays()
             .unwrap_or_default()
             .contains(&id)
         {
-            let display = CGDisplay::new(id);
-            let b = display.bounds();
-            let bounds = (b.origin.x, b.origin.y, b.size.width, b.size.height);
-            let native = display.display_mode().map_or(
-                (VDISPLAY_WIDTH * VDISPLAY_SCALE, VDISPLAY_HEIGHT * VDISPLAY_SCALE),
-                |m| (m.pixel_width() as u32, m.pixel_height() as u32),
-            );
-            return Some((bounds, native));
+            let b = CGDisplay::new(id).bounds();
+            return Some((b.origin.x, b.origin.y, b.size.width, b.size.height));
         }
         thread::sleep(std::time::Duration::from_millis(100));
     }
