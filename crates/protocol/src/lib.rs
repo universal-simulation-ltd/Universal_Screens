@@ -38,6 +38,17 @@ pub enum Message {
     },
 }
 
+/// The first message a client sends upstream, immediately after connecting and
+/// before any [`Input`]. Carries the protocol version (so the host can detect a
+/// mismatch) and the client's full panel resolution in physical pixels, so the
+/// host can size its virtual display to match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientHello {
+    pub protocol_version: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// A client -> host input event. Pointer coordinates are normalized to the
 /// streamed frame (`[0, 1]` from the top-left), so they're independent of the
 /// client window size and the host display resolution.

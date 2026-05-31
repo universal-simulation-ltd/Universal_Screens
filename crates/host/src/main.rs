@@ -21,43 +21,43 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
-use extender_protocol::{self as protocol, Button, Codec as WireCodec, Input, Message};
+use extender_protocol::{self as protocol, Button, ClientHello, Codec as WireCodec, Input, Message};
 use screencapturekit::prelude::*;
 use videotoolbox::prelude::*;
 
 const FPS: i32 = 60;
 const BITRATE: i32 = 40_000_000;
 const DEFAULT_ADDR: &str = "0.0.0.0:9000";
-const VDISPLAY_WIDTH: u32 = 1920;
-const VDISPLAY_HEIGHT: u32 = 1080;
+/// Reject client-advertised sizes outside this range (defends the private
+/// CGVirtualDisplay API against a garbled hello).
+const MAX_DIMENSION: u32 = 16384;
 
 extern "C" {
     /// Create a virtual display (Objective-C shim) at the given pixel size;
-    /// returns its CGDirectDisplayID (0 on failure). Retained for the process lifetime.
+    /// returns its CGDirectDisplayID (0 on failure). Reassigns the shim's global,
+    /// releasing any previously-created display.
     fn extender_vdisplay_create(width: u32, height: u32) -> u32;
 }
 
 /// A display's global bounds: origin x/y and width/height, in points.
 type Bounds = (f64, f64, f64, f64);
 
+/// A live virtual display: its id, pixel size, and global bounds (for input
+/// mapping). Kept across reconnects and recreated only when the size changes.
+struct Display {
+    id: u32,
+    size: (u32, u32),
+    bounds: Bounds,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.to_string());
-    // Optional 2nd arg: the virtual display's logical size, e.g. "2560x1440".
-    let (logical_w, logical_h) = std::env::args()
-        .nth(2)
-        .and_then(|s| parse_resolution(&s))
-        .unwrap_or((VDISPLAY_WIDTH, VDISPLAY_HEIGHT));
-
-    // Create the virtual display we extend onto and wait for the window server to
-    // register it, so capture can find it and input can target its bounds.
-    let virtual_id = unsafe { extender_vdisplay_create(logical_w, logical_h) };
-    if virtual_id == 0 {
-        return Err("failed to create the virtual display (CGVirtualDisplay rejected it)".into());
+    // Optional 2nd arg forces the virtual display size (e.g. "2560x1440"),
+    // overriding the resolution the client advertises in its hello.
+    let forced = std::env::args().nth(2).and_then(|s| parse_resolution(&s));
+    if let Some((w, h)) = forced {
+        println!("virtual display size forced to {w}x{h} (ignoring client hello)");
     }
-    let bounds = wait_for_display(virtual_id)
-        .ok_or("virtual display did not register with the window server")?;
-    let capture = (logical_w, logical_h);
-    println!("created virtual display {virtual_id}: capturing {logical_w}x{logical_h} px");
 
     let listener = TcpListener::bind(&addr)?;
     println!(
@@ -66,8 +66,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("waiting for a client to connect...");
 
+    // The virtual display is created lazily on the first connection, sized to the
+    // client's hello (or `forced`), then reused unless a later client needs a
+    // different size.
+    let mut display: Option<Display> = None;
+
     for incoming in listener.incoming() {
-        let stream = match incoming {
+        let mut stream = match incoming {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("accept failed: {e}");
@@ -78,13 +83,103 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .peer_addr()
             .map_or_else(|_| "?".to_string(), |a| a.to_string());
         println!("client connected: {peer}");
-        match serve(stream, virtual_id, capture, bounds) {
+
+        // Handshake: the client's first upstream message is its panel resolution.
+        let (target_w, target_h) = match read_target_size(&mut stream, &peer, forced) {
+            Some(size) => size,
+            None => {
+                println!("waiting for a client to connect...");
+                continue;
+            }
+        };
+
+        let (id, size, bounds) = match ensure_display(&mut display, target_w, target_h) {
+            Ok(active) => active,
+            Err(e) => {
+                eprintln!("could not provide a {target_w}x{target_h} virtual display: {e}");
+                println!("waiting for a client to connect...");
+                continue;
+            }
+        };
+
+        match serve(stream, id, size, bounds) {
             Ok(()) => println!("client {peer} disconnected"),
             Err(e) => eprintln!("session with {peer} ended: {e}"),
         }
         println!("waiting for a client to connect...");
     }
     Ok(())
+}
+
+/// Read the client's [`ClientHello`] and resolve the virtual display size to use:
+/// `forced` if the operator passed a CLI size, otherwise the client's advertised
+/// resolution. Returns `None` (and logs) on a missing/garbled hello or an
+/// implausible size, so the caller skips this client.
+fn read_target_size(
+    stream: &mut TcpStream,
+    peer: &str,
+    forced: Option<(u32, u32)>,
+) -> Option<(u32, u32)> {
+    let hello: ClientHello = match protocol::read_framed(stream) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("client {peer} sent no valid hello: {e}");
+            return None;
+        }
+    };
+    if hello.protocol_version != protocol::PROTOCOL_VERSION {
+        eprintln!(
+            "warning: client {peer} protocol v{} != host v{} — proceeding anyway",
+            hello.protocol_version,
+            protocol::PROTOCOL_VERSION
+        );
+    }
+    if hello.width == 0
+        || hello.height == 0
+        || hello.width > MAX_DIMENSION
+        || hello.height > MAX_DIMENSION
+    {
+        eprintln!(
+            "client {peer} hello has implausible size {}x{}; skipping",
+            hello.width, hello.height
+        );
+        return None;
+    }
+    let size = forced.unwrap_or((hello.width, hello.height));
+    println!(
+        "client {peer} hello: {}x{}; using {}x{}",
+        hello.width, hello.height, size.0, size.1
+    );
+    Some(size)
+}
+
+/// Ensure a virtual display of `(w, h)` exists, (re)creating it if absent or a
+/// different size, and return its id, size, and global bounds. Recreating
+/// reassigns the shim's global, releasing the previous display.
+fn ensure_display(
+    slot: &mut Option<Display>,
+    w: u32,
+    h: u32,
+) -> Result<(u32, (u32, u32), Bounds), Box<dyn std::error::Error>> {
+    let needs_create = match slot.as_ref() {
+        Some(d) => d.size != (w, h),
+        None => true,
+    };
+    if needs_create {
+        if slot.is_some() {
+            println!("resizing virtual display to {w}x{h} (recreating)");
+        }
+        let id = unsafe { extender_vdisplay_create(w, h) };
+        if id == 0 {
+            return Err("CGVirtualDisplay rejected the requested size".into());
+        }
+        let bounds = wait_for_display(id)
+            .ok_or("virtual display did not register with the window server")?;
+        println!("created virtual display {id}: {w}x{h} px");
+        *slot = Some(Display { id, size: (w, h), bounds });
+    }
+    let d = slot.as_ref().expect("display set above");
+    Ok((d.id, d.size, d.bounds))
 }
 
 /// Parse a "WIDTHxHEIGHT" resolution string (e.g. "2560x1440").

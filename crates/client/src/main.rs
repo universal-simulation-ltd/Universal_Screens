@@ -13,7 +13,7 @@ use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use extender_protocol::{self as protocol, Button, Input, Message};
+use extender_protocol::{self as protocol, Button, ClientHello, Input, Message};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -28,6 +28,9 @@ use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 
+/// Resolution reported to the host when no monitor can be enumerated.
+const FALLBACK_RES: (u32, u32) = (1920, 1080);
+
 /// One decoded frame, tightly packed RGBA (stride == width * 4).
 struct Frame {
     width: u32,
@@ -41,8 +44,8 @@ type Shared = Arc<Mutex<Option<Frame>>>;
 
 /// Connect to the host and feed decoded frames into `shared` until the stream
 /// ends. Runs on its own thread; errors are reported, not propagated.
-fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>) {
-    match connect_and_stream(&addr, &shared, input_rx) {
+fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>, hello: ClientHello) {
+    match connect_and_stream(&addr, &shared, input_rx, hello) {
         Ok(()) => println!("stream ended"),
         Err(e) => eprintln!("client error: {e}"),
     }
@@ -52,11 +55,16 @@ fn connect_and_stream(
     addr: &str,
     shared: &Shared,
     input_rx: Receiver<Input>,
+    hello: ClientHello,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("connecting to {addr}...");
-    let stream = TcpStream::connect(addr)?;
+    let mut stream = TcpStream::connect(addr)?;
     let _ = stream.set_nodelay(true); // disable Nagle — low latency for input + video
     println!("connected to {addr}");
+    // Handshake: advertise our panel resolution before anything else, so the host
+    // can size its virtual display to match.
+    protocol::write_framed(&mut stream, &hello)?;
+    println!("sent hello: {}x{} (protocol v{})", hello.width, hello.height, hello.protocol_version);
     // A second handle on the same socket carries our input upstream.
     let input_stream = stream.try_clone()?;
     std::thread::spawn(move || input_writer(input_stream, input_rx));
@@ -450,10 +458,57 @@ impl Gpu {
     }
 }
 
+/// Pick the monitor whose full panel resolution we advertise to the host, in
+/// physical pixels. `index` selects from `available_monitors()` (in order);
+/// otherwise the primary monitor is used. Falls back to the window's current
+/// monitor, then [`FALLBACK_RES`], if enumeration comes up empty.
+fn resolve_resolution(
+    event_loop: &ActiveEventLoop,
+    window: &Window,
+    index: Option<usize>,
+) -> (u32, u32) {
+    let monitors: Vec<_> = event_loop.available_monitors().collect();
+    if monitors.is_empty() {
+        if let Some(m) = window.current_monitor() {
+            let s = m.size();
+            return (s.width, s.height);
+        }
+        eprintln!("no monitors detected; reporting {}x{}", FALLBACK_RES.0, FALLBACK_RES.1);
+        return FALLBACK_RES;
+    }
+
+    let primary = event_loop.primary_monitor();
+    println!("available monitors:");
+    for (i, m) in monitors.iter().enumerate() {
+        let s = m.size();
+        let name = m.name().unwrap_or_else(|| "<unnamed>".to_string());
+        let tag = if primary.as_ref() == Some(m) { " (primary)" } else { "" };
+        println!("  [{i}] {name} {}x{}{tag}", s.width, s.height);
+    }
+
+    let chosen = match index {
+        Some(i) if i < monitors.len() => &monitors[i],
+        Some(i) => {
+            eprintln!("monitor index {i} out of range; using primary");
+            primary.as_ref().unwrap_or(&monitors[0])
+        }
+        None => primary.as_ref().unwrap_or(&monitors[0]),
+    };
+    let s = chosen.size();
+    println!("reporting {}x{} to host", s.width, s.height);
+    (s.width, s.height)
+}
+
 struct App {
     shared: Shared,
     gpu: Option<Gpu>,
     input_tx: Sender<Input>,
+    /// Taken in `resumed` once the resolution is known, then moved to the network
+    /// thread. `None` after the network thread has started.
+    input_rx: Option<Receiver<Input>>,
+    /// Host address to connect to, and the optional monitor index to report.
+    addr: String,
+    monitor_index: Option<usize>,
     /// Whether the pointer is locked and we're forwarding input to the host.
     grabbed: bool,
 }
@@ -467,6 +522,21 @@ impl ApplicationHandler for App {
             .with_title("ExtenderScreen client")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+
+        // Now that winit can enumerate monitors, pick the resolution to advertise
+        // and start the network thread (deferred from main until this is known).
+        if let Some(input_rx) = self.input_rx.take() {
+            let (width, height) = resolve_resolution(event_loop, &window, self.monitor_index);
+            let hello = ClientHello {
+                protocol_version: protocol::PROTOCOL_VERSION,
+                width,
+                height,
+            };
+            let addr = self.addr.clone();
+            let shared = self.shared.clone();
+            std::thread::spawn(move || run_network(addr, shared, input_rx, hello));
+        }
+
         let gpu = pollster::block_on(Gpu::new(window.clone()));
         self.gpu = Some(gpu);
         window.request_redraw();
@@ -567,18 +637,24 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    // Args: [HOST_ADDR] [MONITOR_INDEX]. The network thread starts in `resumed`
+    // once winit can enumerate monitors (we need the chosen monitor's size first).
     let addr = std::env::args().nth(1).unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    let monitor_index = std::env::args().nth(2).and_then(|s| s.parse::<usize>().ok());
     let shared: Shared = Arc::new(Mutex::new(None));
     let (input_tx, input_rx) = mpsc::channel::<Input>();
-
-    {
-        let shared = shared.clone();
-        std::thread::spawn(move || run_network(addr, shared, input_rx));
-    }
 
     println!("controls: click to grab control · Esc to release · F (when not grabbed) = fullscreen");
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App { shared, gpu: None, input_tx, grabbed: false };
+    let mut app = App {
+        shared,
+        gpu: None,
+        input_tx,
+        input_rx: Some(input_rx),
+        addr,
+        monitor_index,
+        grabbed: false,
+    };
     event_loop.run_app(&mut app).expect("run app");
 }
