@@ -517,6 +517,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "extender-host-windows"
+version = "0.1.0"
+dependencies = [
+ "extender-protocol",
+ "windows",
+]
+
+[[package]]
 name = "extender-mobile-ffi"
 version = "0.1.0"
 dependencies = [
