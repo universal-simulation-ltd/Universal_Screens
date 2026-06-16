@@ -117,10 +117,14 @@ What does *not* carry over for free:
   typed-in `host:port` first; Bonjour later.
   *Verify:* on-device, drive a Mac on the same Wi-Fi.
 
-- **M5e — Android app.** Same shape: `MediaCodec` hardware decode to a
-  `SurfaceView`, `GestureDetector` → `Input`, soft-keyboard text → text variant.
-  Kotlin shell over the same M5c core via JNI/UniFFI.
-  *Verify:* on-device against a Mac on the same Wi-Fi.
+- **M5e — Android app.** 🚧 Scaffolded in `apps/android/` (Kotlin + Compose):
+  a single app with a **mode switch** — Full control / Viewer / Clicker — over a
+  Rust **JNI bridge** (`crates/android-jni`, loaded as `libextender_mobile.so`).
+  `MediaCodec` decodes the Annex-B stream to a `SurfaceView`; touches forward as
+  absolute pointer input; the clicker sends key taps. The JNI bridge compiles;
+  the Kotlin/Gradle side is unbuilt scaffolding (needs Android Studio + the NDK,
+  see `apps/android/README.md`). Remaining: build with `cargo-ndk`, on-device
+  test of decode/touch, soft-keyboard text wiring, host discovery (Bonjour/mDNS).
 
 - **M5f — security & off-LAN (optional, larger).** TLS for the stream, a pairing
   step (PIN/QR) so any LAN peer can't connect, and an off-LAN path (relay or

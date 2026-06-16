@@ -1,0 +1,9 @@
+# Android / Gradle build outputs
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+
+# Native libs produced by cargo-ndk (rebuild with the command in README.md)
+app/src/main/jniLibs/
