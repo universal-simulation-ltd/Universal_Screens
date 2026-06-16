@@ -6,10 +6,16 @@
 //! Run: cargo run -p extender-host-windows [-- BIND_ADDR]   (default 0.0.0.0:9000)
 //! Windows-only (uses Win32 `SendInput`); will not compile on other platforms.
 
+mod snapshot;
+
+use std::io;
 use std::mem::size_of;
 use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
 
-use extender_protocol::{self as protocol, Button, ClientHello, Input};
+use extender_protocol::{self as protocol, Button, ClientHello, Input, Message};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_HWHEEL,
@@ -24,6 +30,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 
 const DEFAULT_ADDR: &str = "0.0.0.0:9000";
+/// Slide-preview snapshots: longest side ≤ this many px, at this JPEG quality.
+const SNAPSHOT_MAX_DIM: u32 = 1000;
+const SNAPSHOT_QUALITY: u8 = 70;
+/// Wait this long after a key before snapshotting, so the slide has redrawn.
+const SNAPSHOT_DELAY: Duration = Duration::from_millis(350);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::args()
@@ -94,12 +105,66 @@ fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<()> {
 }
 
 /// Read input events from the client and inject them into the local desktop until
-/// the client disconnects.
-fn serve(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+/// the client disconnects. A second thread pushes still-image slide previews
+/// downstream after each slide-changing key (see [`snapshot_loop`]).
+fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle — low latency for input
-    while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
-        inject(input);
+
+    // A separate handle on the socket carries downstream snapshots; the snapshot
+    // thread owns it so the input loop never blocks on capture/encode.
+    let mut writer = stream.try_clone()?;
+    // Identify ourselves first so the client can label/icon a saved connection.
+    let name = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let _ = protocol::write_framed(&mut writer, &Message::HostInfo { os: "windows".into(), name });
+    let (snap_tx, snap_rx) = mpsc::channel::<()>();
+    let snap_thread = thread::spawn(move || snapshot_loop(writer, &snap_rx));
+
+    let mut input = stream;
+    while let Ok(event) = protocol::read_framed::<_, Input>(&mut input) {
+        // A key press or committed text can advance the slide; request a fresh
+        // preview after injecting it. Mouse moves/buttons don't, so skip those.
+        let changes_slide = matches!(event, Input::Key { pressed: true, .. } | Input::Text { .. });
+        inject(event);
+        if changes_slide {
+            let _ = snap_tx.send(());
+        }
     }
+
+    drop(snap_tx); // unblock the snapshot thread so it exits
+    let _ = snap_thread.join();
+    Ok(())
+}
+
+/// Push slide-preview snapshots to the client: one right after connect, then one
+/// after each slide-changing key. A short delay lets the slide redraw first, and
+/// a burst of taps is coalesced into a single capture. Exits when the client
+/// disconnects (a socket write fails) or the input loop drops `rx`'s sender.
+fn snapshot_loop(mut writer: TcpStream, rx: &Receiver<()>) {
+    if send_snapshot(&mut writer).is_err() {
+        return; // client already gone
+    }
+    while rx.recv().is_ok() {
+        thread::sleep(SNAPSHOT_DELAY);
+        while rx.try_recv().is_ok() {} // coalesce a burst into one capture
+        if send_snapshot(&mut writer).is_err() {
+            return;
+        }
+    }
+}
+
+/// Capture the primary screen and write it as a [`Message::Snapshot`]. A capture
+/// failure is logged but not propagated (it shouldn't kill the session); only a
+/// socket write error returns `Err`, signalling the client is gone.
+fn send_snapshot(writer: &mut TcpStream) -> io::Result<()> {
+    let Some((width, height, data)) =
+        snapshot::capture_primary_jpeg(SNAPSHOT_MAX_DIM, SNAPSHOT_QUALITY)
+    else {
+        eprintln!("screen capture failed; skipping snapshot");
+        return Ok(());
+    };
+    let bytes = data.len();
+    protocol::write_framed(writer, &Message::Snapshot { width, height, data })?;
+    println!("sent slide preview {width}x{height} ({bytes} B JPEG)");
     Ok(())
 }
 

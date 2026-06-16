@@ -113,7 +113,8 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeFree(
 // ---- downstream events ---------------------------------------------------
 
 /// Advance to the next event, storing it on the handle; returns its kind
-/// (0 = Start, 1 = Frame) or -1 once the stream ends. Call from one thread.
+/// (0 = Start, 1 = Frame, 2 = Snapshot, 3 = HostInfo) or -1 once the stream ends.
+/// Call from one thread. For HostInfo the bytes are UTF-8 "os\nname".
 #[no_mangle]
 pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeNextEvent(
     _env: JNIEnv,
@@ -142,6 +143,23 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeNextE
             protocol::append_annex_b(&mut annex_b, &data);
             s.data = annex_b;
             1
+        }
+        Some(StreamEvent::Snapshot { width, height, data }) => {
+            // A still slide preview: `data` is JPEG, surfaced as-is (no Annex-B).
+            s.kind = 2;
+            s.width = width as i32;
+            s.height = height as i32;
+            s.keyframe = false;
+            s.pts_value = 0;
+            s.data = data;
+            2
+        }
+        Some(StreamEvent::HostInfo { os, name }) => {
+            // Pack identity into the byte payload as UTF-8 "os\nname" so Kotlin can
+            // read it via the existing nativeEventData accessor.
+            s.kind = 3;
+            s.data = format!("{os}\n{name}").into_bytes();
+            3
         }
         None => {
             s.kind = -1;

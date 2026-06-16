@@ -10,8 +10,11 @@ use serde::{Deserialize, Serialize};
 
 /// Protocol version negotiated during the connection handshake. Bumped to 2 in
 /// M5: [`ClientHello`] gained a `capture_mode` field and [`Input`] gained the
-/// touch/gesture/text variants. The host warns (but proceeds) on a version skew.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// touch/gesture/text variants. Bumped in M6: v3 added [`Message::Snapshot`] (a
+/// still-image preview an input-only host pushes to a clicker), v4 added
+/// [`Message::HostInfo`] (the host's OS + name, for labelling saved connections).
+/// The host warns (but proceeds) on a version skew.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +60,24 @@ pub enum Message {
         pts_timescale: i32,
         keyframe: bool,
         data: Vec<u8>,
+    },
+    /// A standalone still image of the host screen (`data` is JPEG-encoded). Used
+    /// by an input-only host (the clicker's [`CaptureMode::ControlOnly`]) to push a
+    /// lightweight slide preview without a continuous video stream — slides are
+    /// static, so a still refreshed on each change is enough. Appended last so the
+    /// existing `StreamStart`/`Frame` `postcard` discriminants stay stable.
+    Snapshot {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
+    /// The host's identity, sent once right after the handshake so a client can
+    /// label and icon a saved connection for quick reconnect. `os` is a short
+    /// lowercase tag (`"windows"`, `"macos"`, `"linux"`); `name` is the host's
+    /// machine name. Appended last to keep existing discriminants stable.
+    HostInfo {
+        os: String,
+        name: String,
     },
 }
 
@@ -256,6 +277,15 @@ mod tests {
                 pts_timescale: 60,
                 keyframe: false,
                 data: vec![9, 9, 9],
+            },
+            Message::Snapshot {
+                width: 960,
+                height: 540,
+                data: vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3],
+            },
+            Message::HostInfo {
+                os: "windows".to_string(),
+                name: "DESKTOP-ABC123".to_string(),
             },
         ];
 

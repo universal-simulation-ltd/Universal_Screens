@@ -105,6 +105,10 @@ fn decode_loop(session: &Session, shared: &Shared) -> Result<(), Box<dyn std::er
                     Err(e) => eprintln!("decode error: {e}"),
                 }
             }
+            // The desktop client renders the live video stream; the still-image
+            // Snapshot and the HostInfo identity are for the mobile clicker, so
+            // ignore them here.
+            StreamEvent::Snapshot { .. } | StreamEvent::HostInfo { .. } => {}
         }
     }
     Ok(())

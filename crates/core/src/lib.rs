@@ -36,6 +36,17 @@ pub enum StreamEvent {
         keyframe: bool,
         data: Vec<u8>,
     },
+    /// A still JPEG snapshot of the host screen (the clicker's slide preview).
+    Snapshot {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
+    /// The host's identity (OS tag + machine name), for labelling saved connections.
+    HostInfo {
+        os: String,
+        name: String,
+    },
 }
 
 impl From<Message> for StreamEvent {
@@ -47,6 +58,10 @@ impl From<Message> for StreamEvent {
             Message::Frame { pts_value, pts_timescale, keyframe, data } => {
                 StreamEvent::Frame { pts_value, pts_timescale, keyframe, data }
             }
+            Message::Snapshot { width, height, data } => {
+                StreamEvent::Snapshot { width, height, data }
+            }
+            Message::HostInfo { os, name } => StreamEvent::HostInfo { os, name },
         }
     }
 }
