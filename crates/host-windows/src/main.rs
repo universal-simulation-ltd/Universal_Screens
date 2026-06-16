@@ -35,6 +35,9 @@ const SNAPSHOT_MAX_DIM: u32 = 1000;
 const SNAPSHOT_QUALITY: u8 = 70;
 /// Wait this long after a key before snapshotting, so the slide has redrawn.
 const SNAPSHOT_DELAY: Duration = Duration::from_millis(350);
+/// Pre-scan: per-page settle time, and a safety cap on the page count.
+const SCAN_PAGE_DELAY: Duration = Duration::from_millis(250);
+const SCAN_MAX_PAGES: u32 = 500;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::args()
@@ -104,29 +107,48 @@ fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<()> {
     Some(())
 }
 
+/// A request to the snapshot thread.
+enum SnapReq {
+    /// A slide-changing key was injected (HID usage id); refresh the preview and
+    /// advance the tracked page index accordingly.
+    Key(u32),
+    /// Pre-scan the open document into the slide cache for next-slide look-ahead.
+    Scan,
+}
+
 /// Read input events from the client and inject them into the local desktop until
-/// the client disconnects. A second thread pushes still-image slide previews
-/// downstream after each slide-changing key (see [`snapshot_loop`]).
+/// the client disconnects. A second thread pushes slide previews downstream and,
+/// on request, pre-scans the deck so it can also preview the *next* slide.
 fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle — low latency for input
 
-    // A separate handle on the socket carries downstream snapshots; the snapshot
+    // A separate handle on the socket carries downstream previews; the snapshot
     // thread owns it so the input loop never blocks on capture/encode.
     let mut writer = stream.try_clone()?;
     // Identify ourselves first so the client can label/icon a saved connection.
     let name = std::env::var("COMPUTERNAME").unwrap_or_default();
     let _ = protocol::write_framed(&mut writer, &Message::HostInfo { os: "windows".into(), name });
-    let (snap_tx, snap_rx) = mpsc::channel::<()>();
+    let (snap_tx, snap_rx) = mpsc::channel::<SnapReq>();
     let snap_thread = thread::spawn(move || snapshot_loop(writer, &snap_rx));
 
     let mut input = stream;
     while let Ok(event) = protocol::read_framed::<_, Input>(&mut input) {
-        // A key press or committed text can advance the slide; request a fresh
-        // preview after injecting it. Mouse moves/buttons don't, so skip those.
-        let changes_slide = matches!(event, Input::Key { pressed: true, .. } | Input::Text { .. });
+        // ScanDeck is a control request, not an input event — hand it to the
+        // snapshot thread instead of injecting it.
+        if matches!(event, Input::ScanDeck) {
+            let _ = snap_tx.send(SnapReq::Scan);
+            continue;
+        }
+        // A key press or committed text can change the slide; refresh the preview
+        // after injecting it (Text reports code 0 = no page-index change).
+        let nav_code = match &event {
+            Input::Key { code, pressed: true } => Some(*code),
+            Input::Text { .. } => Some(0),
+            _ => None,
+        };
         inject(event);
-        if changes_slide {
-            let _ = snap_tx.send(());
+        if let Some(code) = nav_code {
+            let _ = snap_tx.send(SnapReq::Key(code));
         }
     }
 
@@ -135,37 +157,133 @@ fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Push slide-preview snapshots to the client: one right after connect, then one
-/// after each slide-changing key. A short delay lets the slide redraw first, and
-/// a burst of taps is coalesced into a single capture. Exits when the client
-/// disconnects (a socket write fails) or the input loop drops `rx`'s sender.
-fn snapshot_loop(mut writer: TcpStream, rx: &Receiver<()>) {
-    if send_snapshot(&mut writer).is_err() {
+/// Drive slide previews on a dedicated thread: the current slide (live capture) on
+/// connect and after each slide-changing key, plus the next slide from the
+/// pre-scan cache. A `Scan` request (re)builds that cache by paging through the
+/// document. Owns the page index and the cache. Exits when the client disconnects
+/// (a socket write fails) or the input loop drops the sender.
+fn snapshot_loop(mut writer: TcpStream, rx: &Receiver<SnapReq>) {
+    let mut cache: Vec<(u32, u32, Vec<u8>)> = Vec::new();
+    let mut idx: i32 = 0;
+
+    if send_previews(&mut writer, &cache, idx).is_err() {
         return; // client already gone
     }
-    while rx.recv().is_ok() {
+    loop {
+        let Ok(first) = rx.recv() else { return };
+        let mut scan = matches!(first, SnapReq::Scan);
+        if let SnapReq::Key(code) = first {
+            apply_index(&mut idx, code, cache.len());
+        }
+        // Let the slide redraw, coalescing a burst of taps into one refresh.
         thread::sleep(SNAPSHOT_DELAY);
-        while rx.try_recv().is_ok() {} // coalesce a burst into one capture
-        if send_snapshot(&mut writer).is_err() {
+        while let Ok(req) = rx.try_recv() {
+            match req {
+                SnapReq::Scan => scan = true,
+                SnapReq::Key(code) => apply_index(&mut idx, code, cache.len()),
+            }
+        }
+        let result = if scan {
+            scan_deck(&mut writer, &mut cache, &mut idx)
+        } else {
+            send_previews(&mut writer, &cache, idx)
+        };
+        if result.is_err() {
             return;
         }
     }
 }
 
-/// Capture the primary screen and write it as a [`Message::Snapshot`]. A capture
-/// failure is logged but not propagated (it shouldn't kill the session); only a
-/// socket write error returns `Err`, signalling the client is gone.
-fn send_snapshot(writer: &mut TcpStream) -> io::Result<()> {
-    let Some((width, height, data)) =
+/// Update the tracked page index from an injected key (HID usage), clamping to the
+/// known page range so it self-heals at the document ends.
+fn apply_index(idx: &mut i32, code: u32, pages: usize) {
+    match code {
+        0x4E | 0x4F | 0x51 => *idx += 1, // PageDown / Right / Down
+        0x4B | 0x50 | 0x52 => *idx -= 1, // PageUp / Left / Up
+        0x4A => *idx = 0,                // Home
+        0x4D => *idx = pages as i32 - 1, // End
+        _ => {}                          // Text or other: stay put
+    }
+    let last = pages as i32 - 1;
+    *idx = (*idx).max(0);
+    if last >= 0 {
+        *idx = (*idx).min(last);
+    }
+}
+
+/// Send the current slide (a fresh live capture, slot 0) plus the previous and
+/// next slides (from the pre-scan `cache`, slots -1 / +1, or empty markers so the
+/// client clears those tiles). Only a socket write error returns `Err` (the client
+/// is gone); a capture failure is logged and skipped.
+fn send_previews(
+    writer: &mut TcpStream,
+    cache: &[(u32, u32, Vec<u8>)],
+    idx: i32,
+) -> io::Result<()> {
+    if let Some((width, height, data)) =
         snapshot::capture_primary_jpeg(SNAPSHOT_MAX_DIM, SNAPSHOT_QUALITY)
-    else {
-        eprintln!("screen capture failed; skipping snapshot");
-        return Ok(());
-    };
-    let bytes = data.len();
-    protocol::write_framed(writer, &Message::Snapshot { width, height, data })?;
-    println!("sent slide preview {width}x{height} ({bytes} B JPEG)");
+    {
+        let bytes = data.len();
+        protocol::write_framed(writer, &Message::Snapshot { width, height, slot: 0, data })?;
+        println!("sent current preview {width}x{height} ({bytes} B JPEG)");
+    } else {
+        eprintln!("screen capture failed; skipping current preview");
+    }
+    // Adjacent slides from the cache, or empty markers so the client clears them.
+    for (slot, offset) in [(-1, -1i32), (1, 1i32)] {
+        let cached = usize::try_from(idx + offset).ok().and_then(|i| cache.get(i));
+        let msg = match cached {
+            Some((w, h, jpeg)) => {
+                Message::Snapshot { width: *w, height: *h, slot, data: jpeg.clone() }
+            }
+            None => Message::Snapshot { width: 0, height: 0, slot, data: Vec::new() },
+        };
+        protocol::write_framed(writer, &msg)?;
+    }
     Ok(())
+}
+
+/// Pre-scan the open document into `cache`: jump to the first page, page to the end
+/// capturing each page (stopping when a page repeats — i.e. PageDown did nothing),
+/// then return to the start. Resets `idx` to 0 and sends the first page's preview.
+/// The user must keep the document focused for the duration.
+fn scan_deck(
+    writer: &mut TcpStream,
+    cache: &mut Vec<(u32, u32, Vec<u8>)>,
+    idx: &mut i32,
+) -> io::Result<()> {
+    println!("scanning deck...");
+    cache.clear();
+    tap_vk(VK_HOME); // jump to the first page
+    thread::sleep(SNAPSHOT_DELAY);
+
+    if let Some(page) = snapshot::capture_primary_jpeg(SNAPSHOT_MAX_DIM, SNAPSHOT_QUALITY) {
+        cache.push(page);
+    }
+    for _ in 1..SCAN_MAX_PAGES {
+        tap_vk(VK_NEXT); // PageDown
+        thread::sleep(SCAN_PAGE_DELAY);
+        let Some(page) = snapshot::capture_primary_jpeg(SNAPSHOT_MAX_DIM, SNAPSHOT_QUALITY) else {
+            break;
+        };
+        // A page identical to the previous one means PageDown did nothing: the end.
+        if cache.last().is_some_and(|prev| prev.2 == page.2) {
+            break;
+        }
+        cache.push(page);
+    }
+
+    tap_vk(VK_HOME); // back to the start
+    thread::sleep(SNAPSHOT_DELAY);
+    *idx = 0;
+    println!("scanned {} pages", cache.len());
+    send_previews(writer, cache, *idx)
+}
+
+/// Tap a virtual key (down then up) — used to drive the document during a scan.
+fn tap_vk(vk: VIRTUAL_KEY) {
+    send_key(vk, true);
+    send_key(vk, false);
 }
 
 /// Inject one input event via `SendInput`. Keyboard and a best-effort mouse path
@@ -206,6 +324,8 @@ fn inject(input: Input) {
         | Input::MouseMoveRelative { .. }
         | Input::Touch { .. }
         | Input::Gesture(_) => {}
+        // Handled in serve() (it's a control request, not an injectable event).
+        Input::ScanDeck => {}
     }
 }
 

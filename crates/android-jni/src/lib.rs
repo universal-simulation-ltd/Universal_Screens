@@ -144,11 +144,13 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeNextE
             s.data = annex_b;
             1
         }
-        Some(StreamEvent::Snapshot { width, height, data }) => {
+        Some(StreamEvent::Snapshot { width, height, slot, data }) => {
             // A still slide preview: `data` is JPEG, surfaced as-is (no Annex-B).
+            // The codec field carries `slot` (0 = current, -1 = previous, +1 = next).
             s.kind = 2;
             s.width = width as i32;
             s.height = height as i32;
+            s.codec = slot;
             s.keyframe = false;
             s.pts_value = 0;
             s.data = data;
@@ -313,6 +315,16 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeSendS
     y: jfloat,
 ) {
     send_input(handle, Input::Gesture(Gesture::SecondaryClick { x, y }));
+}
+
+/// Ask the host to pre-scan the open document for next-slide look-ahead.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeScanDeck(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    send_input(handle, Input::ScanDeck);
 }
 
 #[no_mangle]

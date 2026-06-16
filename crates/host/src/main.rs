@@ -402,6 +402,9 @@ fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64)) {
                 }
             }
         }
+        // Look-ahead pre-scan is a Windows-clicker-host feature; this streaming
+        // host has no slide cache, so there's nothing to scan.
+        Input::ScanDeck => {}
     }
 }
 

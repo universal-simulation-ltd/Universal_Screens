@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 /// touch/gesture/text variants. Bumped in M6: v3 added [`Message::Snapshot`] (a
 /// still-image preview an input-only host pushes to a clicker), v4 added
 /// [`Message::HostInfo`] (the host's OS + name, for labelling saved connections).
-/// The host warns (but proceeds) on a version skew.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// v5 added [`Input::ScanDeck`] and a `next` flag on [`Message::Snapshot`], for
+/// the clicker's next-slide look-ahead. The host warns (but proceeds) on a skew.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,9 +67,15 @@ pub enum Message {
     /// lightweight slide preview without a continuous video stream — slides are
     /// static, so a still refreshed on each change is enough. Appended last so the
     /// existing `StreamStart`/`Frame` `postcard` discriminants stay stable.
+    ///
+    /// `slot` says which slide this preview is, relative to the current position:
+    /// `0` = current (a live capture), `-1` = previous, `+1` = next (both from the
+    /// host's pre-scan cache). An empty `data` for an adjacent slot means "no slide
+    /// there" (e.g. at the start/end), so the client clears that tile.
     Snapshot {
         width: u32,
         height: u32,
+        slot: i32,
         data: Vec<u8>,
     },
     /// The host's identity, sent once right after the handshake so a client can
@@ -131,6 +138,11 @@ pub enum Input {
     /// as physical [`Input::Key`] scancodes. The host synthesizes a keystroke
     /// carrying the string.
     Text { text: String },
+    /// Ask a clicker host to pre-scan the open document into its slide cache, so it
+    /// can preview the *upcoming* slide: the host pages through to the end and
+    /// returns to the start, capturing each page. A host that doesn't support
+    /// look-ahead ignores it. Appended last to keep existing discriminants stable.
+    ScanDeck,
 }
 
 /// The lifecycle phase of a touch contact (mirrors the common touch APIs).
@@ -281,8 +293,11 @@ mod tests {
             Message::Snapshot {
                 width: 960,
                 height: 540,
+                slot: 0,
                 data: vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3],
             },
+            Message::Snapshot { width: 0, height: 0, slot: -1, data: vec![] },
+            Message::Snapshot { width: 480, height: 270, slot: 1, data: vec![9, 9] },
             Message::HostInfo {
                 os: "windows".to_string(),
                 name: "DESKTOP-ABC123".to_string(),
@@ -316,6 +331,7 @@ mod tests {
             Input::Gesture(Gesture::Pinch { scale: 1.5 }),
             Input::Gesture(Gesture::SecondaryClick { x: 0.4, y: 0.9 }),
             Input::Text { text: "héllo, 世界 🌍".to_string() },
+            Input::ScanDeck,
         ];
 
         let mut buf = Vec::new();

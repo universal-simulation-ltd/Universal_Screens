@@ -37,9 +37,12 @@ pub enum StreamEvent {
         data: Vec<u8>,
     },
     /// A still JPEG snapshot of the host screen (the clicker's slide preview).
+    /// `slot` is the slide's offset from the current position: 0 = current,
+    /// -1 = previous, +1 = next.
     Snapshot {
         width: u32,
         height: u32,
+        slot: i32,
         data: Vec<u8>,
     },
     /// The host's identity (OS tag + machine name), for labelling saved connections.
@@ -58,8 +61,8 @@ impl From<Message> for StreamEvent {
             Message::Frame { pts_value, pts_timescale, keyframe, data } => {
                 StreamEvent::Frame { pts_value, pts_timescale, keyframe, data }
             }
-            Message::Snapshot { width, height, data } => {
-                StreamEvent::Snapshot { width, height, data }
+            Message::Snapshot { width, height, slot, data } => {
+                StreamEvent::Snapshot { width, height, slot, data }
             }
             Message::HostInfo { os, name } => StreamEvent::HostInfo { os, name },
         }
