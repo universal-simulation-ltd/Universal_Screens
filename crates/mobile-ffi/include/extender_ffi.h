@@ -83,6 +83,21 @@ void extender_send_secondary_click(ExtenderSession *session, float x, float y);
 void extender_send_pinch(ExtenderSession *session, float scale);
 void extender_send_text(ExtenderSession *session, const char *text);
 
+/* Key by USB-HID keyboard usage id; pressed = down/up (send down then up for a
+ * tap). Common presentation-clicker keys are defined below. */
+void extender_send_key(ExtenderSession *session, uint32_t hid_code, bool pressed);
+
+#define EXTENDER_KEY_PAGE_UP 0x4B   /* previous slide */
+#define EXTENDER_KEY_PAGE_DOWN 0x4E /* next slide     */
+#define EXTENDER_KEY_LEFT 0x50      /* previous slide (arrow) */
+#define EXTENDER_KEY_RIGHT 0x4F     /* next slide (arrow)     */
+#define EXTENDER_KEY_HOME 0x4A      /* first slide */
+#define EXTENDER_KEY_END 0x4D       /* last slide  */
+#define EXTENDER_KEY_ESCAPE 0x29    /* end slideshow */
+#define EXTENDER_KEY_F5 0x3E        /* start slideshow (PowerPoint) */
+#define EXTENDER_KEY_B 0x05         /* blank (PowerPoint) */
+#define EXTENDER_KEY_PERIOD 0x37    /* blank (Keynote/Google Slides) */
+
 #ifdef __cplusplus
 }
 #endif

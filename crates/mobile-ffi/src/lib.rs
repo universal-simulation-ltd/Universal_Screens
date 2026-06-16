@@ -325,6 +325,22 @@ pub unsafe extern "C" fn extender_send_pinch(session: *mut ExtenderSession, scal
     send(session, Input::Gesture(Gesture::Pinch { scale }));
 }
 
+/// Send a key event by USB-HID keyboard usage id, e.g. `0x4E` = Page Down
+/// ("next slide"), `0x4B` = Page Up, `0x29` = Escape, `0x3E` = F5. `pressed` is
+/// true for key-down, false for key-up; send a down then an up for a tap. This
+/// is the basis of the presentation-clicker controls.
+///
+/// # Safety
+/// `session` must be a live session pointer.
+#[no_mangle]
+pub unsafe extern "C" fn extender_send_key(
+    session: *mut ExtenderSession,
+    hid_code: u32,
+    pressed: bool,
+) {
+    send(session, Input::Key { code: hid_code, pressed });
+}
+
 /// Send committed Unicode text (a NUL-terminated UTF-8 string) from a soft
 /// keyboard / IME. A null or invalid-UTF-8 `text` is ignored.
 ///
@@ -470,6 +486,31 @@ mod tests {
 
         // Stream ends after the host closes; next event is null.
         assert!(unsafe { extender_session_next_event(session) }.is_null());
+        unsafe { extender_session_free(session) };
+    }
+
+    /// A presentation-clicker keypress (Page Down) reaches the host as an
+    /// `Input::Key` with the right HID usage id.
+    #[test]
+    fn ffi_send_key_reaches_host() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            let mut r = BufReader::new(sock);
+            let _hello: ClientHello = protocol::read_framed(&mut r).unwrap();
+            let key: Input = protocol::read_framed(&mut r).unwrap();
+            key
+        });
+
+        let c_addr = CString::new(addr).unwrap();
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, true) };
+        assert!(!session.is_null());
+
+        // 0x4E = Page Down (next slide).
+        unsafe { extender_send_key(session, 0x4E, true) };
+        assert_eq!(host.join().unwrap(), Input::Key { code: 0x4E, pressed: true });
         unsafe { extender_session_free(session) };
     }
 }

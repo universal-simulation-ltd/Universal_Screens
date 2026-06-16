@@ -149,6 +149,13 @@ fn key_to_hid(code: KeyCode) -> Option<u32> {
         // Arrows: right, left, down, up.
         KeyCode::ArrowRight => 0x4F, KeyCode::ArrowLeft => 0x50, KeyCode::ArrowDown => 0x51,
         KeyCode::ArrowUp => 0x52,
+        // Navigation: PageUp/PageDown (slide back/forward), Home, End, Insert, Delete.
+        KeyCode::PageUp => 0x4B, KeyCode::PageDown => 0x4E, KeyCode::Home => 0x4A,
+        KeyCode::End => 0x4D, KeyCode::Insert => 0x49, KeyCode::Delete => 0x4C,
+        // Function keys F1–F12 (F5 starts a slideshow in PowerPoint).
+        KeyCode::F1 => 0x3A, KeyCode::F2 => 0x3B, KeyCode::F3 => 0x3C, KeyCode::F4 => 0x3D,
+        KeyCode::F5 => 0x3E, KeyCode::F6 => 0x3F, KeyCode::F7 => 0x40, KeyCode::F8 => 0x41,
+        KeyCode::F9 => 0x42, KeyCode::F10 => 0x43, KeyCode::F11 => 0x44, KeyCode::F12 => 0x45,
         // Modifiers: L/R control, shift, alt(option), super(command).
         KeyCode::ControlLeft => 0xE0, KeyCode::ShiftLeft => 0xE1, KeyCode::AltLeft => 0xE2,
         KeyCode::SuperLeft => 0xE3, KeyCode::ControlRight => 0xE4, KeyCode::ShiftRight => 0xE5,
