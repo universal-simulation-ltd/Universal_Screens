@@ -1,7 +1,8 @@
 # M5 — Mobile clients & "control my actual screen"
 
-**Status:** design / not started. **Prereq:** M1 (streaming) ✅, M2 (input) ✅,
-M3 (virtual display) ✅, M4 (configurable resolution) ✅.
+**Status:** in progress — M5a ✅, M5b ✅, M5c ✅ (FFI bindings deferred), M5d–M5f
+pending. **Prereq:** M1 (streaming) ✅, M2 (input) ✅, M3 (virtual display) ✅,
+M4 (configurable resolution) ✅.
 
 ## Goal
 
@@ -92,12 +93,16 @@ What does *not* carry over for free:
   [WINDOWS-CLIENT](WINDOWS-CLIENT.md) note already documents this is loop-free
   across machines).
 
-- **M5c — shared mobile core crate.** Factor the protocol-drive + frame-feed
-  logic (currently inline in `crates/client/src/main.rs`) into a reusable piece
-  (extend the near-empty `crates/core`) with a C/FFI or UniFFI surface: connect,
-  pump frames out as decoded/encoded buffers, push `Input` in. No UI, no winit.
-  *Verify:* a tiny host-side harness drives a connect → receive-N-frames →
-  send-input cycle through the FFI boundary.
+- **M5c — shared mobile core crate.** ✅ Done in Rust. `crates/core` now hosts a
+  `Session` (connect + `ClientHello` handshake + downstream reader + input
+  uploader, all platform-agnostic) that surfaces `StreamEvent`s carrying
+  **encoded** frames + parameter sets — decoding stays platform-native. The
+  desktop client is refactored onto it (`run_network` → `Session` + a local
+  `openh264` decode loop), so the networking lives in one place. A loopback
+  integration test drives connect → receive StreamStart + N frames → send input
+  over a real socket. **FFI surface deferred:** the C/UniFFI bindings are a thin
+  layer best designed against the actual iOS/Android consumers (M5d/M5e), so the
+  Rust API is kept FFI-friendly (simple owned types, channels) but not yet bound.
 
 - **M5d — iOS app.** Thin SwiftUI/Metal shell over the M5c core: `VTDecompression`
   (VideoToolbox) hardware H.264 decode, `MTKView` render, gesture recognizers →
@@ -243,8 +248,8 @@ event via `CGEventKeyboardSetUnicodeString`).
   `ClientHello`, round-trip tests (M5a).
 - `crates/host/src/main.rs` — capture-mode branch in `serve()`/`main()`; primary
   display selection; `Input::Text` injection (M5b).
-- `crates/core/src/lib.rs` — promote shared connect/decode-feed logic for FFI
-  reuse (M5c).
+- `crates/core/src/lib.rs` — ✅ `Session` + `StreamEvent` (shared networking,
+  M5c); FFI bindings still to come.
 - `apps/ios/`, `apps/android/` (new) — native shells over the core (M5d/M5e).
 - `crates/client/src/main.rs` — add a `--mirror` flag to exercise M5b from the
   desktop before the mobile apps exist.

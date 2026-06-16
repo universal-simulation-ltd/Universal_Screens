@@ -8,12 +8,11 @@
 //!
 //! Run: cargo run -p extender-client [-- HOST_ADDR]   (default 127.0.0.1:9000)
 
-use std::io::BufReader;
-use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, Input, Message};
+use extender_core::{Session, StreamEvent};
+use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, Input};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -47,53 +46,45 @@ type Shared = Arc<Mutex<Option<Frame>>>;
 
 // ---- networking + decode ------------------------------------------------
 
-/// Connect to the host and feed decoded frames into `shared` until the stream
-/// ends. Runs on its own thread; errors are reported, not propagated.
+/// Connect to the host (via the shared `extender-core` session, which owns the
+/// socket + handshake + input upload) and feed decoded frames into `shared`
+/// until the stream ends. Runs on its own thread; errors are reported here.
 fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>, hello: ClientHello) {
-    match connect_and_stream(&addr, &shared, input_rx, hello) {
-        Ok(()) => println!("stream ended"),
-        Err(e) => eprintln!("client error: {e}"),
+    println!("connecting to {addr}...");
+    let session = match Session::connect(&addr, &hello, input_rx) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("client error: {e}");
+            return;
+        }
+    };
+    println!(
+        "connected to {addr}; sent hello {}x{} (protocol v{})",
+        hello.width, hello.height, hello.protocol_version
+    );
+
+    if let Err(e) = decode_loop(&session, &shared) {
+        eprintln!("client error: {e}");
+        return;
     }
+    println!("stream ended");
 }
 
-fn connect_and_stream(
-    addr: &str,
-    shared: &Shared,
-    input_rx: Receiver<Input>,
-    hello: ClientHello,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("connecting to {addr}...");
-    let mut stream = TcpStream::connect(addr)?;
-    let _ = stream.set_nodelay(true); // disable Nagle — low latency for input + video
-    println!("connected to {addr}");
-    // Handshake: advertise our panel resolution before anything else, so the host
-    // can size its virtual display to match.
-    protocol::write_framed(&mut stream, &hello)?;
-    println!("sent hello: {}x{} (protocol v{})", hello.width, hello.height, hello.protocol_version);
-    // A second handle on the same socket carries our input upstream.
-    let input_stream = stream.try_clone()?;
-    std::thread::spawn(move || input_writer(input_stream, input_rx));
-    let mut reader = BufReader::new(stream);
-
+/// Drain `StreamEvent`s from the session, decoding each H.264 frame (software,
+/// portable `openh264`) into RGBA for the render loop. The session uploads input
+/// on its own thread, so this just consumes video.
+fn decode_loop(session: &Session, shared: &Shared) -> Result<(), Box<dyn std::error::Error>> {
     let mut decoder: Option<Decoder> = None;
     let mut sps_pps: Vec<u8> = Vec::new();
 
-    loop {
-        let message: Message = match protocol::read_framed(&mut reader) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                println!("host closed the stream");
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        };
-        match message {
-            Message::StreamStart { width, height, codec, parameter_sets } => {
+    while let Some(event) = session.next_event() {
+        match event {
+            StreamEvent::Start { width, height, codec, parameter_sets } => {
                 println!("stream: {width}x{height} {codec:?}");
                 sps_pps = protocol::annex_b_parameter_sets(&parameter_sets);
                 decoder = Some(Decoder::new()?);
             }
-            Message::Frame { keyframe, data, .. } => {
+            StreamEvent::Frame { keyframe, data, .. } => {
                 let Some(decoder) = decoder.as_mut() else {
                     return Err("Frame arrived before StreamStart".into());
                 };
@@ -116,16 +107,7 @@ fn connect_and_stream(
             }
         }
     }
-}
-
-/// Drain captured input events and write them upstream until the channel closes
-/// (window closed) or the socket errors (host gone).
-fn input_writer(mut stream: TcpStream, rx: Receiver<Input>) {
-    while let Ok(input) = rx.recv() {
-        if protocol::write_framed(&mut stream, &input).is_err() {
-            break; // host gone
-        }
-    }
+    Ok(())
 }
 
 /// Map a winit mouse button to the protocol button, ignoring extra buttons.
