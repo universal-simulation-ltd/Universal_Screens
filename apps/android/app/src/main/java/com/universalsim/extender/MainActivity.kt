@@ -130,7 +130,7 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode) -> Unit)
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("ExtenderScreen", style = MaterialTheme.typography.headlineMedium)
+        Text("Screen Extender", style = MaterialTheme.typography.headlineMedium)
 
         if (visible.isNotEmpty()) {
             Text("Saved hosts", style = MaterialTheme.typography.titleMedium)
@@ -350,7 +350,7 @@ private fun PreviewTile(bitmap: ImageBitmap?, dim: Boolean, label: String) {
         Box(mod, contentAlignment = Alignment.Center) {
             Image(
                 painter = painterResource(R.drawable.ic_screenextender),
-                contentDescription = "ScreenExtender",
+                contentDescription = "Screen Extender",
                 modifier = Modifier.size(40.dp),
                 alpha = 0.3f,
             )
