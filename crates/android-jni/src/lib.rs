@@ -56,7 +56,8 @@ fn send_input(handle: jlong, input: Input) {
 // ---- session lifecycle ---------------------------------------------------
 
 /// Connect and return a handle (0 on failure). `capture_mode`: 0 = virtual
-/// second screen, 1 = mirror the host's primary display.
+/// second screen, 1 = mirror the host's primary display, 2 = control-only
+/// (input only, no video — the clicker).
 #[no_mangle]
 pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConnect<'local>(
     mut env: JNIEnv<'local>,
@@ -74,10 +75,10 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
         protocol_version: protocol::PROTOCOL_VERSION,
         width: width as u32,
         height: height as u32,
-        capture_mode: if capture_mode == 1 {
-            CaptureMode::MirrorPrimary
-        } else {
-            CaptureMode::VirtualDisplay
+        capture_mode: match capture_mode {
+            1 => CaptureMode::MirrorPrimary,
+            2 => CaptureMode::ControlOnly,
+            _ => CaptureMode::VirtualDisplay,
         },
     };
     let (input_tx, input_rx) = mpsc::channel();

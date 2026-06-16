@@ -12,7 +12,7 @@ object ExtenderNative {
         System.loadLibrary("extender_mobile")
     }
 
-    /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display. */
+    /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display, 2 = control-only (clicker). */
     external fun nativeConnect(addr: String, width: Int, height: Int, captureMode: Int): Long
     external fun nativeFree(handle: Long)
 
