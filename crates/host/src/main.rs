@@ -402,6 +402,9 @@ fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64)) {
                 }
             }
         }
+        // Look-ahead pre-scan and the window picker are Windows-clicker-host
+        // features; this streaming host implements neither.
+        Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } => {}
     }
 }
 

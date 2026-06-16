@@ -4,6 +4,7 @@ members = [
     "crates/protocol",
     "crates/core",
     "crates/host",
+    "crates/host-windows",
     "crates/client",
     "crates/mobile-ffi",
     "crates/android-jni",

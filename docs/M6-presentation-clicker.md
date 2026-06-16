@@ -1,7 +1,8 @@
 # M6 — Presentation clicker
 
-**Status:** in progress — keymap + FFI ✅, app UI + optional no-stream mode
-pending. **Prereq:** M2 (input) ✅, M5a (protocol) ✅, M5c (core + C ABI) ✅.
+**Status:** working end to end on Windows + Android — keymap + FFI ✅, Android app
+built & running ✅, true no-stream `ControlOnly` host ✅ (Windows), slide preview ✅,
+saved connections ✅. **Prereq:** M2 (input) ✅, M5a (protocol) ✅, M5c (core + C ABI) ✅.
 
 ## Goal
 
@@ -45,22 +46,33 @@ Arrows and Esc were already mapped; `→`/`←` alone already drive every app ab
     macOS-only — written against the standard HID→macOS table, needs a Mac to
     compile/smoke-test.)
 
-- **M6b — clicker UI (mobile).** 🚧 Scaffolded for Android in `apps/android/`:
-  the `ClickerScreen` Compose view has ◀ Prev / Next ▶, First/Last, Blank, and
-  Start(F5)/End(Esc) buttons, each calling `tapKey` (a key down then up) over the
-  JNI bridge. Unbuilt until compiled in Android Studio (see `apps/android/README.md`);
+- **M6b — clicker UI (mobile).** ✅ Built and running on Android (`apps/android/`):
+  the `ClickerScreen` Compose view has ◀ Prev / Next ▶, First/Last, Blank (PPT) /
+  Blank (.), and Start(F5)/End(Esc) buttons, each calling `tapKey` (a key down
+  then up) over the JNI bridge. Build with `gradlew assembleDebug` (the repo now
+  ships the Gradle wrapper + `gradle.properties`; see `apps/android/README.md`);
   the iOS equivalent follows with the iOS shell.
 
-- **M6c — "control-only" (no-stream) mode.** 🚧 Protocol + client wiring done;
-  host impl pending. For pure clicking you don't need the video stream; skipping
-  it saves the phone's battery and the LAN's bandwidth. `CaptureMode::ControlOnly`
-  is now in the protocol (the Android clicker requests it). A host honoring it
-  accepts input but never starts capture/encode/stream. **The macOS host doesn't
-  implement the no-stream path yet** (it treats `ControlOnly` like
-  `MirrorPrimary` and streams anyway). The natural first *true* implementation is
-  the **Windows clicker host** (`extender-host-windows`): it has no capture/encode
-  at all — just receive `Input` and inject via `SendInput` — so a phone can click
-  a Windows laptop with no Mac involved. (Buildable/testable on Windows.)
+- **M6c — "control-only" (no-stream) mode.** ✅ Done via the **Windows clicker
+  host** (`extender-host-windows`): it has no capture/encode at all — bind
+  `0.0.0.0:9000`, read the `ClientHello`, then receive `Input` and inject via
+  `SendInput` (`hid_to_windows_vk` mirrors `hid_to_macos`). So a phone clicks a
+  Windows laptop with **no Mac involved**. `CaptureMode::ControlOnly` is in the
+  protocol and the Android clicker requests it. (The macOS host still treats
+  `ControlOnly` like `MirrorPrimary` and streams anyway — unchanged.)
+
+- **M6d — slide preview (snapshots).** ✅ Slides are static, so instead of a video
+  stream the Windows host pushes a JPEG still (`Message::Snapshot`, protocol v3):
+  it captures the primary display (GDI `BitBlt`), downscales + encodes (~1000px,
+  q70), and sends one ~350 ms after each slide-changing key plus one on connect,
+  on a debounced thread. The Android clicker shows it atop the buttons. Far
+  lighter than H.264 and keeps the no-video ethos.
+
+- **M6e — saved connections.** ✅ The host sends `Message::HostInfo{os,name}`
+  (protocol v4) right after the handshake; the app remembers each connected host
+  (`ConnectionStore`, SharedPreferences) and shows a quick-connect list with a
+  device icon (Windows/Mac/Linux), the machine name, and one-tap reconnect in the
+  last-used mode, with hide / delete.
 
 ## Keycode reference (added in M6a)
 
@@ -92,6 +104,7 @@ USB-HID usage id → macOS virtual keycode, for the keys this milestone added:
 
 - `crates/client/src/main.rs` — `key_to_hid`: PageUp/Down, Home/End, Insert/Delete, F1–F12 (done).
 - `crates/host/src/main.rs` — `hid_to_macos`: matching entries (done).
+- `crates/host-windows/src/main.rs` — `hid_to_windows_vk` (mirrors `hid_to_macos`) + `SendInput` injection; `snapshot.rs` — GDI screen capture → JPEG (M6c/M6d).
 - `crates/mobile-ffi/src/lib.rs` + `include/extender_ffi.h` — `extender_send_key` + clicker keycodes (done).
-- iOS/Android apps — clicker control row (M6b, with the app shells).
-- `crates/protocol` + `crates/host` — `CaptureMode::ControlOnly` (M6c, optional).
+- `crates/protocol/src/lib.rs` — `CaptureMode::ControlOnly` (M6c), `Message::Snapshot` (M6d), `Message::HostInfo` (M6e).
+- `apps/android/.../MainActivity.kt` — clicker control row, slide preview, saved-connection list (M6b/d/e); `ConnectionStore.kt` — persisted hosts.

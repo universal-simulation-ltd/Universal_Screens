@@ -12,7 +12,7 @@ object ExtenderNative {
         System.loadLibrary("extender_mobile")
     }
 
-    /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display. */
+    /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display, 2 = control-only (clicker). */
     external fun nativeConnect(addr: String, width: Int, height: Int, captureMode: Int): Long
     external fun nativeFree(handle: Long)
 
@@ -32,4 +32,13 @@ object ExtenderNative {
     external fun nativeSendTouch(handle: Long, id: Int, phase: Int, x: Float, y: Float)
     external fun nativeSendSecondaryClick(handle: Long, x: Float, y: Float)
     external fun nativeSendText(handle: Long, text: String)
+
+    /** Ask the host to pre-scan the open document for next-slide look-ahead. */
+    external fun nativeScanDeck(handle: Long)
+
+    /** Ask the host to (re)send its list of open windows. */
+    external fun nativeListWindows(handle: Long)
+
+    /** Bring the host window with [id] (from a WindowList event) to the foreground. */
+    external fun nativeFocusWindow(handle: Long, id: Long)
 }

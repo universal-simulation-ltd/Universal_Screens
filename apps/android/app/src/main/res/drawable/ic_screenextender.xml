@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Main display -->
+    <path
+        android:fillColor="#3F51B5"
+        android:pathData="M5,11 h24 a2,2 0 0 1 2,2 v16 a2,2 0 0 1 -2,2 h-24 a2,2 0 0 1 -2,-2 v-16 a2,2 0 0 1 2,-2 z" />
+    <!-- Display stand -->
+    <path
+        android:fillColor="#3F51B5"
+        android:pathData="M13,33 h8 v3 h-8 z M10,37 h14 v2 h-14 z" />
+    <!-- Extended phone/second screen -->
+    <path
+        android:fillColor="#7986CB"
+        android:pathData="M35,16 h8 a2,2 0 0 1 2,2 v18 a2,2 0 0 1 -2,2 h-8 a2,2 0 0 1 -2,-2 v-18 a2,2 0 0 1 2,-2 z" />
+    <!-- Extend arrow on the main display -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,21 h8 v-3 l5,5 -5,5 v-3 h-8 z" />
+</vector>

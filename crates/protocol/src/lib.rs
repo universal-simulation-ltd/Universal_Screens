@@ -10,8 +10,15 @@ use serde::{Deserialize, Serialize};
 
 /// Protocol version negotiated during the connection handshake. Bumped to 2 in
 /// M5: [`ClientHello`] gained a `capture_mode` field and [`Input`] gained the
-/// touch/gesture/text variants. The host warns (but proceeds) on a version skew.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// touch/gesture/text variants. Bumped in M6: v3 added [`Message::Snapshot`] (a
+/// still-image preview an input-only host pushes to a clicker), v4 added
+/// [`Message::HostInfo`] (the host's OS + name, for labelling saved connections).
+/// v5 added [`Input::ScanDeck`] and a `slot` on [`Message::Snapshot`], for the
+/// clicker's next-slide look-ahead. v6 added [`Message::WindowList`] plus
+/// [`Input::ListWindows`] / [`Input::FocusWindow`], so a clicker can refocus the
+/// host window that should receive its keys. The host warns (but proceeds) on a
+/// version skew.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +64,37 @@ pub enum Message {
         pts_timescale: i32,
         keyframe: bool,
         data: Vec<u8>,
+    },
+    /// A standalone still image of the host screen (`data` is JPEG-encoded). Used
+    /// by an input-only host (the clicker's [`CaptureMode::ControlOnly`]) to push a
+    /// lightweight slide preview without a continuous video stream — slides are
+    /// static, so a still refreshed on each change is enough. Appended last so the
+    /// existing `StreamStart`/`Frame` `postcard` discriminants stay stable.
+    ///
+    /// `slot` says which slide this preview is, relative to the current position:
+    /// `0` = current (a live capture), `-1` = previous, `+1` = next (both from the
+    /// host's pre-scan cache). An empty `data` for an adjacent slot means "no slide
+    /// there" (e.g. at the start/end), so the client clears that tile.
+    Snapshot {
+        width: u32,
+        height: u32,
+        slot: i32,
+        data: Vec<u8>,
+    },
+    /// The host's identity, sent once right after the handshake so a client can
+    /// label and icon a saved connection for quick reconnect. `os` is a short
+    /// lowercase tag (`"windows"`, `"macos"`, `"linux"`); `name` is the host's
+    /// machine name. Appended last to keep existing discriminants stable.
+    HostInfo {
+        os: String,
+        name: String,
+    },
+    /// The host's open top-level windows as `(id, title)` pairs, so a clicker can
+    /// pick one to bring to the foreground (its keystrokes go to whatever's
+    /// focused). `id` is an opaque host handle echoed back in [`Input::FocusWindow`].
+    /// Sent on connect and on [`Input::ListWindows`].
+    WindowList {
+        windows: Vec<(i64, String)>,
     },
 }
 
@@ -110,6 +148,16 @@ pub enum Input {
     /// as physical [`Input::Key`] scancodes. The host synthesizes a keystroke
     /// carrying the string.
     Text { text: String },
+    /// Ask a clicker host to pre-scan the open document into its slide cache, so it
+    /// can preview the *upcoming* slide: the host pages through to the end and
+    /// returns to the start, capturing each page. A host that doesn't support
+    /// look-ahead ignores it. Appended last to keep existing discriminants stable.
+    ScanDeck,
+    /// Ask the host to (re)send its [`Message::WindowList`].
+    ListWindows,
+    /// Bring the host window with this id (from [`Message::WindowList`]) to the
+    /// foreground, so subsequent keystrokes land in it.
+    FocusWindow { id: i64 },
 }
 
 /// The lifecycle phase of a touch contact (mirrors the common touch APIs).
@@ -257,6 +305,21 @@ mod tests {
                 keyframe: false,
                 data: vec![9, 9, 9],
             },
+            Message::Snapshot {
+                width: 960,
+                height: 540,
+                slot: 0,
+                data: vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3],
+            },
+            Message::Snapshot { width: 0, height: 0, slot: -1, data: vec![] },
+            Message::Snapshot { width: 480, height: 270, slot: 1, data: vec![9, 9] },
+            Message::HostInfo {
+                os: "windows".to_string(),
+                name: "DESKTOP-ABC123".to_string(),
+            },
+            Message::WindowList {
+                windows: vec![(12345, "slides.pdf — Edge".to_string()), (67890, "Notes".to_string())],
+            },
         ];
 
         let mut buf = Vec::new();
@@ -286,6 +349,9 @@ mod tests {
             Input::Gesture(Gesture::Pinch { scale: 1.5 }),
             Input::Gesture(Gesture::SecondaryClick { x: 0.4, y: 0.9 }),
             Input::Text { text: "héllo, 世界 🌍".to_string() },
+            Input::ScanDeck,
+            Input::ListWindows,
+            Input::FocusWindow { id: 1234567890 },
         ];
 
         let mut buf = Vec::new();

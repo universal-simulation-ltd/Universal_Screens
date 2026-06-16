@@ -56,7 +56,8 @@ fn send_input(handle: jlong, input: Input) {
 // ---- session lifecycle ---------------------------------------------------
 
 /// Connect and return a handle (0 on failure). `capture_mode`: 0 = virtual
-/// second screen, 1 = mirror the host's primary display.
+/// second screen, 1 = mirror the host's primary display, 2 = control-only
+/// (input only, no video — the clicker).
 #[no_mangle]
 pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConnect<'local>(
     mut env: JNIEnv<'local>,
@@ -74,10 +75,10 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
         protocol_version: protocol::PROTOCOL_VERSION,
         width: width as u32,
         height: height as u32,
-        capture_mode: if capture_mode == 1 {
-            CaptureMode::MirrorPrimary
-        } else {
-            CaptureMode::VirtualDisplay
+        capture_mode: match capture_mode {
+            1 => CaptureMode::MirrorPrimary,
+            2 => CaptureMode::ControlOnly,
+            _ => CaptureMode::VirtualDisplay,
         },
     };
     let (input_tx, input_rx) = mpsc::channel();
@@ -112,7 +113,9 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeFree(
 // ---- downstream events ---------------------------------------------------
 
 /// Advance to the next event, storing it on the handle; returns its kind
-/// (0 = Start, 1 = Frame) or -1 once the stream ends. Call from one thread.
+/// (0 = Start, 1 = Frame, 2 = Snapshot, 3 = HostInfo, 4 = WindowList) or -1 once
+/// the stream ends. Call from one thread. For HostInfo the bytes are UTF-8
+/// "os\nname"; for WindowList they are one "id\ttitle" line per window.
 #[no_mangle]
 pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeNextEvent(
     _env: JNIEnv,
@@ -141,6 +144,33 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeNextE
             protocol::append_annex_b(&mut annex_b, &data);
             s.data = annex_b;
             1
+        }
+        Some(StreamEvent::Snapshot { width, height, slot, data }) => {
+            // A still slide preview: `data` is JPEG, surfaced as-is (no Annex-B).
+            // The codec field carries `slot` (0 = current, -1 = previous, +1 = next).
+            s.kind = 2;
+            s.width = width as i32;
+            s.height = height as i32;
+            s.codec = slot;
+            s.keyframe = false;
+            s.pts_value = 0;
+            s.data = data;
+            2
+        }
+        Some(StreamEvent::HostInfo { os, name }) => {
+            // Pack identity into the byte payload as UTF-8 "os\nname" so Kotlin can
+            // read it via the existing nativeEventData accessor.
+            s.kind = 3;
+            s.data = format!("{os}\n{name}").into_bytes();
+            3
+        }
+        Some(StreamEvent::WindowList { windows }) => {
+            // Pack as one "id\ttitle" line per window for the Kotlin side to parse.
+            s.kind = 4;
+            let lines: Vec<String> =
+                windows.iter().map(|(id, title)| format!("{id}\t{title}")).collect();
+            s.data = lines.join("\n").into_bytes();
+            4
         }
         None => {
             s.kind = -1;
@@ -294,6 +324,37 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeSendS
     y: jfloat,
 ) {
     send_input(handle, Input::Gesture(Gesture::SecondaryClick { x, y }));
+}
+
+/// Ask the host to pre-scan the open document for next-slide look-ahead.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeScanDeck(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    send_input(handle, Input::ScanDeck);
+}
+
+/// Ask the host to (re)send its list of open windows.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeListWindows(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    send_input(handle, Input::ListWindows);
+}
+
+/// Bring the host window with `id` (from a WindowList event) to the foreground.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeFocusWindow(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    id: jlong,
+) {
+    send_input(handle, Input::FocusWindow { id });
 }
 
 #[no_mangle]
