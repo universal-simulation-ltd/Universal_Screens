@@ -32,6 +32,12 @@ pub enum CaptureMode {
     /// Capture the host's existing primary display and route input to it — i.e.
     /// remotely control the real desktop (the "control" use case from M5).
     MirrorPrimary,
+    /// Accept input only — the host injects events but streams no video. For a
+    /// presentation clicker, where the client just sends keystrokes and wants no
+    /// battery/bandwidth cost (M6c). A host that doesn't support it can treat it
+    /// like `MirrorPrimary` and simply stream anyway. Appended last so the
+    /// existing `postcard` discriminants stay stable.
+    ControlOnly,
 }
 
 /// A message on the host -> client stream.
@@ -296,7 +302,11 @@ mod tests {
 
     #[test]
     fn client_hello_round_trips_with_capture_mode() {
-        for mode in [CaptureMode::VirtualDisplay, CaptureMode::MirrorPrimary] {
+        for mode in [
+            CaptureMode::VirtualDisplay,
+            CaptureMode::MirrorPrimary,
+            CaptureMode::ControlOnly,
+        ] {
             let hello = ClientHello {
                 protocol_version: PROTOCOL_VERSION,
                 width: 2560,

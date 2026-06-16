@@ -57,8 +57,12 @@ fun AppRoot() {
         ConnectScreen(status) { addr, chosenMode ->
             mode = chosenMode
             status = "connecting…"
-            // Clicker doesn't need video; the others mirror the host's screen.
-            val capture = ExtenderSession.MODE_MIRROR
+            // Clicker needs no video (control-only); the others mirror the screen.
+            val capture = if (chosenMode == Mode.CLICKER) {
+                ExtenderSession.MODE_CONTROL_ONLY
+            } else {
+                ExtenderSession.MODE_MIRROR
+            }
             thread {
                 // Width/height advertise the phone panel; the host mirrors at its
                 // own native size, so exact values here are not critical.

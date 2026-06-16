@@ -51,15 +51,16 @@ Arrows and Esc were already mapped; `→`/`←` alone already drive every app ab
   JNI bridge. Unbuilt until compiled in Android Studio (see `apps/android/README.md`);
   the iOS equivalent follows with the iOS shell.
 
-- **M6c — "control-only" (no-stream) mode (optional).** For pure clicking you
-  don't need the video stream; skipping it saves the phone's battery and the
-  LAN's bandwidth. Add a `CaptureMode::ControlOnly` where the host accepts input
-  (mapped to the primary display's bounds, as in mirror mode) but never starts
-  capture/encode/stream. The mobile app offers a "clicker only" toggle; the
-  desktop client (which is built around rendering video) would just show a blank
-  window in this mode, so it's primarily for the phone. *Deferred* — it touches
-  the host's `serve()` (skip the `SCStream`/encoder setup) and is best landed with
-  a Mac to test.
+- **M6c — "control-only" (no-stream) mode.** 🚧 Protocol + client wiring done;
+  host impl pending. For pure clicking you don't need the video stream; skipping
+  it saves the phone's battery and the LAN's bandwidth. `CaptureMode::ControlOnly`
+  is now in the protocol (the Android clicker requests it). A host honoring it
+  accepts input but never starts capture/encode/stream. **The macOS host doesn't
+  implement the no-stream path yet** (it treats `ControlOnly` like
+  `MirrorPrimary` and streams anyway). The natural first *true* implementation is
+  the **Windows clicker host** (`extender-host-windows`): it has no capture/encode
+  at all — just receive `Input` and inject via `SendInput` — so a phone can click
+  a Windows laptop with no Mac involved. (Buildable/testable on Windows.)
 
 ## Keycode reference (added in M6a)
 

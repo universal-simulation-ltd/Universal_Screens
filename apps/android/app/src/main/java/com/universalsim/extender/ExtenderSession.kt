@@ -23,6 +23,7 @@ class ExtenderSession private constructor(private var handle: Long) {
     companion object {
         const val MODE_VIRTUAL = 0
         const val MODE_MIRROR = 1
+        const val MODE_CONTROL_ONLY = 2 // input only, no video (clicker)
 
         /** Blocking connect; returns null on failure. Call off the main thread. */
         fun connect(addr: String, width: Int, height: Int, captureMode: Int): ExtenderSession? {

@@ -101,7 +101,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // (the "extend" default) or the host's real primary display ("control").
         let active = match mode {
             CaptureMode::VirtualDisplay => ensure_display(&mut display, target_w, target_h),
-            CaptureMode::MirrorPrimary => primary_display(),
+            // The macOS host doesn't implement a no-stream path yet, so a
+            // ControlOnly request is served like MirrorPrimary (it streams anyway).
+            CaptureMode::MirrorPrimary | CaptureMode::ControlOnly => primary_display(),
         };
         let (id, size, bounds) = match active {
             Ok(active) => active,
