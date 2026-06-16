@@ -21,7 +21,10 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
-use extender_protocol::{self as protocol, Button, ClientHello, Codec as WireCodec, Input, Message};
+use extender_protocol::{
+    self as protocol, Button, CaptureMode, ClientHello, Codec as WireCodec, Gesture, Input, Message,
+    TouchPhase,
+};
 use screencapturekit::prelude::*;
 use videotoolbox::prelude::*;
 
@@ -84,19 +87,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_or_else(|_| "?".to_string(), |a| a.to_string());
         println!("client connected: {peer}");
 
-        // Handshake: the client's first upstream message is its panel resolution.
-        let (target_w, target_h) = match read_target_size(&mut stream, &peer, forced) {
-            Some(size) => size,
+        // Handshake: the client's first upstream message carries its panel
+        // resolution and the capture mode it wants.
+        let (mode, target_w, target_h) = match read_hello(&mut stream, &peer, forced) {
+            Some(hello) => hello,
             None => {
                 println!("waiting for a client to connect...");
                 continue;
             }
         };
 
-        let (id, size, bounds) = match ensure_display(&mut display, target_w, target_h) {
+        // Pick what to capture: a virtual second screen sized to the client
+        // (the "extend" default) or the host's real primary display ("control").
+        let active = match mode {
+            CaptureMode::VirtualDisplay => ensure_display(&mut display, target_w, target_h),
+            CaptureMode::MirrorPrimary => primary_display(),
+        };
+        let (id, size, bounds) = match active {
             Ok(active) => active,
             Err(e) => {
-                eprintln!("could not provide a {target_w}x{target_h} virtual display: {e}");
+                eprintln!("could not provide a display for {peer}: {e}");
                 println!("waiting for a client to connect...");
                 continue;
             }
@@ -111,15 +121,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Read the client's [`ClientHello`] and resolve the virtual display size to use:
-/// `forced` if the operator passed a CLI size, otherwise the client's advertised
-/// resolution. Returns `None` (and logs) on a missing/garbled hello or an
-/// implausible size, so the caller skips this client.
-fn read_target_size(
+/// Read the client's [`ClientHello`] and resolve the capture mode plus the
+/// virtual-display size to use: `forced` if the operator passed a CLI size,
+/// otherwise the client's advertised resolution. The size is only used in
+/// [`CaptureMode::VirtualDisplay`] (mirror mode captures the real display as-is).
+/// Returns `None` (and logs) on a missing/garbled hello or an implausible size,
+/// so the caller skips this client.
+fn read_hello(
     stream: &mut TcpStream,
     peer: &str,
     forced: Option<(u32, u32)>,
-) -> Option<(u32, u32)> {
+) -> Option<(CaptureMode, u32, u32)> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -147,10 +159,29 @@ fn read_target_size(
     }
     let size = forced.unwrap_or((hello.width, hello.height));
     println!(
-        "client {peer} hello: {}x{}; using {}x{}",
-        hello.width, hello.height, size.0, size.1
+        "client {peer} hello: {}x{}, mode {:?}; using {}x{} (mode-dependent)",
+        hello.width, hello.height, hello.capture_mode, size.0, size.1
     );
-    Some(size)
+    Some((hello.capture_mode, size.0, size.1))
+}
+
+/// Resolve the host's primary display for [`CaptureMode::MirrorPrimary`]: its
+/// id, native pixel size (so a Retina display streams at full resolution), and
+/// global bounds in points (for input mapping). Creates no virtual display.
+fn primary_display() -> Result<(u32, (u32, u32), Bounds), Box<dyn std::error::Error>> {
+    let display = CGDisplay::main();
+    let id = display.id;
+    let b = display.bounds();
+    let bounds = (b.origin.x, b.origin.y, b.size.width, b.size.height);
+    let size = (
+        u32::try_from(display.pixels_wide()).unwrap_or(0),
+        u32::try_from(display.pixels_high()).unwrap_or(0),
+    );
+    if size.0 == 0 || size.1 == 0 {
+        return Err("primary display reported a zero pixel size".into());
+    }
+    println!("mirroring primary display {id}: {}x{} px", size.0, size.1);
+    Ok((id, size, bounds))
 }
 
 /// Ensure a virtual display of `(w, h)` exists, (re)creating it if absent or a
@@ -209,7 +240,7 @@ fn wait_for_display(id: u32) -> Option<Bounds> {
 /// stream opens on a keyframe.
 fn serve(
     stream: TcpStream,
-    virtual_id: u32,
+    target_id: u32,
     capture: (u32, u32),
     bounds: Bounds,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -218,12 +249,12 @@ fn serve(
     let display = content
         .displays()
         .into_iter()
-        .find(|d| d.display_id() == virtual_id)
-        .ok_or("virtual display not in shareable content (is Screen Recording permission granted?)")?;
+        .find(|d| d.display_id() == target_id)
+        .ok_or("target display not in shareable content (is Screen Recording permission granted?)")?;
     // Capture at the display's native pixel size (2x logical on HiDPI) so the
     // streamed frame keeps Retina detail instead of being downsampled to points.
     let (width, height) = capture;
-    println!("capturing virtual display {virtual_id} at {width}x{height} px");
+    println!("capturing display {target_id} at {width}x{height} px");
 
     let encoder = Arc::new(
         CompressionSession::builder(width as i32, height as i32, Codec::H264)
@@ -286,17 +317,15 @@ fn receive_and_inject(mut stream: TcpStream, bounds: Bounds) {
 
 /// Inject one input event via CoreGraphics. `cursor` tracks the last pointer
 /// position so button and scroll events fire where the pointer is. Normalized
-/// pointer coords map into the virtual display's global `bounds`.
+/// pointer coords map into the captured display's global `bounds` (the virtual
+/// display in extend mode, or the primary display in mirror mode).
 fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64)) {
     let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
         return;
     };
     match input {
         Input::MouseMove { x, y } => {
-            *cursor = (
-                bounds.0 + f64::from(x) * bounds.2,
-                bounds.1 + f64::from(y) * bounds.3,
-            );
+            *cursor = normalized_to_global(bounds, x, y);
             post_mouse(source, CGEventType::MouseMoved, *cursor, CGMouseButton::Left);
         }
         Input::MouseMoveRelative { dx, dy } => {
@@ -331,7 +360,56 @@ fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64)) {
                 }
             }
         }
+        Input::Touch { phase, x, y, .. } => {
+            // A single contact drives the pointer: begin = press, move = drag,
+            // end/cancel = release — all at the contact point. A tap (begin then
+            // end with no move) is therefore a left click.
+            *cursor = normalized_to_global(bounds, x, y);
+            let event_type = match phase {
+                TouchPhase::Began => CGEventType::LeftMouseDown,
+                TouchPhase::Moved => CGEventType::LeftMouseDragged,
+                TouchPhase::Ended | TouchPhase::Cancelled => CGEventType::LeftMouseUp,
+            };
+            post_mouse(source, event_type, *cursor, CGMouseButton::Left);
+        }
+        Input::Gesture(Gesture::SecondaryClick { x, y }) => {
+            // Long-press / two-finger tap → a full right-click (down then up).
+            *cursor = normalized_to_global(bounds, x, y);
+            post_mouse(source, CGEventType::RightMouseDown, *cursor, CGMouseButton::Right);
+            if let Ok(up_source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                post_mouse(up_source, CGEventType::RightMouseUp, *cursor, CGMouseButton::Right);
+            }
+        }
+        Input::Gesture(Gesture::Pinch { .. }) => {
+            // Pinch-to-zoom has no portable CGEvent injection path (the magnify
+            // gesture events are private), so it's a no-op until a mobile client
+            // actually sends it and we pick a mapping (e.g. zoom shortcut).
+        }
+        Input::Text { text } => {
+            // Soft-keyboard / IME text can't be expressed as physical scancodes:
+            // post a keystroke carrying the Unicode string (keycode 0 — the string
+            // is what gets inserted), down then up.
+            if let Ok(event) = CGEvent::new_keyboard_event(source, 0, true) {
+                event.set_string(&text);
+                event.post(CGEventTapLocation::HID);
+            }
+            if let Ok(up_source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                if let Ok(event) = CGEvent::new_keyboard_event(up_source, 0, false) {
+                    event.set_string(&text);
+                    event.post(CGEventTapLocation::HID);
+                }
+            }
+        }
     }
+}
+
+/// Map a normalized frame coordinate (`[0, 1]` from the top-left) into the
+/// captured display's global point coordinates, using its `bounds`.
+fn normalized_to_global(bounds: Bounds, x: f32, y: f32) -> (f64, f64) {
+    (
+        bounds.0 + f64::from(x) * bounds.2,
+        bounds.1 + f64::from(y) * bounds.3,
+    )
 }
 
 /// Post a mouse event of `event_type` at `pos` for `button`.

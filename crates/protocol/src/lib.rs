@@ -8,14 +8,30 @@ use std::io::{self, Read, Write};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-/// Protocol version negotiated during the connection handshake.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Protocol version negotiated during the connection handshake. Bumped to 2 in
+/// M5: [`ClientHello`] gained a `capture_mode` field and [`Input`] gained the
+/// touch/gesture/text variants. The host warns (but proceeds) on a version skew.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Codec {
     H264,
     Hevc,
+}
+
+/// How the client wants the host to source the streamed frames. Defaults to the
+/// existing "extend" behaviour, so a client that doesn't care gets a virtual
+/// second screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CaptureMode {
+    /// Create + capture a virtual display sized to the client (the "extend" use
+    /// case from M3). The host sizes the virtual display to the client's hello.
+    #[default]
+    VirtualDisplay,
+    /// Capture the host's existing primary display and route input to it — i.e.
+    /// remotely control the real desktop (the "control" use case from M5).
+    MirrorPrimary,
 }
 
 /// A message on the host -> client stream.
@@ -40,19 +56,30 @@ pub enum Message {
 
 /// The first message a client sends upstream, immediately after connecting and
 /// before any [`Input`]. Carries the protocol version (so the host can detect a
-/// mismatch) and the client's full panel resolution in physical pixels, so the
-/// host can size its virtual display to match.
+/// mismatch), the client's full panel resolution in physical pixels (so the host
+/// can size a virtual display to match), and the requested [`CaptureMode`].
+///
+/// Note: this struct is `postcard`-encoded as its fields in order, so the
+/// `capture_mode` field added in protocol v2 is *not* wire-compatible with a v1
+/// peer — both ends must be built from the same protocol version. The version
+/// field lets the host detect and warn about a skew.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol_version: u32,
     pub width: u32,
     pub height: u32,
+    pub capture_mode: CaptureMode,
 }
 
 /// A client -> host input event. Pointer coordinates are normalized to the
 /// streamed frame (`[0, 1]` from the top-left), so they're independent of the
 /// client window size and the host display resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// The touch/gesture/text variants were added in protocol v2 for mobile clients.
+/// They're appended after `Key` so the existing variants keep their `postcard`
+/// discriminants; a v1 host simply never receives the new ones. `Input` is no
+/// longer `Copy` because [`Input::Text`] owns a `String`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Input {
     /// Absolute pointer position within the streamed frame.
     MouseMove { x: f32, y: f32 },
@@ -65,6 +92,36 @@ pub enum Input {
     /// A key changed state. `code` is a platform-neutral key identifier the host
     /// maps to its OS keycode.
     Key { code: u32, pressed: bool },
+    /// A touch/pen contact changed. `id` distinguishes simultaneous fingers;
+    /// `x`/`y` are normalized to the frame like [`Input::MouseMove`]. The host
+    /// drives the pointer with these, treating a single contact's begin/move/end
+    /// as a left press/drag/release at the contact point.
+    Touch { id: u32, phase: TouchPhase, x: f32, y: f32 },
+    /// A high-level gesture pre-classified on the client (where the touch history
+    /// lives). See [`Gesture`].
+    Gesture(Gesture),
+    /// Committed Unicode text from a soft keyboard / IME, which can't be expressed
+    /// as physical [`Input::Key`] scancodes. The host synthesizes a keystroke
+    /// carrying the string.
+    Text { text: String },
+}
+
+/// The lifecycle phase of a touch contact (mirrors the common touch APIs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchPhase {
+    Began,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
+/// A high-level gesture, classified on the client and sent ready to act on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Gesture {
+    /// Pinch scale factor relative to the gesture's start (`1.0` = unchanged).
+    Pinch { scale: f32 },
+    /// A secondary-click request (e.g. long-press) at a normalized point.
+    SecondaryClick { x: f32, y: f32 },
 }
 
 /// A mouse button.
@@ -217,6 +274,12 @@ mod tests {
             Input::MouseButton { button: Button::Right, pressed: false },
             Input::Scroll { dx: -1.0, dy: 2.5 },
             Input::Key { code: 42, pressed: true },
+            Input::Touch { id: 1, phase: TouchPhase::Began, x: 0.1, y: 0.2 },
+            Input::Touch { id: 1, phase: TouchPhase::Moved, x: 0.3, y: 0.4 },
+            Input::Touch { id: 1, phase: TouchPhase::Ended, x: 0.5, y: 0.6 },
+            Input::Gesture(Gesture::Pinch { scale: 1.5 }),
+            Input::Gesture(Gesture::SecondaryClick { x: 0.4, y: 0.9 }),
+            Input::Text { text: "héllo, 世界 🌍".to_string() },
         ];
 
         let mut buf = Vec::new();
@@ -229,6 +292,27 @@ mod tests {
             let got: Input = read_framed(&mut cursor).unwrap();
             assert_eq!(&got, expected);
         }
+    }
+
+    #[test]
+    fn client_hello_round_trips_with_capture_mode() {
+        for mode in [CaptureMode::VirtualDisplay, CaptureMode::MirrorPrimary] {
+            let hello = ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                width: 2560,
+                height: 1440,
+                capture_mode: mode,
+            };
+            let mut buf = Vec::new();
+            write_framed(&mut buf, &hello).unwrap();
+            let got: ClientHello = read_framed(&mut io::Cursor::new(buf)).unwrap();
+            assert_eq!(got, hello);
+        }
+    }
+
+    #[test]
+    fn capture_mode_defaults_to_virtual_display() {
+        assert_eq!(CaptureMode::default(), CaptureMode::VirtualDisplay);
     }
 
     #[test]

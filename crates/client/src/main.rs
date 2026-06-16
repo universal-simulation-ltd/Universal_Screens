@@ -13,7 +13,7 @@ use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use extender_protocol::{self as protocol, Button, ClientHello, Input, Message};
+use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, Input, Message};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -554,6 +554,9 @@ struct App {
     addr: String,
     monitor_index: Option<usize>,
     res_index: Option<usize>,
+    /// Which display the host should stream: a virtual second screen (default) or
+    /// a mirror of the host's primary display (`--mirror`, remote-control mode).
+    capture_mode: CaptureMode,
     /// Whether the pointer is locked and we're forwarding input to the host.
     grabbed: bool,
 }
@@ -577,6 +580,7 @@ impl ApplicationHandler for App {
                 protocol_version: protocol::PROTOCOL_VERSION,
                 width,
                 height,
+                capture_mode: self.capture_mode,
             };
             let addr = self.addr.clone();
             let shared = self.shared.clone();
@@ -683,31 +687,41 @@ impl ApplicationHandler for App {
 }
 
 /// Parse the command line: one positional `HOST_ADDR`, plus optional
-/// `--monitor N` / `-m N` and `--res N` / `-r N` flags.
-fn parse_args() -> (String, Option<usize>, Option<usize>) {
+/// `--monitor N` / `-m N`, `--res N` / `-r N`, and `--mirror` flags.
+fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode) {
     let mut addr: Option<String> = None;
     let mut monitor_index = None;
     let mut res_index = None;
+    let mut capture_mode = CaptureMode::VirtualDisplay;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--monitor" | "-m" => monitor_index = args.next().and_then(|s| s.parse().ok()),
             "--res" | "-r" => res_index = args.next().and_then(|s| s.parse().ok()),
+            "--mirror" => capture_mode = CaptureMode::MirrorPrimary,
             _ if arg.starts_with('-') => eprintln!("ignoring unknown flag: {arg}"),
             _ if addr.is_none() => addr = Some(arg),
             _ => eprintln!("ignoring extra argument: {arg}"),
         }
     }
-    (addr.unwrap_or_else(|| DEFAULT_ADDR.to_string()), monitor_index, res_index)
+    (
+        addr.unwrap_or_else(|| DEFAULT_ADDR.to_string()),
+        monitor_index,
+        res_index,
+        capture_mode,
+    )
 }
 
 fn main() {
     // The network thread starts in `resumed` once winit can enumerate monitors
     // (we need the chosen monitor's size before we can send the hello).
-    let (addr, monitor_index, res_index) = parse_args();
+    let (addr, monitor_index, res_index, capture_mode) = parse_args();
     let shared: Shared = Arc::new(Mutex::new(None));
     let (input_tx, input_rx) = mpsc::channel::<Input>();
 
+    if capture_mode == CaptureMode::MirrorPrimary {
+        println!("mirror mode: requesting the host's primary display (remote control)");
+    }
     println!("controls: click to grab control · Esc to release · F (when not grabbed) = fullscreen");
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -719,6 +733,7 @@ fn main() {
         addr,
         monitor_index,
         res_index,
+        capture_mode,
         grabbed: false,
     };
     event_loop.run_app(&mut app).expect("run app");
