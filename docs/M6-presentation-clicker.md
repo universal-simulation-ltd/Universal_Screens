@@ -45,10 +45,11 @@ Arrows and Esc were already mapped; `→`/`←` alone already drive every app ab
     macOS-only — written against the standard HID→macOS table, needs a Mac to
     compile/smoke-test.)
 
-- **M6b — clicker UI (mobile, M5d/M5e).** A control row in the iOS/Android app:
-  ◀ ▶ big buttons, plus first/last, start/end, and blank. Each button calls
-  `extender_send_key` down+up. Optionally a swipe = next/prev. This is native UI
-  work and ships with the app shells.
+- **M6b — clicker UI (mobile).** 🚧 Scaffolded for Android in `apps/android/`:
+  the `ClickerScreen` Compose view has ◀ Prev / Next ▶, First/Last, Blank, and
+  Start(F5)/End(Esc) buttons, each calling `tapKey` (a key down then up) over the
+  JNI bridge. Unbuilt until compiled in Android Studio (see `apps/android/README.md`);
+  the iOS equivalent follows with the iOS shell.
 
 - **M6c — "control-only" (no-stream) mode (optional).** For pure clicking you
   don't need the video stream; skipping it saves the phone's battery and the
