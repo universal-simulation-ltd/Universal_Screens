@@ -39,6 +39,6 @@ object ExtenderNative {
     /** Ask the host to (re)send its list of open windows. */
     external fun nativeListWindows(handle: Long)
 
-    /** Bring the host window with [id] (from a WindowList event) to the foreground. */
-    external fun nativeFocusWindow(handle: Long, id: Long)
+    /** Bring the host window with [id] to the foreground; [startShow] also sends F5. */
+    external fun nativeFocusWindow(handle: Long, id: Long, startShow: Boolean)
 }

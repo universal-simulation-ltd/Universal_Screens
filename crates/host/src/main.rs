@@ -97,12 +97,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Pick what to capture: a virtual second screen sized to the client
-        // (the "extend" default) or the host's real primary display ("control").
+        // Pick what to capture: a virtual second screen sized to the client (the
+        // "extend" default) or the host's real primary display (mirror / control).
+        // Control-only needs the primary display only for its bounds (pointer
+        // mapping) — it captures nothing.
         let active = match mode {
             CaptureMode::VirtualDisplay => ensure_display(&mut display, target_w, target_h),
-            // The macOS host doesn't implement a no-stream path yet, so a
-            // ControlOnly request is served like MirrorPrimary (it streams anyway).
             CaptureMode::MirrorPrimary | CaptureMode::ControlOnly => primary_display(),
         };
         let (id, size, bounds) = match active {
@@ -114,7 +114,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match serve(stream, id, size, bounds) {
+        // Control-only (M6c): inject input but stream no video. Everything else
+        // captures + encodes + streams the chosen display.
+        let outcome = match mode {
+            CaptureMode::ControlOnly => serve_control_only(stream, bounds),
+            _ => serve(stream, id, size, bounds),
+        };
+        match outcome {
             Ok(()) => println!("client {peer} disconnected"),
             Err(e) => eprintln!("session with {peer} ended: {e}"),
         }
@@ -235,6 +241,17 @@ fn wait_for_display(id: u32) -> Option<Bounds> {
         thread::sleep(std::time::Duration::from_millis(100));
     }
     None
+}
+
+/// Serve a [`CaptureMode::ControlOnly`] client (M6c): inject its input into the
+/// real desktop and stream **no** video. `bounds` is the primary display's global
+/// geometry, used to map normalized pointer coordinates. Returns when the client
+/// disconnects.
+fn serve_control_only(stream: TcpStream, bounds: Bounds) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = stream.set_nodelay(true); // disable Nagle — low latency for input
+    println!("control-only: injecting input, streaming no video");
+    receive_and_inject(stream, bounds);
+    Ok(())
 }
 
 /// Capture + encode the main display and stream it to one connected client until

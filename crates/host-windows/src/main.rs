@@ -119,8 +119,9 @@ enum SnapReq {
     Scan,
     /// (Re)send the list of open windows.
     ListWindows,
-    /// Bring the window with this handle to the foreground.
-    FocusWindow(i64),
+    /// Bring the window with this handle to the foreground; if the bool is set,
+    /// also start its slideshow (F5).
+    FocusWindow(i64, bool),
 }
 
 /// Read input events from the client and inject them into the local desktop until
@@ -150,8 +151,8 @@ fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = snap_tx.send(SnapReq::ListWindows);
                 continue;
             }
-            Input::FocusWindow { id } => {
-                let _ = snap_tx.send(SnapReq::FocusWindow(id));
+            Input::FocusWindow { id, start_show } => {
+                let _ = snap_tx.send(SnapReq::FocusWindow(id, start_show));
                 continue;
             }
             _ => {}
@@ -233,11 +234,13 @@ fn handle_req(
             *refresh = true;
         }
         SnapReq::ListWindows => send_window_list(writer)?,
-        SnapReq::FocusWindow(id) => {
+        SnapReq::FocusWindow(id, start_show) => {
             winlist::focus_window(id);
-            // Once it's foreground, try to start its slideshow / presenter mode.
-            thread::sleep(FOCUS_SETTLE);
-            tap_vk(VK_F5);
+            if start_show {
+                // Once it's foreground, start its slideshow / presenter mode.
+                thread::sleep(FOCUS_SETTLE);
+                tap_vk(VK_F5);
+            }
             *refresh = true; // the newly-focused window becomes the next preview
         }
     }
@@ -584,6 +587,48 @@ mod tests {
     fn unmapped_usage_returns_none() {
         assert_eq!(hid_to_windows_vk(0x00), None);
         assert_eq!(hid_to_windows_vk(0xFFFF), None);
+    }
+
+    #[test]
+    fn page_index_tracks_nav_keys_and_clamps_to_the_deck() {
+        let mut idx = 0;
+        apply_index(&mut idx, 0x4E, 5); // PageDown
+        assert_eq!(idx, 1);
+        apply_index(&mut idx, 0x4F, 5); // Right
+        assert_eq!(idx, 2);
+        apply_index(&mut idx, 0x4B, 5); // PageUp
+        assert_eq!(idx, 1);
+        apply_index(&mut idx, 0x4A, 5); // Home -> first
+        assert_eq!(idx, 0);
+        apply_index(&mut idx, 0x4B, 5); // PageUp at start clamps
+        assert_eq!(idx, 0);
+        apply_index(&mut idx, 0x4D, 5); // End -> last
+        assert_eq!(idx, 4);
+        apply_index(&mut idx, 0x4E, 5); // PageDown at end clamps
+        assert_eq!(idx, 4);
+    }
+
+    #[test]
+    fn page_index_ignores_non_nav_keys() {
+        let mut idx = 3;
+        apply_index(&mut idx, 0, 5); // Text / no-op code
+        assert_eq!(idx, 3);
+        apply_index(&mut idx, 0x04, 5); // a letter
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn page_index_has_no_upper_clamp_before_a_scan() {
+        // With no cached pages the upper bound is unknown, so it just tracks deltas.
+        let mut idx = 0;
+        apply_index(&mut idx, 0x4E, 0);
+        apply_index(&mut idx, 0x4E, 0);
+        assert_eq!(idx, 2);
+        apply_index(&mut idx, 0x4B, 0);
+        assert_eq!(idx, 1);
+        apply_index(&mut idx, 0x4B, 0);
+        apply_index(&mut idx, 0x4B, 0);
+        assert_eq!(idx, 0); // never negative
     }
 
     #[test]
