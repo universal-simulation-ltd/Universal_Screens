@@ -6,12 +6,14 @@
 //! Run: cargo run -p extender-host-windows [-- BIND_ADDR]   (default 0.0.0.0:9000)
 //! Windows-only (uses Win32 `SendInput`); will not compile on other platforms.
 
+mod gui;
 mod snapshot;
 mod winlist;
 
 use std::io;
 use std::mem::size_of;
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
@@ -30,7 +32,6 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_UP,
 };
 
-const DEFAULT_ADDR: &str = "0.0.0.0:9000";
 /// Slide-preview snapshots: longest side ≤ this many px, at this JPEG quality.
 const SNAPSHOT_MAX_DIM: u32 = 1000;
 const SNAPSHOT_QUALITY: u8 = 70;
@@ -42,46 +43,76 @@ const SCAN_MAX_PAGES: u32 = 500;
 /// Wait after raising a window before sending F5, so it's foreground first.
 const FOCUS_SETTLE: Duration = Duration::from_millis(250);
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+/// A lifecycle event from the accept loop, for the CLI logger or the GUI window.
+pub(crate) enum HostEvent {
+    /// Listening and idle (no client).
+    Waiting,
+    /// A client connected (its address).
+    Connected(String),
+    /// The client disconnected (its address).
+    Disconnected(String),
+    /// A non-fatal accept error.
+    Error(String),
+}
 
-    let listener = TcpListener::bind(&addr)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // An explicit bind address (used by scripts) runs headless on the console;
+    // no argument launches the GUI host window.
+    match std::env::args().nth(1) {
+        Some(addr) if addr != "--gui" => run_cli(&addr),
+        _ => gui::run(),
+    }
+}
+
+/// Headless console host: bind, then serve clients forever, logging to stdout.
+fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind(addr)?;
     println!(
         "extender-host-windows listening on {addr} (protocol v{}, input-only — no video)",
         protocol::PROTOCOL_VERSION
     );
-    println!("waiting for a client to connect...");
-
-    for incoming in listener.incoming() {
-        let mut stream = match incoming {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("accept failed: {e}");
-                continue;
-            }
-        };
-        let peer = stream
-            .peer_addr()
-            .map_or_else(|_| "?".to_string(), |a| a.to_string());
-        println!("client connected: {peer}");
-
-        // Handshake: the client's first upstream message is its hello. We only
-        // log the requested capture mode — this host always serves input-only and
-        // never streams, regardless of what the client asked for.
-        if read_hello(&mut stream, &peer).is_none() {
-            println!("waiting for a client to connect...");
-            continue;
-        }
-
-        match serve(stream) {
-            Ok(()) => println!("client {peer} disconnected"),
-            Err(e) => eprintln!("session with {peer} ended: {e}"),
-        }
-        println!("waiting for a client to connect...");
-    }
+    let stop = AtomicBool::new(false);
+    serve_loop(&listener, &stop, &|event| match event {
+        HostEvent::Waiting => println!("waiting for a client to connect..."),
+        HostEvent::Connected(peer) => println!("client connected: {peer}"),
+        HostEvent::Disconnected(peer) => println!("client {peer} disconnected"),
+        HostEvent::Error(msg) => eprintln!("{msg}"),
+    });
     Ok(())
+}
+
+/// Accept and serve clients until `stop` is set, reporting lifecycle via
+/// `on_event`. Accept is non-blocking so `stop` is observed promptly between
+/// clients (an in-progress session ends when that client disconnects).
+pub(crate) fn serve_loop(
+    listener: &TcpListener,
+    stop: &AtomicBool,
+    on_event: &(dyn Fn(HostEvent) + Sync),
+) {
+    let _ = listener.set_nonblocking(true);
+    on_event(HostEvent::Waiting);
+    while !stop.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((mut stream, peer_addr)) => {
+                let _ = stream.set_nonblocking(false); // blocking reads for the session
+                let peer = peer_addr.to_string();
+                on_event(HostEvent::Connected(peer.clone()));
+                // Handshake: the client's first message is its hello (logged only;
+                // this host always serves input-only regardless of requested mode).
+                if read_hello(&mut stream, &peer).is_some() {
+                    if let Err(e) = serve(stream) {
+                        on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
+                    }
+                }
+                on_event(HostEvent::Disconnected(peer));
+                on_event(HostEvent::Waiting);
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => on_event(HostEvent::Error(format!("accept failed: {e}"))),
+        }
+    }
 }
 
 /// Read and log the client's [`ClientHello`], tolerating a protocol-version skew

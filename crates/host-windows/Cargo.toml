@@ -17,6 +17,10 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_System_Threading",
+    "Win32_System_Console",
 ] }
 # Slide-preview snapshots: encode the captured screen to JPEG (resize + encode).
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# Host control window (GUI mode) + connection QR code.
+eframe = "0.29"
+qrcode = { version = "0.14", default-features = false }
