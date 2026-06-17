@@ -31,10 +31,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         "Screen Extender Host",
         options,
         Box::new(|cc| {
-            // Light theme with a plain white background.
+            // Light theme on a pastel-orange background (UNI·SIM brand tint).
+            let pastel = egui::Color32::from_rgb(255, 235, 214);
             let mut visuals = egui::Visuals::light();
-            visuals.panel_fill = egui::Color32::WHITE;
-            visuals.window_fill = egui::Color32::WHITE;
+            visuals.panel_fill = pastel;
+            visuals.window_fill = pastel;
             cc.egui_ctx.set_visuals(visuals);
 
             let mut app = HostApp::new(cc);
@@ -159,7 +160,13 @@ impl eframe::App for HostApp {
                             }
                         }
                         if let Some(qr) = &self.qr {
-                            ui.image(egui::load::SizedTexture::new(qr.id(), egui::vec2(240.0, 240.0)));
+                            ui.add(
+                                egui::Image::from_texture(egui::load::SizedTexture::new(
+                                    qr.id(),
+                                    egui::vec2(240.0, 240.0),
+                                ))
+                                .rounding(16.0),
+                            );
                         }
                         ui.add_space(8.0);
                         ui.label("…or type this address:");
