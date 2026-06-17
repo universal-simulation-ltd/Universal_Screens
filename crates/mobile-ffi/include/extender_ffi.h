@@ -47,10 +47,15 @@ typedef enum {
 
 /* --- session lifecycle --- */
 
-/* Connect to "host:port"; mirror=true requests the host's primary display
- * (remote control) instead of a virtual second screen. NULL on failure. */
+/* capture_mode for extender_session_connect. */
+#define EXTENDER_CAPTURE_VIRTUAL 0      /* virtual second screen (extend) */
+#define EXTENDER_CAPTURE_MIRROR 1       /* mirror the host's primary display */
+#define EXTENDER_CAPTURE_CONTROL_ONLY 2 /* input only, no video (clicker) */
+
+/* Connect to "host:port" with the given capture_mode (see EXTENDER_CAPTURE_*).
+ * Unknown values fall back to virtual. NULL on failure. */
 ExtenderSession *extender_session_connect(const char *addr, uint32_t width,
-                                          uint32_t height, bool mirror);
+                                          uint32_t height, uint32_t capture_mode);
 
 /* Block for the next event; NULL when the stream ends. Free with
  * extender_event_free. */

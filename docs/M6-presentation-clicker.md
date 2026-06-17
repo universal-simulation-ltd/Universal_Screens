@@ -50,8 +50,10 @@ Arrows and Esc were already mapped; `→`/`←` alone already drive every app ab
   the `ClickerScreen` Compose view has ◀ Prev / Next ▶, First/Last, Blank (PPT) /
   Blank (.), and Start(F5)/End(Esc) buttons, each calling `tapKey` (a key down
   then up) over the JNI bridge. Build with `gradlew assembleDebug` (the repo now
-  ships the Gradle wrapper + `gradle.properties`; see `apps/android/README.md`);
-  the iOS equivalent follows with the iOS shell.
+  ships the Gradle wrapper + `gradle.properties`; see `apps/android/README.md`).
+  The iOS clicker is scaffolded in `apps/ios/` (SwiftUI, wired to the
+  `extender-mobile-ffi` C ABI) — unbuilt, pending Xcode/a Mac; see
+  `apps/ios/README.md`.
 
 - **M6c — "control-only" (no-stream) mode.** ✅ Done via the **Windows clicker
   host** (`extender-host-windows`): it has no capture/encode at all — bind

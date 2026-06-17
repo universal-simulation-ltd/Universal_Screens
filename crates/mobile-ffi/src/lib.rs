@@ -78,8 +78,10 @@ pub enum ExtenderMouseButton {
 // ---- session lifecycle ---------------------------------------------------
 
 /// Connect to `addr` (a NUL-terminated `"host:port"` string) and start a session
-/// advertising a `width`x`height` panel. `mirror` selects the host's primary
-/// display (remote control) instead of a virtual second screen.
+/// advertising a `width`x`height` panel. `capture_mode`: 0 = virtual second
+/// screen (extend), 1 = mirror the host's primary display (remote control),
+/// 2 = control-only (input only, no video — the clicker). Unknown values fall
+/// back to virtual.
 ///
 /// Returns an opaque session pointer, or null on a null/invalid `addr` or a
 /// connection/handshake failure. Free it with [`extender_session_free`].
@@ -91,7 +93,7 @@ pub unsafe extern "C" fn extender_session_connect(
     addr: *const c_char,
     width: u32,
     height: u32,
-    mirror: bool,
+    capture_mode: u32,
 ) -> *mut ExtenderSession {
     if addr.is_null() {
         return ptr::null_mut();
@@ -103,10 +105,10 @@ pub unsafe extern "C" fn extender_session_connect(
         protocol_version: protocol::PROTOCOL_VERSION,
         width,
         height,
-        capture_mode: if mirror {
-            CaptureMode::MirrorPrimary
-        } else {
-            CaptureMode::VirtualDisplay
+        capture_mode: match capture_mode {
+            1 => CaptureMode::MirrorPrimary,
+            2 => CaptureMode::ControlOnly,
+            _ => CaptureMode::VirtualDisplay,
         },
     };
     let (input_tx, input_rx) = mpsc::channel();
@@ -130,9 +132,17 @@ pub unsafe extern "C" fn extender_session_next_event(
     let Some(session) = (unsafe { session.as_ref() }) else {
         return ptr::null_mut();
     };
-    match session.session.next_event() {
-        Some(event) => Box::into_raw(Box::new(ffi_event(event))),
-        None => ptr::null_mut(),
+    // Skip events this C ABI doesn't model yet (snapshot/host-info/window-list),
+    // so only Start/Frame surface; return null once the stream ends.
+    loop {
+        match session.session.next_event() {
+            Some(event) => {
+                if let Some(ffi) = ffi_event(event) {
+                    return Box::into_raw(Box::new(ffi));
+                }
+            }
+            None => return ptr::null_mut(),
+        }
     }
 }
 
@@ -360,9 +370,12 @@ pub unsafe extern "C" fn extender_send_text(session: *mut ExtenderSession, text:
 
 /// Convert a core [`StreamEvent`] into the FFI event, normalizing every byte
 /// buffer to Annex-B so the consumer feeds it straight to a platform decoder.
-fn ffi_event(event: StreamEvent) -> ExtenderEvent {
+/// Returns `None` for events this C ABI doesn't expose yet (the snapshot preview,
+/// host identity, and window list added for the Android clicker — see the JNI
+/// bridge); the caller skips those.
+fn ffi_event(event: StreamEvent) -> Option<ExtenderEvent> {
     match event {
-        StreamEvent::Start { width, height, codec, parameter_sets } => ExtenderEvent {
+        StreamEvent::Start { width, height, codec, parameter_sets } => Some(ExtenderEvent {
             kind: ExtenderEventKind::Start,
             width,
             height,
@@ -371,11 +384,11 @@ fn ffi_event(event: StreamEvent) -> ExtenderEvent {
             pts_timescale: 0,
             keyframe: false,
             data: protocol::annex_b_parameter_sets(&parameter_sets),
-        },
+        }),
         StreamEvent::Frame { pts_value, pts_timescale, keyframe, data } => {
             let mut annex_b = Vec::new();
             protocol::append_annex_b(&mut annex_b, &data);
-            ExtenderEvent {
+            Some(ExtenderEvent {
                 kind: ExtenderEventKind::Frame,
                 width: 0,
                 height: 0,
@@ -384,8 +397,11 @@ fn ffi_event(event: StreamEvent) -> ExtenderEvent {
                 pts_timescale,
                 keyframe,
                 data: annex_b,
-            }
+            })
         }
+        StreamEvent::Snapshot { .. }
+        | StreamEvent::HostInfo { .. }
+        | StreamEvent::WindowList { .. } => None,
     }
 }
 
@@ -451,7 +467,7 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, false) };
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, 0) };
         assert!(!session.is_null());
 
         // Start event: codec/geometry + Annex-B parameter sets.
@@ -505,7 +521,8 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, true) };
+        // 2 = control-only (the clicker's mode).
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2) };
         assert!(!session.is_null());
 
         // 0x4E = Page Down (next slide).
