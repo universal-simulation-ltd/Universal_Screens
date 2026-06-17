@@ -78,6 +78,7 @@ fun AppRoot() {
     var session by remember { mutableStateOf<ExtenderSession?>(null) }
     var mode by remember { mutableStateOf(Mode.CLICKER) }
     var currentAddr by remember { mutableStateOf("") }
+    var currentPin by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
     // Credentials gathered (addr, pin) and awaiting a mode choice; null = not picking.
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
@@ -90,6 +91,7 @@ fun AppRoot() {
     val doConnect: (String, Mode, Int, Boolean) -> Unit = { addr, chosenMode, pin, rememberMode ->
         mode = chosenMode
         currentAddr = addr
+        currentPin = pin
         connecting = true
         status = ""
         // Clicker needs no video (control-only); the others mirror the screen.
@@ -119,8 +121,22 @@ fun AppRoot() {
     when {
         live != null -> {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Mode: $mode", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val modeName = when (mode) {
+                        Mode.CLICKER -> "Clicker"
+                        Mode.VIEWER -> "Mirror"
+                        Mode.FULL_CONTROL -> "Remote control"
+                    }
+                    // Tap the mode to go back and pick a different one for this host.
+                    Button(onClick = {
+                        live.close()
+                        session = null
+                        pending = currentAddr to currentPin
+                    }) { Text(modeName) }
                     Button(onClick = {
                         live.close()
                         session = null
