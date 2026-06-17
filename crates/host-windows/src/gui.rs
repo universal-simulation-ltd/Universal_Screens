@@ -31,6 +31,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         "Screen Extender Host",
         options,
         Box::new(|cc| {
+            // Light theme with a plain white background.
+            let mut visuals = egui::Visuals::light();
+            visuals.panel_fill = egui::Color32::WHITE;
+            visuals.window_fill = egui::Color32::WHITE;
+            cc.egui_ctx.set_visuals(visuals);
+
             let mut app = HostApp::new(cc);
             // Connect automatically the first time (and every launch until the user
             // opts out under More options).
