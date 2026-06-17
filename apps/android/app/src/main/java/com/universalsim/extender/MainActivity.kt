@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -77,7 +79,7 @@ fun AppRoot() {
 
     val live = session
     if (live == null) {
-        ConnectScreen(status) { addr, chosenMode ->
+        ConnectScreen(status) { addr, chosenMode, pin ->
             mode = chosenMode
             currentAddr = addr
             status = "connecting…"
@@ -90,11 +92,11 @@ fun AppRoot() {
             thread {
                 // Width/height advertise the phone panel; the host mirrors at its
                 // own native size, so exact values here are not critical.
-                val s = ExtenderSession.connect(addr, 1920, 1080, capture)
+                val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin)
                 runOnUi {
                     // Remember a successful host for quick reconnect; its OS/name
                     // fill in once HostInfo arrives (see the screen sinks below).
-                    if (s != null) ConnectionStore.remember(context, addr, chosenMode.name)
+                    if (s != null) ConnectionStore.remember(context, addr, chosenMode.name, pin)
                     session = s
                     status = if (s == null) "connection failed" else ""
                 }
@@ -119,16 +121,27 @@ fun AppRoot() {
 }
 
 @Composable
-fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode) -> Unit) {
+fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int) -> Unit) {
     val context = LocalContext.current
     var addr by remember { mutableStateOf("127.0.0.1:9000") }
+    var pin by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(ConnectionStore.load(context)) }
     var showHidden by remember { mutableStateOf(false) }
     fun reload() { saved = ConnectionStore.load(context) }
 
-    // Scan the host's QR code (from the Windows host window) to fill the address.
+    // Scan the host's QR (from the host window). It encodes "ip:port?pin=NNNN";
+    // a scan fills the fields and auto-connects as a clicker (scan = pair & go).
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { addr = it }
+        val text = result.contents ?: return@rememberLauncherForActivityResult
+        val q = text.indexOf("?pin=")
+        if (q >= 0) {
+            addr = text.substring(0, q)
+            val p = text.substring(q + 5).filter { it.isDigit() }
+            pin = p
+            onConnect(addr, Mode.CLICKER, p.toIntOrNull() ?: 0)
+        } else {
+            addr = text
+        }
     }
 
     val visible = saved.filter { showHidden || !it.hidden }.sortedByDescending { it.lastConnected }
@@ -147,7 +160,7 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode) -> Unit)
                 SavedConnectionRow(
                     conn = c,
                     onConnect = {
-                        onConnect(c.addr, runCatching { Mode.valueOf(c.mode) }.getOrDefault(Mode.CLICKER))
+                        onConnect(c.addr, runCatching { Mode.valueOf(c.mode) }.getOrDefault(Mode.CLICKER), c.pin)
                     },
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
                     onDelete = { ConnectionStore.delete(context, c.addr); reload() },
@@ -177,10 +190,18 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode) -> Unit)
             },
             modifier = Modifier.fillMaxWidth(),
         )
+        OutlinedTextField(
+            value = pin,
+            onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4) },
+            label = { Text("PIN (from the host)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onConnect(addr, Mode.CLICKER) }) { Text("Clicker") }
-            Button(onClick = { onConnect(addr, Mode.VIEWER) }) { Text("Viewer") }
-            Button(onClick = { onConnect(addr, Mode.FULL_CONTROL) }) { Text("Control") }
+            val code = pin.toIntOrNull() ?: 0
+            Button(onClick = { onConnect(addr, Mode.CLICKER, code) }) { Text("Clicker") }
+            Button(onClick = { onConnect(addr, Mode.VIEWER, code) }) { Text("Viewer") }
+            Button(onClick = { onConnect(addr, Mode.FULL_CONTROL, code) }) { Text("Control") }
         }
         if (status.isNotEmpty()) Text(status)
     }

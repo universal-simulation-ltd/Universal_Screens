@@ -36,8 +36,8 @@ class ExtenderSession private constructor(private var handle: Long) {
         const val MODE_CONTROL_ONLY = 2 // input only, no video (clicker)
 
         /** Blocking connect; returns null on failure. Call off the main thread. */
-        fun connect(addr: String, width: Int, height: Int, captureMode: Int): ExtenderSession? {
-            val handle = ExtenderNative.nativeConnect(addr, width, height, captureMode)
+        fun connect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int = 0): ExtenderSession? {
+            val handle = ExtenderNative.nativeConnect(addr, width, height, captureMode, pin)
             return if (handle != 0L) ExtenderSession(handle) else null
         }
     }
