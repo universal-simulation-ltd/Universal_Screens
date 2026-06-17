@@ -134,8 +134,8 @@ impl eframe::App for HostApp {
                     ui.label("or scan this QR in the app:");
                     ui.add_space(6.0);
                     if self.qr.is_none() {
-                        if let Some(image) = qr_image(&address) {
-                            self.qr = Some(ctx.load_texture("qr", image, egui::TextureOptions::NEAREST));
+                        if let Some(image) = crate::qr::branded_qr(&address) {
+                            self.qr = Some(ctx.load_texture("qr", image, egui::TextureOptions::LINEAR));
                         }
                     }
                     if let Some(qr) = &self.qr {
@@ -155,28 +155,3 @@ fn primary_lan_ip() -> Option<String> {
     Some(socket.local_addr().ok()?.ip().to_string())
 }
 
-/// Render `text` to a black-on-white QR `ColorImage` (with a quiet-zone border),
-/// scaled up so it stays crisp. `None` if the text won't fit in a QR code.
-fn qr_image(text: &str) -> Option<egui::ColorImage> {
-    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
-    let modules = code.width();
-    let colors = code.to_colors();
-    let quiet = 4usize;
-    let scale = 6usize;
-    let dim = (modules + quiet * 2) * scale;
-    let mut pixels = vec![egui::Color32::WHITE; dim * dim];
-    for y in 0..modules {
-        for x in 0..modules {
-            if colors[y * modules + x] == qrcode::Color::Dark {
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = (x + quiet) * scale + dx;
-                        let py = (y + quiet) * scale + dy;
-                        pixels[py * dim + px] = egui::Color32::BLACK;
-                    }
-                }
-            }
-        }
-    }
-    Some(egui::ColorImage { size: [dim, dim], pixels })
-}

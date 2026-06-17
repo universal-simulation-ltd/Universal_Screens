@@ -7,6 +7,7 @@
 //! Windows-only (uses Win32 `SendInput`); will not compile on other platforms.
 
 mod gui;
+mod qr;
 mod snapshot;
 mod winlist;
 
