@@ -104,6 +104,8 @@ struct HostApp {
     wifi: Option<crate::wifi::WifiInfo>,
     /// The Wi-Fi join QR, lazily built from `wifi`.
     wifi_qr: Option<egui::TextureHandle>,
+    /// The one-scan combined QR (join Wi-Fi + connect), for the app's scanner.
+    combined_qr: Option<egui::TextureHandle>,
     /// Reveal the Wi-Fi password (toggled by clicking the masked value).
     wifi_show_password: bool,
     /// Hide the Wi-Fi QR and show the details for manual entry instead.
@@ -112,6 +114,9 @@ struct HostApp {
     show_step2: bool,
     /// Reveal the pairing PIN (toggled by clicking it); it's in the QR regardless.
     show_pin: bool,
+    /// Whether an inbound firewall rule for the port exists (checked on start);
+    /// None until the host first listens.
+    firewall_ok: Option<bool>,
 }
 
 impl HostApp {
@@ -143,10 +148,12 @@ impl HostApp {
             app_logo: None,
             wifi: crate::wifi::current_wifi(),
             wifi_qr: None,
+            combined_qr: None,
             wifi_show_password: false,
             wifi_manual: false,
             show_step2: false,
             show_pin: false,
+            firewall_ok: None,
         }
     }
 
@@ -208,6 +215,8 @@ impl HostApp {
         let ip = primary_lan_ip().unwrap_or_else(|| "127.0.0.1".to_owned());
         self.address = Some(format!("{ip}:{port}"));
         self.qr = None;
+        self.combined_qr = None;
+        self.firewall_ok = Some(crate::firewall::rule_present(port));
         self.running = true;
     }
 
@@ -216,6 +225,7 @@ impl HostApp {
         self.running = false;
         self.address = None;
         self.qr = None;
+        self.combined_qr = None;
     }
 
     /// Step 1 — get the phone onto the same network as this PC: a Wi-Fi "join"
@@ -228,24 +238,51 @@ impl HostApp {
             ui.small("Connect your phone to the same network or router as this PC.");
             return;
         };
-        // Build the join QR lazily from the standard WIFI: payload.
-        if self.wifi_qr.is_none() {
-            if let Some(image) = crate::qr::branded_qr(&wifi.qr_payload()) {
-                self.wifi_qr =
-                    Some(ctx.load_texture("wifi_qr", image, egui::TextureOptions::LINEAR));
-            }
-        }
         if !self.wifi_manual {
-            if let Some(qr) = &self.wifi_qr {
-                ui.add(
-                    egui::Image::from_texture(egui::load::SizedTexture::new(
-                        qr.id(),
-                        egui::vec2(190.0, 190.0),
-                    ))
-                    .rounding(14.0),
-                );
+            // Prefer the one-scan combined QR (the app joins this Wi-Fi *and*
+            // connects). Falls back to a plain Wi-Fi-join QR if the host isn't
+            // listening yet (so there's no address to embed).
+            if self.running && self.address.is_some() {
+                if self.combined_qr.is_none() {
+                    if let Some(addr) = &self.address {
+                        let payload = combined_payload(wifi, addr, self.pin);
+                        if let Some(image) = crate::qr::branded_qr(&payload) {
+                            self.combined_qr = Some(ctx.load_texture(
+                                "combined_qr",
+                                image,
+                                egui::TextureOptions::LINEAR,
+                            ));
+                        }
+                    }
+                }
+                if let Some(qr) = &self.combined_qr {
+                    ui.add(
+                        egui::Image::from_texture(egui::load::SizedTexture::new(
+                            qr.id(),
+                            egui::vec2(200.0, 200.0),
+                        ))
+                        .rounding(14.0),
+                    );
+                }
+                ui.small("In the Universal Screens app, tap Scan — joins this Wi-Fi and connects in one step.");
+            } else {
+                if self.wifi_qr.is_none() {
+                    if let Some(image) = crate::qr::branded_qr(&wifi.qr_payload()) {
+                        self.wifi_qr =
+                            Some(ctx.load_texture("wifi_qr", image, egui::TextureOptions::LINEAR));
+                    }
+                }
+                if let Some(qr) = &self.wifi_qr {
+                    ui.add(
+                        egui::Image::from_texture(egui::load::SizedTexture::new(
+                            qr.id(),
+                            egui::vec2(190.0, 190.0),
+                        ))
+                        .rounding(14.0),
+                    );
+                }
+                ui.small("Scan to join this PC's Wi-Fi.");
             }
-            ui.small("Scan to join this PC's Wi-Fi.");
             ui.add_space(4.0);
         }
         ui.label(egui::RichText::new(format!("Network: {}", wifi.ssid)).strong());
@@ -300,6 +337,22 @@ impl HostApp {
                         .rounding(14.0),
                     );
                 }
+                // Firewall: phones on Wi-Fi can't reach the host unless inbound is
+                // allowed (loopback/USB works regardless). Offer a one-click fix.
+                if self.firewall_ok == Some(false) {
+                    ui.add_space(6.0);
+                    ui.colored_label(BRAND, "Windows Firewall may block phones on Wi-Fi.");
+                    if ui.button("Allow through firewall").clicked() {
+                        if let Some(port) = address
+                            .rsplit_once(':')
+                            .and_then(|(_, p)| p.parse::<u16>().ok())
+                        {
+                            crate::firewall::request_allow(port);
+                            self.firewall_ok = Some(true); // optimistic; UAC adds it
+                        }
+                    }
+                }
+
                 ui.add_space(6.0);
                 ui.small("…or type the address and PIN:");
                 ui.heading(&address);
@@ -677,6 +730,77 @@ fn paint_brand_strip(ctx: &egui::Context) {
     ));
     painter.add(egui::Shape::mesh(mesh));
     ctx.request_repaint(); // keep the pulse animating
+}
+
+/// The one-scan combined payload: a custom-scheme URI the Universal Screens app
+/// recognises, carrying the host address + PIN *and* the Wi-Fi credentials so a
+/// single scan joins the network and connects. The phone's system camera can't
+/// act on it — it's for the in-app scanner.
+fn combined_payload(wifi: &crate::wifi::WifiInfo, host: &str, pin: u32) -> String {
+    let (ip, port) = host.rsplit_once(':').unwrap_or((host, "9000"));
+    let mut s = format!(
+        "unisimscreens://connect?host={}&port={}&pin={:04}&ssid={}&auth={}",
+        pe(ip),
+        pe(port),
+        pin,
+        pe(&wifi.ssid),
+        pe(&wifi.auth),
+    );
+    if let Some(p) = &wifi.password {
+        s.push_str("&pass=");
+        s.push_str(&pe(p));
+    }
+    s
+}
+
+/// Percent-encode a query-string value (everything outside the RFC 3986
+/// unreserved set), so SSIDs/passwords with spaces or symbols survive the QR.
+fn pe(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pe_encodes_reserved_keeps_unreserved() {
+        assert_eq!(pe("a b/c?d=e&f"), "a%20b%2Fc%3Fd%3De%26f");
+        assert_eq!(pe("Safe-1._~"), "Safe-1._~");
+    }
+
+    #[test]
+    fn combined_payload_carries_wifi_and_host() {
+        let w = crate::wifi::WifiInfo {
+            ssid: "My Net".to_owned(),
+            password: Some("p@ss".to_owned()),
+            auth: "WPA".to_owned(),
+        };
+        let p = combined_payload(&w, "10.0.0.5:9100", 1234);
+        assert!(p.starts_with("unisimscreens://connect?"));
+        assert!(p.contains("host=10.0.0.5"), "{p}");
+        assert!(p.contains("port=9100"), "{p}");
+        assert!(p.contains("pin=1234"), "{p}");
+        assert!(p.contains("ssid=My%20Net"), "{p}");
+        assert!(p.contains("pass=p%40ss"), "{p}");
+        assert!(p.contains("auth=WPA"), "{p}");
+    }
+
+    #[test]
+    fn combined_payload_open_network_omits_pass() {
+        let w = crate::wifi::WifiInfo { ssid: "Cafe".to_owned(), password: None, auth: "nopass".to_owned() };
+        let p = combined_payload(&w, "192.168.0.2:9000", 7);
+        assert!(p.contains("pin=0007"), "{p}");
+        assert!(!p.contains("pass="), "{p}");
+    }
 }
 
 /// A "STEP N" eyebrow (brand orange) + title heading for the connect flow.

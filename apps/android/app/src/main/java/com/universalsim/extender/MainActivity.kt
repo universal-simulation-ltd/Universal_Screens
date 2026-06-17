@@ -127,20 +127,46 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
     var pin by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(ConnectionStore.load(context)) }
     var showHidden by remember { mutableStateOf(false) }
+    var joinStatus by remember { mutableStateOf<String?>(null) }
     fun reload() { saved = ConnectionStore.load(context) }
 
-    // Scan the host's QR (from the host window). It encodes "ip:port?pin=NNNN";
-    // a scan fills the fields and auto-connects as a clicker (scan = pair & go).
+    // Scan the host's QR. Two formats:
+    //  • "ip:port?pin=NNNN"          — host QR: fill fields and connect.
+    //  • "unisimscreens://connect?…" — combined QR: join the host's Wi-Fi first
+    //    (one-tap system dialog) and then connect, all from one scan.
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val text = result.contents ?: return@rememberLauncherForActivityResult
-        val q = text.indexOf("?pin=")
-        if (q >= 0) {
-            addr = text.substring(0, q)
-            val p = text.substring(q + 5).filter { it.isDigit() }
-            pin = p
-            onConnect(addr, Mode.CLICKER, p.toIntOrNull() ?: 0)
+        if (text.startsWith("unisimscreens://")) {
+            val uri = android.net.Uri.parse(text)
+            val host = uri.getQueryParameter("host").orEmpty()
+            val port = uri.getQueryParameter("port") ?: "9000"
+            val code = uri.getQueryParameter("pin")?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+            val ssid = uri.getQueryParameter("ssid")
+            val pass = uri.getQueryParameter("pass")
+            val auth = uri.getQueryParameter("auth") ?: "WPA"
+            val target = "$host:$port"
+            addr = target
+            pin = code.toString().padStart(4, '0')
+            if (!ssid.isNullOrEmpty() && WifiConnect.isSupported()) {
+                joinStatus = "Joining “$ssid”…"
+                WifiConnect.join(context, ssid, pass, auth) { ok ->
+                    joinStatus = if (ok) null else "Couldn't join Wi-Fi — join it manually, then connect."
+                    if (ok) onConnect(target, Mode.CLICKER, code)
+                }
+            } else {
+                // Already on the network (or Android < 10): just connect.
+                onConnect(target, Mode.CLICKER, code)
+            }
         } else {
-            addr = text
+            val q = text.indexOf("?pin=")
+            if (q >= 0) {
+                addr = text.substring(0, q)
+                val p = text.substring(q + 5).filter { it.isDigit() }
+                pin = p
+                onConnect(addr, Mode.CLICKER, p.toIntOrNull() ?: 0)
+            } else {
+                addr = text
+            }
         }
     }
 
@@ -185,6 +211,7 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
                         .setPrompt("Scan the host QR")
                         .setBeepEnabled(false)
                         .setOrientationLocked(false)
+                        .setCaptureActivity(PortraitCaptureActivity::class.java)
                     scanLauncher.launch(options)
                 }) { Text("Scan QR") }
             },
@@ -203,6 +230,7 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
             Button(onClick = { onConnect(addr, Mode.VIEWER, code) }) { Text("Viewer") }
             Button(onClick = { onConnect(addr, Mode.FULL_CONTROL, code) }) { Text("Control") }
         }
+        joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
     }
 }
