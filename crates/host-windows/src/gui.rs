@@ -5,6 +5,8 @@
 //! manual start/stop, auto-start preference) live under a collapsed "More options".
 
 use std::net::{TcpListener, UdpSocket};
+use std::os::windows::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -212,7 +214,7 @@ impl HostApp {
             ctx.request_repaint();
         });
 
-        let ip = primary_lan_ip().unwrap_or_else(|| "127.0.0.1".to_owned());
+        let ip = best_lan_ip().unwrap_or_else(|| "127.0.0.1".to_owned());
         self.address = Some(format!("{ip}:{port}"));
         self.qr = None;
         self.combined_qr = None;
@@ -971,6 +973,29 @@ fn platform_display(tag: &str) -> &str {
 fn first_free_port(start: u16) -> Option<(TcpListener, u16)> {
     (start..start.saturating_add(50))
         .find_map(|port| TcpListener::bind(("0.0.0.0", port)).ok().map(|l| (l, port)))
+}
+
+/// The best LAN address for a phone to reach: prefer a DHCP-assigned private IPv4
+/// (a real Wi-Fi/Ethernet adapter), which sidesteps VPN tunnels, WSL/Hyper-V
+/// virtual adapters and APIPA link-local addresses. Falls back to the default-
+/// route address. This matters when a VPN (e.g. ProtonVPN) owns the default
+/// route: the route-based pick would otherwise hand out the unreachable VPN IP.
+fn best_lan_ip() -> Option<String> {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let ps = "(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | \
+        Where-Object { $_.PrefixOrigin -eq 'Dhcp' -and $_.IPAddress -notlike '169.254.*' } | \
+        Select-Object -ExpandProperty IPAddress -First 1)";
+    if let Ok(out) = Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-Command", ps])
+        .output()
+    {
+        let ip = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if ip.parse::<std::net::Ipv4Addr>().is_ok() {
+            return Some(ip);
+        }
+    }
+    primary_lan_ip()
 }
 
 /// The IP of the default-route interface (no packets are sent). `None` if down.
