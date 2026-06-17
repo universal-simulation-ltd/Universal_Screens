@@ -27,10 +27,11 @@ final class ExtenderSession {
         addr: String,
         width: UInt32 = 1920,
         height: UInt32 = 1080,
-        mode: CaptureMode
+        mode: CaptureMode,
+        pin: UInt32 = 0
     ) -> ExtenderSession? {
         let handle = addr.withCString {
-            extender_session_connect($0, width, height, mode.rawValue)
+            extender_session_connect($0, width, height, mode.rawValue, pin)
         }
         guard let handle else { return nil }
         return ExtenderSession(handle: handle)

@@ -56,9 +56,11 @@ typedef enum {
 #define EXTENDER_CAPTURE_CONTROL_ONLY 2 /* input only, no video (clicker) */
 
 /* Connect to "host:port" with the given capture_mode (see EXTENDER_CAPTURE_*).
- * Unknown values fall back to virtual. NULL on failure. */
+ * Unknown values fall back to virtual. `pin` is the host's 4-digit pairing code
+ * (0 = none). NULL on failure. */
 ExtenderSession *extender_session_connect(const char *addr, uint32_t width,
-                                          uint32_t height, uint32_t capture_mode);
+                                          uint32_t height, uint32_t capture_mode,
+                                          uint32_t pin);
 
 /* Block for the next event; NULL when the stream ends. Free with
  * extender_event_free. */

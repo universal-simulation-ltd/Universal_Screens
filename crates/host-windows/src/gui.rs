@@ -61,6 +61,8 @@ struct HostApp {
     auto_connect: bool,
     /// Theme override: None = follow the OS, Some(true) = dark, Some(false) = light.
     dark_mode: Option<bool>,
+    /// 4-digit pairing code a client must present to connect (persisted).
+    pin: u32,
     port: String,
     running: bool,
     stop: Arc<AtomicBool>,
@@ -75,7 +77,13 @@ impl HostApp {
         let storage = cc.storage;
         let recent: Vec<RecentConn> =
             storage.and_then(|s| eframe::get_value(s, "recent")).unwrap_or_default();
+        // Reuse the stored PIN, or mint one on first run.
+        let mut pin: u32 = storage.and_then(|s| eframe::get_value(s, "pin_code")).unwrap_or(0);
+        if pin == 0 {
+            pin = gen_pin();
+        }
         Self {
+            pin,
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
                 .unwrap_or(true),
@@ -119,8 +127,9 @@ impl HostApp {
         let status = self.status.clone();
         let recent = self.recent.clone();
         let ctx = ctx.clone();
+        let pin = self.pin;
         thread::spawn(move || {
-            serve_loop(&listener, &stop, &|event| {
+            serve_loop(&listener, &stop, pin, &|event| {
                 match event {
                     HostEvent::Waiting => {
                         *status.lock().unwrap() = "Waiting for your phone…".to_owned();
@@ -162,6 +171,7 @@ impl eframe::App for HostApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "auto_connect", &self.auto_connect);
         eframe::set_value(storage, "dark_mode", &self.dark_mode);
+        eframe::set_value(storage, "pin_code", &self.pin);
         eframe::set_value(storage, "port", &self.port);
         eframe::set_value(storage, "recent", &*self.recent.lock().unwrap());
     }
@@ -206,7 +216,9 @@ impl eframe::App for HostApp {
                 if self.running {
                     if let Some(address) = self.address.clone() {
                         if self.qr.is_none() {
-                            if let Some(image) = crate::qr::branded_qr(&address) {
+                            // The QR carries the address + PIN so a scan auto-pairs.
+                            let payload = format!("{address}?pin={:04}", self.pin);
+                            if let Some(image) = crate::qr::branded_qr(&payload) {
                                 self.qr =
                                     Some(ctx.load_texture("qr", image, egui::TextureOptions::LINEAR));
                             }
@@ -221,8 +233,9 @@ impl eframe::App for HostApp {
                             );
                         }
                         ui.add_space(6.0);
-                        ui.label("…or type this address:");
+                        ui.label("…or type the address and PIN:");
                         ui.heading(&address);
+                        ui.heading(format!("PIN {:04}", self.pin));
                     }
                 } else {
                     ui.add_space(30.0);
@@ -279,6 +292,19 @@ impl eframe::App for HostApp {
                         }
                     });
                     ui.small("Leave blank to use the first free port automatically.");
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Pairing PIN: {:04}", self.pin));
+                        if ui.button("Regenerate").clicked() {
+                            self.pin = gen_pin();
+                            if self.running {
+                                self.start(ctx); // restart so the new PIN is enforced
+                            }
+                        }
+                    });
+                    ui.small("Clients must enter this PIN (or scan the QR) to connect.");
+
                     ui.add_space(4.0);
                     if self.running {
                         if ui.button("Stop").clicked() {
@@ -329,6 +355,16 @@ fn paint_brand_strip(ui: &mut egui::Ui) {
     ui.painter().add(egui::Shape::mesh(mesh));
 
     ui.ctx().request_repaint(); // keep the pulse animating
+}
+
+/// Mint a 4-digit pairing PIN (1000–9999) from the system clock. Not a crypto
+/// secret — it only gates "someone who merely knows the IP" (the link isn't
+/// encrypted; see the README security note).
+fn gen_pin() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    1000 + (nanos % 9000)
 }
 
 /// This machine's name (`COMPUTERNAME`), or a fallback.

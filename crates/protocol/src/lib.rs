@@ -18,8 +18,9 @@ use serde::{Deserialize, Serialize};
 /// [`Input::ListWindows`] / [`Input::FocusWindow`], so a clicker can refocus the
 /// host window that should receive its keys. The host warns (but proceeds) on a
 /// version skew. v7 added a `start_show` flag to [`Input::FocusWindow`]. v8 added
-/// a `platform` field to [`ClientHello`] so a host can show the device type.
-pub const PROTOCOL_VERSION: u32 = 8;
+/// a `platform` field to [`ClientHello`] so a host can show the device type. v9
+/// added a `pin` field for the host's optional 4-digit pairing code.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +117,9 @@ pub struct ClientHello {
     pub capture_mode: CaptureMode,
     /// The client's OS, so a host can label the connection by device type (v8).
     pub platform: ClientPlatform,
+    /// The host's 4-digit pairing code, echoed back by the client (v9). `0` means
+    /// "none supplied"; a host with pairing enabled rejects a mismatch.
+    pub pin: u32,
 }
 
 /// A client -> host input event. Pointer coordinates are normalized to the
@@ -411,6 +415,7 @@ mod tests {
                 height: 1440,
                 capture_mode: mode,
                 platform: ClientPlatform::Android,
+                pin: 1234,
             };
             let mut buf = Vec::new();
             write_framed(&mut buf, &hello).unwrap();

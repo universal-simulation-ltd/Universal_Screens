@@ -91,7 +91,7 @@ pub enum ExtenderMouseButton {
 /// advertising a `width`x`height` panel. `capture_mode`: 0 = virtual second
 /// screen (extend), 1 = mirror the host's primary display (remote control),
 /// 2 = control-only (input only, no video — the clicker). Unknown values fall
-/// back to virtual.
+/// back to virtual. `pin` is the host's 4-digit pairing code (0 = none).
 ///
 /// Returns an opaque session pointer, or null on a null/invalid `addr` or a
 /// connection/handshake failure. Free it with [`extender_session_free`].
@@ -104,6 +104,7 @@ pub unsafe extern "C" fn extender_session_connect(
     width: u32,
     height: u32,
     capture_mode: u32,
+    pin: u32,
 ) -> *mut ExtenderSession {
     if addr.is_null() {
         return ptr::null_mut();
@@ -121,6 +122,7 @@ pub unsafe extern "C" fn extender_session_connect(
             _ => CaptureMode::VirtualDisplay,
         },
         platform: protocol::ClientPlatform::current(),
+        pin,
     };
     let (input_tx, input_rx) = mpsc::channel();
     match Session::connect(addr, &hello, input_rx) {
@@ -536,7 +538,7 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, 0) };
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, 0, 0) };
         assert!(!session.is_null());
 
         // Start event: codec/geometry + Annex-B parameter sets.
@@ -590,8 +592,8 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        // 2 = control-only (the clicker's mode).
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2) };
+        // 2 = control-only (the clicker's mode); 0 = no pairing PIN.
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0) };
         assert!(!session.is_null());
 
         // 0x4E = Page Down (next slide).
@@ -620,7 +622,7 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2) };
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0) };
         assert!(!session.is_null());
         let mut len = 0usize;
 

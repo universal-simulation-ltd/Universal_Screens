@@ -73,7 +73,8 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         protocol::PROTOCOL_VERSION
     );
     let stop = AtomicBool::new(false);
-    serve_loop(&listener, &stop, &|event| match event {
+    // The headless CLI doesn't pair (PIN 0 = accept any); the GUI host pairs.
+    serve_loop(&listener, &stop, 0, &|event| match event {
         HostEvent::Waiting => println!("waiting for a client to connect..."),
         HostEvent::Connected { peer, platform } => {
             println!("client connected: {peer} ({platform:?})");
@@ -90,6 +91,7 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
 pub(crate) fn serve_loop(
     listener: &TcpListener,
     stop: &AtomicBool,
+    expected_pin: u32,
     on_event: &(dyn Fn(HostEvent) + Sync),
 ) {
     let _ = listener.set_nonblocking(true);
@@ -101,7 +103,7 @@ pub(crate) fn serve_loop(
                 let peer = peer_addr.to_string();
                 // Handshake first: its hello carries the device platform. (The host
                 // always serves input-only regardless of the requested mode.)
-                if let Some(platform) = read_hello(&mut stream, &peer) {
+                if let Some(platform) = read_hello(&mut stream, &peer, expected_pin) {
                     on_event(HostEvent::Connected { peer: peer.clone(), platform });
                     if let Err(e) = serve(stream) {
                         on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
@@ -123,7 +125,7 @@ pub(crate) fn serve_loop(
 /// `None` (and logs) on a missing or garbled hello so the caller skips this
 /// client. The advertised size is irrelevant here — without capture there's no
 /// display geometry to size.
-fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<ClientPlatform> {
+fn read_hello(stream: &mut TcpStream, peer: &str, expected_pin: u32) -> Option<ClientPlatform> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -137,6 +139,11 @@ fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<ClientPlatform> {
             hello.protocol_version,
             protocol::PROTOCOL_VERSION
         );
+    }
+    // Pairing: when the host has a PIN, reject a client that didn't present it.
+    if expected_pin != 0 && hello.pin != expected_pin {
+        eprintln!("client {peer} rejected: wrong pairing PIN");
+        return None;
     }
     println!(
         "client {peer} hello: {}x{}, mode {:?}, platform {:?}; serving input-only (no video)",
