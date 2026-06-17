@@ -17,6 +17,8 @@ use crate::{serve_loop, HostEvent};
 
 /// Port scan starts here when no specific port is set.
 const BASE_PORT: u16 = 9000;
+/// UNI·SIM brand orange, for the top brand strip (the "light bar").
+const BRAND: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x55, 0x04);
 /// How many recent connections to remember.
 const RECENT_MAX: usize = 8;
 
@@ -36,14 +38,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         "Screen Extender Host",
         options,
         Box::new(|cc| {
-            // Light theme on a pastel-orange background (UNI·SIM brand tint).
-            let pastel = egui::Color32::from_rgb(255, 216, 168);
-            let mut visuals = egui::Visuals::light();
-            visuals.panel_fill = pastel;
-            visuals.window_fill = pastel;
-            visuals.extreme_bg_color = egui::Color32::from_rgb(255, 229, 199);
-            cc.egui_ctx.set_visuals(visuals);
-
             let mut app = HostApp::new(cc);
             if app.auto_connect {
                 app.start(&cc.egui_ctx);
@@ -65,6 +59,8 @@ struct RecentConn {
 
 struct HostApp {
     auto_connect: bool,
+    /// Theme override: None = follow the OS, Some(true) = dark, Some(false) = light.
+    dark_mode: Option<bool>,
     port: String,
     running: bool,
     stop: Arc<AtomicBool>,
@@ -83,6 +79,7 @@ impl HostApp {
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
                 .unwrap_or(true),
+            dark_mode: storage.and_then(|s| eframe::get_value(s, "dark_mode")).unwrap_or(None),
             port: storage.and_then(|s| eframe::get_value(s, "port")).unwrap_or_default(),
             running: false,
             stop: Arc::new(AtomicBool::new(false)),
@@ -164,6 +161,7 @@ impl HostApp {
 impl eframe::App for HostApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "auto_connect", &self.auto_connect);
+        eframe::set_value(storage, "dark_mode", &self.dark_mode);
         eframe::set_value(storage, "port", &self.port);
         eframe::set_value(storage, "recent", &*self.recent.lock().unwrap());
     }
@@ -175,6 +173,22 @@ impl eframe::App for HostApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Follow the OS theme by default; honour the user's override if set.
+        ctx.set_theme(match self.dark_mode {
+            Some(true) => egui::ThemePreference::Dark,
+            Some(false) => egui::ThemePreference::Light,
+            None => egui::ThemePreference::System,
+        });
+
+        // The UNI·SIM brand strip — a thin gradient "light bar" across the top.
+        // Fill it with the theme background so it tracks light/dark mode.
+        let strip_bg = ctx.style().visuals.panel_fill;
+        egui::TopBottomPanel::top("brand_strip")
+            .exact_height(5.0)
+            .frame(egui::Frame::none().fill(strip_bg))
+            .show_separator_line(false)
+            .show(ctx, |ui| paint_brand_strip(ui));
+
         egui::CentralPanel::default().show(ctx, |ui| {
             // This PC's identity.
             ui.horizontal(|ui| {
@@ -246,6 +260,13 @@ impl eframe::App for HostApp {
                     {
                         self.auto_connect = !dont_auto;
                     }
+
+                    // Dark mode: defaults to following the OS; the checkbox shows
+                    // the effective state and pins it once toggled.
+                    let mut dark = self.dark_mode.unwrap_or(ui.visuals().dark_mode);
+                    if ui.checkbox(&mut dark, "Dark mode").changed() {
+                        self.dark_mode = Some(dark);
+                    }
                     ui.horizontal(|ui| {
                         ui.label("Port:");
                         ui.add(
@@ -274,6 +295,40 @@ impl eframe::App for HostApp {
                 });
         });
     }
+}
+
+/// Paint the UNI·SIM brand strip: a horizontal gradient (transparent → orange →
+/// transparent) with a gentle ~2.4s opacity pulse, matching the suite's
+/// `UniversalBar`. Edges fade out so it reads on any background.
+fn paint_brand_strip(ui: &mut egui::Ui) {
+    let rect = ui.max_rect();
+    // Subtle pulse between 0.35 and 1.0 opacity.
+    let t = ui.input(|i| i.time);
+    let pulse = 0.35 + 0.65 * (0.5 + 0.5 * (t * std::f64::consts::TAU / 2.4).sin());
+    let alpha = (pulse * 255.0) as u8;
+    let orange = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), alpha);
+    let clear = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), 0);
+
+    let (y0, y1) = (rect.top(), rect.bottom());
+    let (xl, xc, xr) = (rect.left(), rect.center().x, rect.right());
+    let v = |x: f32, y: f32, c: egui::Color32| egui::epaint::Vertex {
+        pos: egui::pos2(x, y),
+        uv: egui::epaint::WHITE_UV,
+        color: c,
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.vertices.extend([
+        v(xl, y0, clear),  // 0
+        v(xl, y1, clear),  // 1
+        v(xc, y0, orange), // 2
+        v(xc, y1, orange), // 3
+        v(xr, y0, clear),  // 4
+        v(xr, y1, clear),  // 5
+    ]);
+    mesh.indices.extend([0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5]);
+    ui.painter().add(egui::Shape::mesh(mesh));
+
+    ui.ctx().request_repaint(); // keep the pulse animating
 }
 
 /// This machine's name (`COMPUTERNAME`), or a fallback.
