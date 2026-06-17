@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Pick a saved host or enter a new `ip:port` and connect as a clicker.
+/// Pick a saved host or enter a new `ip:port` and connect in a chosen mode.
 struct ConnectView: View {
     let status: String
-    let onConnect: (String) -> Void
+    let onConnect: (String, Mode) -> Void
 
     @State private var addr = "127.0.0.1:9000"
     @State private var saved: [SavedConnection] = ConnectionStore.load()
@@ -34,8 +34,15 @@ struct ConnectView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
-                Button("Connect") { onConnect(addr) }
-                    .disabled(addr.isEmpty)
+                HStack {
+                    Button("Clicker") { onConnect(addr, .clicker) }
+                    Spacer()
+                    Button("Viewer") { onConnect(addr, .viewer) }
+                    Spacer()
+                    Button("Control") { onConnect(addr, .control) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(addr.isEmpty)
             }
 
             if !status.isEmpty {
@@ -47,7 +54,7 @@ struct ConnectView: View {
 
     private func savedRow(_ host: SavedConnection) -> some View {
         Button {
-            onConnect(host.addr)
+            onConnect(host.addr, .clicker)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: deviceSymbol(host.os)).font(.title2).frame(width: 32)

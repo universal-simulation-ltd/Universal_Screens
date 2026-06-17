@@ -38,8 +38,15 @@ final class ExtenderSession {
 
     // MARK: - Downstream events
 
-    /// Sink for the clicker's downstream events, delivered on the main queue.
+    /// Sink for downstream events. The clicker callbacks (`onSnapshot` /
+    /// `onHostInfo` / `onWindowList` / `onEnded`) are delivered on the main queue;
+    /// the video callbacks (`onStart` / `onFrame`) are delivered on the pump thread
+    /// so decoding stays off the main thread (they don't touch SwiftUI state).
     struct Sink {
+        /// Stream start: `codec` is 0 = H.264, 1 = HEVC; `csd` = Annex-B param sets.
+        var onStart: (_ width: Int, _ height: Int, _ codec: Int, _ csd: Data) -> Void = { _, _, _, _ in }
+        /// One encoded frame: `data` = Annex-B NAL units.
+        var onFrame: (_ data: Data, _ keyframe: Bool, _ ptsValue: Int64) -> Void = { _, _, _ in }
         /// A slide preview: `slot` is 0 = current, -1 = previous, +1 = next; `jpeg`
         /// is empty when there's no slide there.
         var onSnapshot: (_ slot: Int32, _ jpeg: Data) -> Void = { _, _ in }
@@ -58,6 +65,13 @@ final class ExtenderSession {
                 let kind = extender_event_kind(event)
                 let data = Self.eventData(event)
                 switch kind {
+                case EXTENDER_EVENT_START:
+                    let w = Int(extender_event_width(event))
+                    let h = Int(extender_event_height(event))
+                    let codec = Int(extender_event_codec(event))
+                    sink.onStart(w, h, codec, data) // pump thread (decoder is off-main)
+                case EXTENDER_EVENT_FRAME:
+                    sink.onFrame(data, extender_event_keyframe(event), extender_event_pts_value(event))
                 case EXTENDER_EVENT_SNAPSHOT:
                     let slot = extender_event_slot(event)
                     DispatchQueue.main.async { sink.onSnapshot(slot, data) }
@@ -68,7 +82,7 @@ final class ExtenderSession {
                     let windows = Self.parseWindows(data)
                     DispatchQueue.main.async { sink.onWindowList(windows) }
                 default:
-                    break // Start/Frame: video, ignored by the clicker
+                    break // unknown event kind
                 }
                 extender_event_free(event)
             }

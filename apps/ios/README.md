@@ -18,6 +18,8 @@ apps/ios/
     ContentView.swift                # connect → clicker
     ConnectView.swift                # host ip:port entry
     ClickerView.swift                # Prev/Next, slide preview, Scan deck, window picker, More options
+    StreamView.swift                 # viewer / full-control: VideoToolbox + touch forwarding
+    VideoDecoder.swift               # Annex-B H.264/HEVC -> AVSampleBufferDisplayLayer
     ExtenderSession.swift            # Swift wrapper over the C FFI (+ event pump)
     ConnectionStore.swift            # saved-connection persistence (UserDefaults)
     HidKeys.swift                    # HID usage ids for the clicker
@@ -28,8 +30,9 @@ The clicker connects in **control-only** mode (input only, no video) and is at
 feature parity with the Android clicker: slide preview (current + previous/next),
 **Scan deck** look-ahead, a **window picker**, and a **Start-show-on-focus (F5)**
 toggle. The connect screen remembers hosts (saved connections with an OS icon;
-swipe to hide / delete). Viewer / full-control (video) modes are still stubbed —
-they need a `VideoToolbox` decode path.
+swipe to hide / delete). Viewer and full-control modes decode the stream with
+`VideoToolbox` into an `AVSampleBufferDisplayLayer` (full-control also forwards
+touches) — **drafted but unverified**; the decode path wants on-device testing.
 
 ## Building the Rust static library
 
@@ -74,9 +77,10 @@ xcodebuild -create-xcframework \
 
 ## Remaining work
 
-- **Viewer / full-control (video)** — decode the `Start`/`Frame` Annex-B events
-  with `VideoToolbox` and render to a layer; `ExtenderSession.startPump` already
-  surfaces the other events, and the video events flow through the same path.
+- **Compile + on-device test** — the whole Swift app is an unbuilt scaffold (no
+  Xcode/Mac here). The VideoToolbox path (`VideoDecoder` Annex-B → AVCC, format
+  description from parameter sets, sample-buffer enqueue) especially needs a real
+  build + a live stream to validate and tune (frame pacing, error recovery).
 
 The C ABI (`extender-mobile-ffi`) is at parity with `crates/android-jni`: the
 `Snapshot` / `HostInfo` / `WindowList` events and the `ScanDeck` / `ListWindows` /
