@@ -4,9 +4,10 @@ import Foundation
 /// crate). Owns the opaque session pointer. Connect off the main thread — it does
 /// blocking network I/O.
 ///
-/// The clicker only sends input, so this shell doesn't pump downstream events.
-/// The streaming (viewer / full-control) modes will add an event-pump that feeds
-/// `VideoToolbox`; see `startDrain()` for the skeleton.
+/// For the clicker, `startPump` drains downstream events (slide previews, host
+/// identity, window list) on a background thread and delivers them on the main
+/// queue. The Start/Frame video events are ignored here (a future viewer mode
+/// would feed them to VideoToolbox).
 final class ExtenderSession {
     /// Mirrors `EXTENDER_CAPTURE_*` in `extender_ffi.h`.
     enum CaptureMode: UInt32 {
@@ -16,6 +17,8 @@ final class ExtenderSession {
     }
 
     private var handle: OpaquePointer?
+    private var pumpThread: Thread?
+    private var pumping = false
 
     private init(handle: OpaquePointer) { self.handle = handle }
 
@@ -33,6 +36,49 @@ final class ExtenderSession {
         return ExtenderSession(handle: handle)
     }
 
+    // MARK: - Downstream events
+
+    /// Sink for the clicker's downstream events, delivered on the main queue.
+    struct Sink {
+        /// A slide preview: `slot` is 0 = current, -1 = previous, +1 = next; `jpeg`
+        /// is empty when there's no slide there.
+        var onSnapshot: (_ slot: Int32, _ jpeg: Data) -> Void = { _, _ in }
+        var onHostInfo: (_ os: String, _ name: String) -> Void = { _, _ in }
+        var onWindowList: (_ windows: [(id: Int64, title: String)]) -> Void = { _ in }
+        var onEnded: () -> Void = {}
+    }
+
+    /// Drain events on a background thread until the stream ends. Idempotent.
+    func startPump(_ sink: Sink) {
+        guard let handle, !pumping else { return }
+        pumping = true
+        let thread = Thread { [weak self] in
+            while self?.pumping == true {
+                guard let event = extender_session_next_event(handle) else { break }
+                let kind = extender_event_kind(event)
+                let data = Self.eventData(event)
+                switch kind {
+                case EXTENDER_EVENT_SNAPSHOT:
+                    let slot = extender_event_slot(event)
+                    DispatchQueue.main.async { sink.onSnapshot(slot, data) }
+                case EXTENDER_EVENT_HOSTINFO:
+                    let (os, name) = Self.split2(data, separator: "\n")
+                    DispatchQueue.main.async { sink.onHostInfo(os, name) }
+                case EXTENDER_EVENT_WINDOWLIST:
+                    let windows = Self.parseWindows(data)
+                    DispatchQueue.main.async { sink.onWindowList(windows) }
+                default:
+                    break // Start/Frame: video, ignored by the clicker
+                }
+                extender_event_free(event)
+            }
+            DispatchQueue.main.async { sink.onEnded() }
+        }
+        thread.name = "extender-pump"
+        pumpThread = thread
+        thread.start()
+    }
+
     // MARK: - Input
 
     /// A key tap: down then up. The clicker's workhorse.
@@ -40,11 +86,6 @@ final class ExtenderSession {
         guard let handle else { return }
         extender_send_key(handle, hid, true)
         extender_send_key(handle, hid, false)
-    }
-
-    func sendKey(_ hid: UInt32, pressed: Bool) {
-        guard let handle else { return }
-        extender_send_key(handle, hid, pressed)
     }
 
     func sendText(_ text: String) {
@@ -57,24 +98,58 @@ final class ExtenderSession {
         extender_send_touch(handle, id, phase, x, y)
     }
 
+    /// Pre-scan the open document so the host can preview adjacent slides.
+    func scanDeck() {
+        guard let handle else { return }
+        extender_send_scan_deck(handle)
+    }
+
+    /// (Re)request the host's window list (a window-list event follows).
+    func listWindows() {
+        guard let handle else { return }
+        extender_send_list_windows(handle)
+    }
+
+    /// Bring host window `id` to the foreground; `startShow` also starts its slideshow.
+    func focusWindow(id: Int64, startShow: Bool) {
+        guard let handle else { return }
+        extender_send_focus_window(handle, id, startShow)
+    }
+
     // MARK: - Lifecycle
 
     func close() {
+        pumping = false
         guard let handle else { return }
+        // NOTE: the pump may still be blocked in extender_session_next_event; the
+        // session free shuts the socket so it returns and the thread exits. (Same
+        // lifecycle caveat as the Android pump.)
         extender_session_free(handle)
         self.handle = nil
     }
 
     deinit { close() }
 
-    // MARK: - Downstream (video modes — TODO)
+    // MARK: - Helpers
 
-    /// Skeleton for the streaming modes: drain events on a background thread and
-    /// hand Start/Frame buffers (Annex-B) to a VideoToolbox decoder. Unused by the
-    /// clicker. NOTE: stop/free ordering must be handled before wiring this up so
-    /// the pump isn't blocked in `extender_session_next_event` when the session is
-    /// freed.
-    func startDrain() {
-        // Intentionally not implemented in the shell.
+    private static func eventData(_ event: OpaquePointer) -> Data {
+        var len = 0
+        guard let ptr = extender_event_data(event, &len), len > 0 else { return Data() }
+        return Data(bytes: ptr, count: len)
+    }
+
+    private static func split2(_ data: Data, separator: Character) -> (String, String) {
+        let text = String(decoding: data, as: UTF8.self)
+        let parts = text.split(separator: separator, maxSplits: 1, omittingEmptySubsequences: false)
+        return (parts.first.map(String.init) ?? "", parts.count > 1 ? String(parts[1]) : "")
+    }
+
+    private static func parseWindows(_ data: Data) -> [(id: Int64, title: String)] {
+        let text = String(decoding: data, as: UTF8.self)
+        guard !text.isEmpty else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let tab = line.firstIndex(of: "\t"), let id = Int64(line[..<tab]) else { return nil }
+            return (id, String(line[line.index(after: tab)...]))
+        }
     }
 }

@@ -17,16 +17,17 @@ apps/ios/
     ScreenExtenderApp.swift          # @main App
     ContentView.swift                # connect → clicker
     ConnectView.swift                # host ip:port entry
-    ClickerView.swift                # Prev/Next + More options (First/Last/Blank/Start/End)
+    ClickerView.swift                # Prev/Next, slide preview, Scan deck, window picker, More options
     ExtenderSession.swift            # Swift wrapper over the C FFI
     HidKeys.swift                    # HID usage ids for the clicker
     ScreenExtender-Bridging-Header.h # imports extender_ffi.h
 ```
 
-The clicker connects in **control-only** mode (input only, no video). Viewer /
-full-control (video) modes and the slide-preview / window-picker features are
-**not** in this shell — the latter need downstream events the C ABI doesn't expose
-yet (see "FFI parity" below).
+The clicker connects in **control-only** mode (input only, no video) and is at
+feature parity with the Android clicker: slide preview (current + previous/next),
+**Scan deck** look-ahead, a **window picker**, and a **Start-show-on-focus (F5)**
+toggle. Viewer / full-control (video) modes are still stubbed — they need a
+`VideoToolbox` decode path.
 
 ## Building the Rust static library
 
@@ -69,16 +70,14 @@ xcodebuild -create-xcframework \
    ◀ / ▶ to drive slides. (For the Windows host, run
    `cargo run -p extender-host-windows`.)
 
-## FFI parity (follow-up)
+## Remaining work
 
-The Android app gained features that the C ABI (`extender-mobile-ffi`) doesn't yet
-surface, so this iOS shell can't show them:
+- **Viewer / full-control (video)** — decode the `Start`/`Frame` Annex-B events
+  with `VideoToolbox` and render to a layer; `ExtenderSession.startPump` already
+  surfaces the other events, and the video events flow through the same path.
+- **Saved connections** — the C ABI now delivers `HostInfo`; a connection store
+  (like Android's) could remember hosts with their OS icon.
 
-- **Slide preview** + **next-slide look-ahead** — needs the `Snapshot` event and a
-  `ScanDeck` send.
-- **Saved-connection OS icons** — needs the `HostInfo` event.
-- **Window picker** — needs the `WindowList` event and `ListWindows` / `FocusWindow`
-  sends.
-
-Bringing the C ABI to parity with `crates/android-jni` would let the iOS app match
-the Android feature set.
+The C ABI (`extender-mobile-ffi`) is at parity with `crates/android-jni`: the
+`Snapshot` / `HostInfo` / `WindowList` events and the `ScanDeck` / `ListWindows` /
+`FocusWindow` sends are all exposed.
