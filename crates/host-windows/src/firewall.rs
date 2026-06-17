@@ -32,19 +32,51 @@ pub fn rule_present(port: u16) -> bool {
 }
 
 /// Add an inbound allow rule for `port` via an elevated `netsh` (prompts UAC).
-/// Fire-and-forget — we don't block on the elevation result.
+/// Fire-and-forget — we don't block on the elevation result. The rule covers the
+/// currently-active network profile(s) — crucially including **Public**, since
+/// many shared/guest Wi-Fis are categorised Public and a private/domain-only rule
+/// wouldn't apply there.
 pub fn request_allow(port: u16) {
     let name = rule_name(port);
+    let profile = active_profiles().unwrap_or_else(|| "domain,private,public".to_owned());
     // Elevate via PowerShell's Start-Process -Verb RunAs. Each ArgumentList element
     // is a single-quoted PowerShell string, so the rule name's spaces/parens reach
     // netsh as one argument.
     let ps = format!(
         "Start-Process netsh -Verb RunAs -WindowStyle Hidden -ArgumentList \
          @('advfirewall','firewall','add','rule','name={name}','dir=in','action=allow',\
-         'protocol=TCP','localport={port}','profile=private,domain')"
+         'protocol=TCP','localport={port}','profile={profile}')"
     );
     let _ = Command::new("powershell")
         .creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", &ps])
         .spawn();
+}
+
+/// The netsh profile list for the currently-connected network(s), e.g.
+/// `"public"` or `"private,public"`. `None` if it can't be determined.
+fn active_profiles() -> Option<String> {
+    let out = Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-Command", "(Get-NetConnectionProfile).NetworkCategory"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut profiles = Vec::new();
+    for line in text.lines() {
+        let p = match line.trim() {
+            "Public" => "public",
+            "Private" => "private",
+            "DomainAuthenticated" | "Domain" => "domain",
+            _ => continue,
+        };
+        if !profiles.contains(&p) {
+            profiles.push(p);
+        }
+    }
+    if profiles.is_empty() {
+        None
+    } else {
+        Some(profiles.join(","))
+    }
 }
