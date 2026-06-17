@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -76,58 +78,115 @@ fun AppRoot() {
     var mode by remember { mutableStateOf(Mode.CLICKER) }
     var currentAddr by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
+    // Credentials gathered (addr, pin) and awaiting a mode choice; null = not picking.
+    var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    // True while a connection attempt is in flight (shows the Connecting screen).
+    var connecting by remember { mutableStateOf(false) }
+
+    // chosenMode + whether to remember it for this host (so saved rows can skip
+    // the picker next time). When `remember` is false we still save the host for
+    // quick reconnect, but with no mode — tapping it re-asks.
+    val doConnect: (String, Mode, Int, Boolean) -> Unit = { addr, chosenMode, pin, rememberMode ->
+        mode = chosenMode
+        currentAddr = addr
+        connecting = true
+        status = ""
+        // Clicker needs no video (control-only); the others mirror the screen.
+        val capture = if (chosenMode == Mode.CLICKER) {
+            ExtenderSession.MODE_CONTROL_ONLY
+        } else {
+            ExtenderSession.MODE_MIRROR
+        }
+        thread {
+            // Width/height advertise the phone panel; the host mirrors at its own
+            // native size, so exact values here are not critical.
+            val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin)
+            runOnUi {
+                connecting = false
+                if (s != null) {
+                    // Remember the host for quick reconnect; store the mode only if
+                    // the user asked to. OS/name fill in once HostInfo arrives.
+                    ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
+                }
+                session = s
+                status = if (s == null) "connection failed" else ""
+            }
+        }
+    }
 
     val live = session
-    if (live == null) {
-        ConnectScreen(status) { addr, chosenMode, pin ->
-            mode = chosenMode
-            currentAddr = addr
-            status = "connecting…"
-            // Clicker needs no video (control-only); the others mirror the screen.
-            val capture = if (chosenMode == Mode.CLICKER) {
-                ExtenderSession.MODE_CONTROL_ONLY
-            } else {
-                ExtenderSession.MODE_MIRROR
-            }
-            thread {
-                // Width/height advertise the phone panel; the host mirrors at its
-                // own native size, so exact values here are not critical.
-                val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin)
-                runOnUi {
-                    // Remember a successful host for quick reconnect; its OS/name
-                    // fill in once HostInfo arrives (see the screen sinks below).
-                    if (s != null) ConnectionStore.remember(context, addr, chosenMode.name, pin)
-                    session = s
-                    status = if (s == null) "connection failed" else ""
+    when {
+        live != null -> {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Mode: $mode", style = MaterialTheme.typography.titleMedium)
+                    Button(onClick = {
+                        live.close()
+                        session = null
+                    }) { Text("Disconnect") }
+                }
+                when (mode) {
+                    Mode.CLICKER -> ClickerScreen(live, currentAddr)
+                    Mode.VIEWER -> StreamScreen(live, currentAddr, forwardInput = false)
+                    Mode.FULL_CONTROL -> StreamScreen(live, currentAddr, forwardInput = true)
                 }
             }
         }
-    } else {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Mode: $mode", style = MaterialTheme.typography.titleMedium)
-                Button(onClick = {
-                    live.close()
-                    session = null
-                }) { Text("Disconnect") }
-            }
-            when (mode) {
-                Mode.CLICKER -> ClickerScreen(live, currentAddr)
-                Mode.VIEWER -> StreamScreen(live, currentAddr, forwardInput = false)
-                Mode.FULL_CONTROL -> StreamScreen(live, currentAddr, forwardInput = true)
-            }
+        // Connecting: a dedicated spinner screen (don't flash the home page).
+        connecting -> ConnectingScreen(currentAddr)
+        // After address + PIN are gathered (scan or manual), pick what to do.
+        pending != null -> {
+            val (pAddr, pPin) = pending!!
+            ModePickerScreen(
+                addr = pAddr,
+                onPick = { chosen, rememberMode ->
+                    pending = null
+                    doConnect(pAddr, chosen, pPin, rememberMode)
+                },
+                onBack = { pending = null },
+            )
+        }
+        else -> {
+            ConnectScreen(
+                status = status,
+                onPrepare = { addr, pin -> pending = addr to pin },
+                onConnect = { addr, m, pin -> doConnect(addr, m, pin, true) },
+            )
+        }
+    }
+}
+
+/** A full-screen "Connecting…" placeholder with a spinner, shown while a session
+ *  is being established so the user never bounces back to the home page. */
+@Composable
+fun ConnectingScreen(addr: String) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator()
+        Spacer(Modifier.height(16.dp))
+        Text("Connecting…", style = MaterialTheme.typography.titleMedium)
+        if (addr.isNotEmpty()) {
+            Text(addr, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int) -> Unit) {
+fun ConnectScreen(
+    status: String,
+    onPrepare: (addr: String, pin: Int) -> Unit,
+    onConnect: (addr: String, mode: Mode, pin: Int) -> Unit,
+) {
     val context = LocalContext.current
     var addr by remember { mutableStateOf("127.0.0.1:9000") }
     var pin by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(ConnectionStore.load(context)) }
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
+    var showAdvanced by remember { mutableStateOf(false) }
     fun reload() { saved = ConnectionStore.load(context) }
 
     // Scan the host's QR. Two formats:
@@ -151,11 +210,11 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
                 joinStatus = "Joining “$ssid”…"
                 WifiConnect.join(context, ssid, pass, auth) { ok ->
                     joinStatus = if (ok) null else "Couldn't join Wi-Fi — join it manually, then connect."
-                    if (ok) onConnect(target, Mode.CLICKER, code)
+                    if (ok) onPrepare(target, code) // joined → choose a mode
                 }
             } else {
-                // Already on the network (or Android < 10): just connect.
-                onConnect(target, Mode.CLICKER, code)
+                // Already on the network (or Android < 10): go straight to mode pick.
+                onPrepare(target, code)
             }
         } else {
             val q = text.indexOf("?pin=")
@@ -163,22 +222,45 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
                 addr = text.substring(0, q)
                 val p = text.substring(q + 5).filter { it.isDigit() }
                 pin = p
-                onConnect(addr, Mode.CLICKER, p.toIntOrNull() ?: 0)
+                onPrepare(addr, p.toIntOrNull() ?: 0)
             } else {
                 addr = text
             }
         }
     }
 
+    val startScan: () -> Unit = {
+        val options = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Point at the host's Step 2 QR")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+            .setCaptureActivity(PortraitCaptureActivity::class.java)
+        scanLauncher.launch(options)
+    }
+
     val visible = saved.filter { showHidden || !it.hidden }.sortedByDescending { it.lastConnected }
     val hasHidden = saved.any { it.hidden }
 
     Column(
+        // Centre the content vertically so the camera + Scan button land mid-screen
+        // (easy to reach with a thumb); it still scrolls if there are many hosts.
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Universal Screens", style = MaterialTheme.typography.headlineMedium)
+
+        // A big camera glyph above the primary action, so scanning reads as THE
+        // thing to do.
+        Text("📷", fontSize = 72.sp)
+        Button(onClick = startScan, modifier = Modifier.fillMaxWidth()) {
+            Text("Scan to connect", style = MaterialTheme.typography.titleMedium)
+        }
+        Text(
+            "Point at the host's Step 2 QR — it joins this PC's Wi-Fi and connects.",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         if (visible.isNotEmpty()) {
             Text("Saved hosts", style = MaterialTheme.typography.titleMedium)
@@ -186,7 +268,9 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
                 SavedConnectionRow(
                     conn = c,
                     onConnect = {
-                        onConnect(c.addr, runCatching { Mode.valueOf(c.mode) }.getOrDefault(Mode.CLICKER), c.pin)
+                        // Remembered mode → connect straight away; otherwise re-ask.
+                        val m = runCatching { Mode.valueOf(c.mode) }.getOrNull()
+                        if (m != null) onConnect(c.addr, m, c.pin) else onPrepare(c.addr, c.pin)
                     },
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
                     onDelete = { ConnectionStore.delete(context, c.addr); reload() },
@@ -199,39 +283,88 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
             }
         }
 
-        Text("New connection", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = addr,
-            onValueChange = { addr = it },
-            label = { Text("Host  (ip:port)") },
-            trailingIcon = {
-                TextButton(onClick = {
-                    val options = ScanOptions()
-                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        .setPrompt("Scan the host QR")
-                        .setBeepEnabled(false)
-                        .setOrientationLocked(false)
-                        .setCaptureActivity(PortraitCaptureActivity::class.java)
-                    scanLauncher.launch(options)
-                }) { Text("Scan QR") }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = pin,
-            onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4) },
-            label = { Text("PIN (from the host)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val code = pin.toIntOrNull() ?: 0
-            Button(onClick = { onConnect(addr, Mode.CLICKER, code) }) { Text("Clicker") }
-            Button(onClick = { onConnect(addr, Mode.VIEWER, code) }) { Text("Viewer") }
-            Button(onClick = { onConnect(addr, Mode.FULL_CONTROL, code) }) { Text("Control") }
+        // Manual entry is tucked away — most people just scan.
+        TextButton(onClick = { showAdvanced = !showAdvanced }) {
+            Text(if (showAdvanced) "Advanced ▾" else "Advanced ▸")
+        }
+        if (showAdvanced) {
+            OutlinedTextField(
+                value = addr,
+                onValueChange = { addr = it },
+                label = { Text("Host  (ip:port)") },
+                trailingIcon = {
+                    TextButton(onClick = startScan) { Text("Scan QR") }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4) },
+                label = { Text("PIN (from the host)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { onPrepare(addr, pin.toIntOrNull() ?: 0) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Connect") }
         }
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
+    }
+}
+
+/**
+ * After the address + PIN are known (scan or manual), choose how to use the host.
+ * Implemented modes connect on tap; the rest are shown greyed as "coming soon".
+ */
+@Composable
+fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -> Unit) {
+    var rememberChoice by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Universal Screens", style = MaterialTheme.typography.headlineMedium)
+        Text("Host: $addr", style = MaterialTheme.typography.bodyMedium)
+        Text("How do you want to use it?", style = MaterialTheme.typography.titleMedium)
+
+        ModeOption("Clicker", "Presentation remote — next/previous, blank, slide previews") {
+            onPick(Mode.CLICKER, rememberChoice)
+        }
+        ModeOption("Mirror", "Watch the host's screen (view only)") {
+            onPick(Mode.VIEWER, rememberChoice)
+        }
+        ModeOption("Remote control", "See the screen and control it (mouse + keys)") {
+            onPick(Mode.FULL_CONTROL, rememberChoice)
+        }
+        ModeOption("Trackpad", "Coming soon", enabled = false) {}
+        ModeOption("Second screen", "Use this phone as an extra display — coming soon", enabled = false) {}
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = rememberChoice, onCheckedChange = { rememberChoice = it })
+            Spacer(Modifier.width(8.dp))
+            Text("Remember next time?")
+        }
+
+        TextButton(onClick = onBack) { Text("Back") }
+    }
+}
+
+/** One selectable mode: a full-width button with a title + description. */
+@Composable
+private fun ModeOption(
+    title: String,
+    subtitle: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -253,10 +386,10 @@ private fun SavedConnectionRow(
             Spacer(Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.Start) {
                 Text(conn.hostname.ifEmpty { conn.addr })
-                Text(
-                    "${conn.addr}  ·  ${modeLabel(conn.mode)}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                // Show the remembered mode only if there is one; otherwise just the
+                // address (tapping re-asks for the mode).
+                val sub = if (conn.mode.isBlank()) conn.addr else "${conn.addr}  ·  ${modeLabel(conn.mode)}"
+                Text(sub, style = MaterialTheme.typography.bodySmall)
             }
         }
         TextButton(onClick = onToggleHide) { Text(if (conn.hidden) "Unhide" else "Hide") }
@@ -310,16 +443,27 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val slide = preview
-        if (slide != null) {
-            Image(
-                bitmap = slide,
-                contentDescription = "Current slide",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-            )
-        } else {
-            Text("Waiting for slide preview…", style = MaterialTheme.typography.bodyMedium)
+        // Always reserve the 16:9 slot so the layout doesn't jump when the first
+        // preview arrives; show a spinner placeholder until then.
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            contentAlignment = Alignment.Center,
+        ) {
+            val slide = preview
+            if (slide != null) {
+                Image(
+                    bitmap = slide,
+                    contentDescription = "Current slide",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(8.dp))
+                    Text("Waiting for slide preview…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
         // Build (or rebuild) the look-ahead cache, and pick which host window gets
         // the keystrokes (in case the document lost focus).

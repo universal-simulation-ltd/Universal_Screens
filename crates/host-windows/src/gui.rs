@@ -97,7 +97,8 @@ struct HostApp {
     status: Arc<Mutex<String>>,
     recent: Arc<Mutex<Vec<RecentConn>>>,
     address: Option<String>,
-    qr: Option<egui::TextureHandle>,
+    /// The "get the app" QR (the suite page URL); built once.
+    applink_qr: Option<egui::TextureHandle>,
     /// The UNI·SIM mark, lazily uploaded for the navbar changelog icon + QR.
     logo: Option<egui::TextureHandle>,
     /// The Universal Screens app icon, lazily uploaded for the navbar product logo.
@@ -110,8 +111,6 @@ struct HostApp {
     combined_qr: Option<egui::TextureHandle>,
     /// Reveal the Wi-Fi password (toggled by clicking the masked value).
     wifi_show_password: bool,
-    /// Hide the Wi-Fi QR and show the details for manual entry instead.
-    wifi_manual: bool,
     /// Wizard position: false = step 1 (Wi-Fi), true = step 2 (connect phone).
     show_step2: bool,
     /// Reveal the pairing PIN (toggled by clicking it); it's in the QR regardless.
@@ -145,14 +144,13 @@ impl HostApp {
             status: Arc::new(Mutex::new("Not started".to_owned())),
             recent: Arc::new(Mutex::new(recent)),
             address: None,
-            qr: None,
+            applink_qr: None,
             logo: None,
             app_logo: None,
             wifi: crate::wifi::current_wifi(),
             wifi_qr: None,
             combined_qr: None,
             wifi_show_password: false,
-            wifi_manual: false,
             show_step2: false,
             show_pin: false,
             firewall_ok: None,
@@ -216,7 +214,6 @@ impl HostApp {
 
         let ip = best_lan_ip().unwrap_or_else(|| "127.0.0.1".to_owned());
         self.address = Some(format!("{ip}:{port}"));
-        self.qr = None;
         self.combined_qr = None;
         self.firewall_ok = Some(crate::firewall::rule_present(port));
         self.running = true;
@@ -226,24 +223,42 @@ impl HostApp {
         self.stop.store(true, Ordering::Relaxed);
         self.running = false;
         self.address = None;
-        self.qr = None;
         self.combined_qr = None;
     }
 
-    /// Step 1 — get the phone onto the same network as this PC: a Wi-Fi "join"
-    /// QR, plus the network name and a reveal-on-click password (or a manual
-    /// fallback). Skipped with a note when this PC isn't on Wi-Fi.
-    fn step1_wifi(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        step_header(ui, "Step 1", "Connect to the same Wi-Fi");
-        let Some(wifi) = &self.wifi else {
-            ui.label("This PC isn't on Wi-Fi.");
-            ui.small("Connect your phone to the same network or router as this PC.");
-            return;
-        };
-        if !self.wifi_manual {
-            // Prefer the one-scan combined QR (the app joins this Wi-Fi *and*
-            // connects). Falls back to a plain Wi-Fi-join QR if the host isn't
-            // listening yet (so there's no address to embed).
+    /// Step 1 — get the app onto the phone: a QR of the suite page. The phone's
+    /// *camera* opens it; with the app installed it deep-links straight in (Android
+    /// App Link / iOS Universal Link), otherwise it lands on the download page.
+    /// A plain https URL — carries no secrets, and any camera can open it.
+    fn step1_getapp(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        step_header(ui, "Step 1", "Get the app");
+        if self.applink_qr.is_none() {
+            if let Some(image) = crate::qr::branded_qr(OPENSOURCE_URL) {
+                self.applink_qr =
+                    Some(ctx.load_texture("applink_qr", image, egui::TextureOptions::LINEAR));
+            }
+        }
+        if let Some(qr) = &self.applink_qr {
+            ui.add(
+                egui::Image::from_texture(egui::load::SizedTexture::new(
+                    qr.id(),
+                    egui::vec2(200.0, 200.0),
+                ))
+                .rounding(14.0),
+            );
+        }
+        ui.small("Point your phone's camera here — it opens Universal Screens, or the download page if you don't have it yet.");
+    }
+
+    /// Step 2 — one scan *in the app* to join this PC's Wi-Fi and connect: the
+    /// combined QR (network + host + PIN), the network name, a reveal-on-click
+    /// password, and a manual address/PIN fallback for phones already on the network.
+    fn step2_connect(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        step_header(ui, "Step 2", "Scan to connect");
+
+        if let Some(wifi) = &self.wifi {
+            // The one-scan combined QR (the app joins this Wi-Fi *and* connects).
+            // Falls back to a plain Wi-Fi-join QR before the host is listening.
             if self.running && self.address.is_some() {
                 if self.combined_qr.is_none() {
                     if let Some(addr) = &self.address {
@@ -266,7 +281,7 @@ impl HostApp {
                         .rounding(14.0),
                     );
                 }
-                ui.small("In the Universal Screens app, tap Scan — joins this Wi-Fi and connects in one step.");
+                ui.small("In the app, tap Scan and point it here — joins this Wi-Fi and connects.");
             } else {
                 if self.wifi_qr.is_none() {
                     if let Some(image) = crate::qr::branded_qr(&wifi.qr_payload()) {
@@ -286,100 +301,95 @@ impl HostApp {
                 ui.small("Scan to join this PC's Wi-Fi.");
             }
             ui.add_space(4.0);
-        }
-        ui.label(egui::RichText::new(format!("Network: {}", wifi.ssid)).strong());
-        if let Some(masked) = wifi.masked_password() {
-            let shown = if self.wifi_show_password {
-                wifi.password.clone().unwrap_or_default()
-            } else {
-                masked
-            };
-            let hint = if self.wifi_show_password { "Click to hide" } else { "Click to reveal" };
-            let resp = ui
-                .add(egui::Label::new(format!("Password: {shown}")).sense(egui::Sense::click()))
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text(hint);
-            if resp.clicked() {
-                self.wifi_show_password = !self.wifi_show_password;
-            }
-        } else {
-            ui.label("Password: (open network)");
-        }
-        let mut manual = self.wifi_manual;
-        if ui.checkbox(&mut manual, "Enter Wi-Fi details manually").changed() {
-            self.wifi_manual = manual;
-            if manual {
-                self.wifi_show_password = true; // reveal so it can be typed in
-            }
-        }
-    }
-
-    /// Step 2 — point the phone's Universal Screens app at this host: a QR carrying
-    /// the address + PIN, or the address/PIN to type.
-    fn step2_phone(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        step_header(ui, "Step 2", "Connect your phone");
-        ui.label("Open Universal Screens on your phone and scan this code.");
-        ui.add_space(8.0);
-        if self.running {
-            if let Some(address) = self.address.clone() {
-                if self.qr.is_none() {
-                    // The QR carries the address + PIN so a scan auto-pairs.
-                    let payload = format!("{address}?pin={:04}", self.pin);
-                    if let Some(image) = crate::qr::branded_qr(&payload) {
-                        self.qr =
-                            Some(ctx.load_texture("qr", image, egui::TextureOptions::LINEAR));
-                    }
-                }
-                if let Some(qr) = &self.qr {
-                    ui.add(
-                        egui::Image::from_texture(egui::load::SizedTexture::new(
-                            qr.id(),
-                            egui::vec2(190.0, 190.0),
-                        ))
-                        .rounding(14.0),
-                    );
-                }
-                // Firewall: phones on Wi-Fi can't reach the host unless inbound is
-                // allowed (loopback/USB works regardless). Offer a one-click fix.
-                if self.firewall_ok == Some(false) {
-                    ui.add_space(6.0);
-                    ui.colored_label(BRAND, "Windows Firewall may block phones on Wi-Fi.");
-                    if ui.button("Allow through firewall").clicked() {
-                        if let Some(port) = address
-                            .rsplit_once(':')
-                            .and_then(|(_, p)| p.parse::<u16>().ok())
-                        {
-                            crate::firewall::request_allow(port);
-                            self.firewall_ok = Some(true); // optimistic; UAC adds it
-                        }
-                    }
-                }
-
-                ui.add_space(6.0);
-                ui.small("…or type the address and PIN:");
-                ui.heading(&address);
-                // PIN masked until clicked (it's baked into the QR regardless).
-                let pin_text =
-                    if self.show_pin { format!("PIN {:04}", self.pin) } else { "PIN ••••".to_owned() };
-                let hint = if self.show_pin { "Click to hide" } else { "Click to reveal" };
+            ui.label(egui::RichText::new(format!("Network: {}", wifi.ssid)).strong());
+            if let Some(masked) = wifi.masked_password() {
+                let shown = if self.wifi_show_password {
+                    wifi.password.clone().unwrap_or_default()
+                } else {
+                    masked
+                };
+                let hint =
+                    if self.wifi_show_password { "Click to hide" } else { "Click to reveal" };
                 let resp = ui
-                    .add(
-                        egui::Label::new(egui::RichText::new(pin_text).heading())
-                            .sense(egui::Sense::click()),
-                    )
+                    .add(egui::Label::new(format!("Password: {shown}")).sense(egui::Sense::click()))
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text(hint);
                 if resp.clicked() {
-                    self.show_pin = !self.show_pin;
+                    self.wifi_show_password = !self.wifi_show_password;
                 }
+            } else {
+                ui.label("Password: (open network)");
             }
         } else {
-            ui.add_space(20.0);
-            ui.label("Not connected.");
-            if ui.button("Start").clicked() {
-                self.start(ctx);
+            ui.small("This PC isn't on Wi-Fi — put your phone on the same network, then use the details below.");
+        }
+
+        // A one-click firewall fix when inbound looks blocked (kept visible since
+        // it's the usual reason a phone on Wi-Fi can't reach the host).
+        if self.running && self.firewall_ok == Some(false) {
+            if let Some(address) = self.address.clone() {
+                ui.add_space(6.0);
+                ui.colored_label(BRAND, "Windows Firewall may block phones on Wi-Fi.");
+                if ui.button("Allow through firewall").clicked() {
+                    if let Some(port) =
+                        address.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())
+                    {
+                        crate::firewall::request_allow(port);
+                        self.firewall_ok = Some(true); // optimistic; UAC adds it
+                    }
+                }
             }
         }
+
+        // Everything secondary lives here: the manual address/PIN, status, and
+        // recent connections.
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new("More details").default_open(false).show(ui, |ui| {
+            if self.running {
+                if let Some(address) = self.address.clone() {
+                    ui.small("Already on the network? Type the address and PIN:");
+                    ui.heading(&address);
+                    // PIN masked until clicked (it's baked into the QR regardless).
+                    let pin_text = if self.show_pin {
+                        format!("PIN {:04}", self.pin)
+                    } else {
+                        "PIN ••••".to_owned()
+                    };
+                    let hint = if self.show_pin { "Click to hide" } else { "Click to reveal" };
+                    let resp = ui
+                        .add(
+                            egui::Label::new(egui::RichText::new(pin_text).heading())
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(hint);
+                    if resp.clicked() {
+                        self.show_pin = !self.show_pin;
+                    }
+                }
+            } else {
+                ui.label("Not connected.");
+                if ui.button("Start").clicked() {
+                    self.start(ctx);
+                }
+            }
+
+            ui.add_space(6.0);
+            ui.label(format!("Status: {}", self.status.lock().unwrap()));
+
+            let recent = self.recent.lock().unwrap().clone();
+            if !recent.is_empty() {
+                ui.add_space(6.0);
+                ui.separator();
+                ui.label("Recent connections");
+                for conn in recent.iter().take(3) {
+                    ui.horizontal(|ui| {
+                        device_icon(ui, DeviceKind::from_tag(&conn.platform), 18.0);
+                        ui.label(format!("{} · {}", platform_display(&conn.platform), conn.peer));
+                    });
+                }
+            }
+        });
     }
 
     /// The Universal navbar row: product logo + "Geek Apps" switcher, an Actions
@@ -643,20 +653,18 @@ impl eframe::App for HostApp {
 
                 ui.vertical_centered(|ui| {
                     if self.show_step2 {
-                        self.step2_phone(ctx, ui);
+                        self.step2_connect(ctx, ui);
                         ui.add_space(8.0);
-                        ui.label(format!("Status: {}", self.status.lock().unwrap()));
-                        ui.add_space(8.0);
-                        if ui.button("Back to Wi-Fi step").clicked() {
+                        if ui.button("Back").clicked() {
                             self.show_step2 = false;
                         }
                     } else {
-                        self.step1_wifi(ctx, ui);
+                        self.step1_getapp(ctx, ui);
                         ui.add_space(14.0);
                         // Confirm Step 1 → reveal Step 2.
                         let next = ui.add(
                             egui::Button::new(
-                                egui::RichText::new("✔  I'm connected — next")
+                                egui::RichText::new("✔  I have the app — next")
                                     .color(egui::Color32::WHITE)
                                     .size(15.0),
                             )
@@ -669,24 +677,6 @@ impl eframe::App for HostApp {
                         }
                     }
                 });
-
-                // Recent connections.
-                let recent = self.recent.lock().unwrap().clone();
-                if !recent.is_empty() {
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.label("Recent connections");
-                    for conn in &recent {
-                        ui.horizontal(|ui| {
-                            device_icon(ui, DeviceKind::from_tag(&conn.platform), 20.0);
-                            ui.label(format!(
-                                "{} · {}",
-                                platform_display(&conn.platform),
-                                conn.peer
-                            ));
-                        });
-                    }
-                }
             });
         });
     }

@@ -22,6 +22,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Step 1 "Get the app" QR: an https App Link to the suite page. With
+                 the app installed (and assetlinks.json hosted on the domain) this
+                 opens the app; otherwise the browser shows the download page. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                      android:host="opensource.unisim.co.uk"
+                      android:pathPrefix="/screens" />
+            </intent-filter>
+            <!-- Custom scheme used by the combined connect payload. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="unisimscreens" />
+            </intent-filter>
         </activity>
 
         <!-- Portrait QR scanner (zxing's default capture screen is landscape). -->
