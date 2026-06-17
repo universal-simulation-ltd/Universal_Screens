@@ -1261,6 +1261,7 @@ dependencies = [
  "extender-protocol",
  "image",
  "qrcode",
+ "serde",
  "windows 0.62.2",
 ]
 

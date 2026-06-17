@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
-use extender_protocol::{self as protocol, Button, ClientHello, Input, Message};
+use extender_protocol::{self as protocol, Button, ClientHello, ClientPlatform, Input, Message};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_HWHEEL,
@@ -48,8 +48,8 @@ const FOCUS_SETTLE: Duration = Duration::from_millis(250);
 pub(crate) enum HostEvent {
     /// Listening and idle (no client).
     Waiting,
-    /// A client connected (its address).
-    Connected(String),
+    /// A client connected: its address and the device platform from its hello.
+    Connected { peer: String, platform: ClientPlatform },
     /// The client disconnected (its address).
     Disconnected(String),
     /// A non-fatal accept error.
@@ -75,7 +75,9 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stop = AtomicBool::new(false);
     serve_loop(&listener, &stop, &|event| match event {
         HostEvent::Waiting => println!("waiting for a client to connect..."),
-        HostEvent::Connected(peer) => println!("client connected: {peer}"),
+        HostEvent::Connected { peer, platform } => {
+            println!("client connected: {peer} ({platform:?})");
+        }
         HostEvent::Disconnected(peer) => println!("client {peer} disconnected"),
         HostEvent::Error(msg) => eprintln!("{msg}"),
     });
@@ -97,15 +99,15 @@ pub(crate) fn serve_loop(
             Ok((mut stream, peer_addr)) => {
                 let _ = stream.set_nonblocking(false); // blocking reads for the session
                 let peer = peer_addr.to_string();
-                on_event(HostEvent::Connected(peer.clone()));
-                // Handshake: the client's first message is its hello (logged only;
-                // this host always serves input-only regardless of requested mode).
-                if read_hello(&mut stream, &peer).is_some() {
+                // Handshake first: its hello carries the device platform. (The host
+                // always serves input-only regardless of the requested mode.)
+                if let Some(platform) = read_hello(&mut stream, &peer) {
+                    on_event(HostEvent::Connected { peer: peer.clone(), platform });
                     if let Err(e) = serve(stream) {
                         on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
                     }
+                    on_event(HostEvent::Disconnected(peer));
                 }
-                on_event(HostEvent::Disconnected(peer));
                 on_event(HostEvent::Waiting);
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -117,10 +119,11 @@ pub(crate) fn serve_loop(
 }
 
 /// Read and log the client's [`ClientHello`], tolerating a protocol-version skew
-/// the same way the macOS host does. Returns `None` (and logs) on a missing or
-/// garbled hello, so the caller skips this client. The advertised size is
-/// irrelevant here — without capture there's no display geometry to size.
-fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<()> {
+/// the same way the macOS host does. Returns the client's [`ClientPlatform`], or
+/// `None` (and logs) on a missing or garbled hello so the caller skips this
+/// client. The advertised size is irrelevant here — without capture there's no
+/// display geometry to size.
+fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<ClientPlatform> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -136,10 +139,10 @@ fn read_hello(stream: &mut TcpStream, peer: &str) -> Option<()> {
         );
     }
     println!(
-        "client {peer} hello: {}x{}, mode {:?}; serving input-only (no video)",
-        hello.width, hello.height, hello.capture_mode
+        "client {peer} hello: {}x{}, mode {:?}, platform {:?}; serving input-only (no video)",
+        hello.width, hello.height, hello.capture_mode, hello.platform
     );
-    Some(())
+    Some(hello.platform)
 }
 
 /// A request to the snapshot thread (which owns the downstream writer).
