@@ -572,7 +572,7 @@ private fun PreviewTile(bitmap: ImageBitmap?, dim: Boolean, label: String) {
     } else {
         Box(mod, contentAlignment = Alignment.Center) {
             Image(
-                painter = painterResource(R.drawable.ic_screenextender),
+                painter = painterResource(R.drawable.app_icon),
                 contentDescription = "Universal Screens",
                 modifier = Modifier.size(40.dp),
                 alpha = 0.3f,
