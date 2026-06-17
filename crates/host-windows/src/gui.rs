@@ -13,10 +13,11 @@ use eframe::egui;
 use extender_protocol::ClientPlatform;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde::{Deserialize, Serialize};
-use windows::Win32::Foundation::{COLORREF, HWND};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
 };
+use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, SendMessageW, WM_SETICON};
 
 use crate::{serve_loop, HostEvent};
 
@@ -26,6 +27,17 @@ const BASE_PORT: u16 = 9000;
 const BRAND: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x55, 0x04);
 /// How many recent connections to remember.
 const RECENT_MAX: usize = 8;
+/// The open-source suite page this app belongs to (navbar "Geek Apps" link).
+const OPENSOURCE_URL: &str = "https://opensource.unisim.co.uk/screens";
+/// This app's version, surfaced in the changelog popup.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Short "what's new", newest first, shown under the UNI·SIM mark.
+const CHANGELOG: &[&str] = &[
+    "• Universal navbar: apps, actions & profile menus",
+    "• Pairing PIN embedded in the connection QR",
+    "• Title bar & light bar follow the app theme",
+    "• Slide preview, deck scan & window picker",
+];
 
 /// Launch the host window. Detaches the inherited console so a double-click (or
 /// `cargo run` with no args) doesn't leave a stray terminal behind.
@@ -33,14 +45,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     unsafe {
         let _ = windows::Win32::System::Console::FreeConsole();
     }
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([440.0, 720.0])
-            .with_title("Screen Extender — Host"),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([440.0, 720.0])
+        // Keep a real title so the taskbar button / hover shows the name; the
+        // caption *text* is then painted the same colour as the caption fill (in
+        // set_title_bar) so it's invisible in the header, and the small caption
+        // icon is blanked in update() — leaving just clean window chrome.
+        .with_title("Universal Screens");
+    if let Some(rgba) = crate::qr::app_icon_rgba(64) {
+        viewport = viewport.with_icon(egui::IconData { rgba, width: 64, height: 64 });
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
-        "Screen Extender Host",
+        "Universal Screens Host",
         options,
         Box::new(|cc| {
             let mut app = HostApp::new(cc);
@@ -79,6 +96,22 @@ struct HostApp {
     recent: Arc<Mutex<Vec<RecentConn>>>,
     address: Option<String>,
     qr: Option<egui::TextureHandle>,
+    /// The UNI·SIM mark, lazily uploaded for the navbar changelog icon + QR.
+    logo: Option<egui::TextureHandle>,
+    /// The Universal Screens app icon, lazily uploaded for the navbar product logo.
+    app_logo: Option<egui::TextureHandle>,
+    /// This PC's current Wi-Fi network (for the "join this network" step), if any.
+    wifi: Option<crate::wifi::WifiInfo>,
+    /// The Wi-Fi join QR, lazily built from `wifi`.
+    wifi_qr: Option<egui::TextureHandle>,
+    /// Reveal the Wi-Fi password (toggled by clicking the masked value).
+    wifi_show_password: bool,
+    /// Hide the Wi-Fi QR and show the details for manual entry instead.
+    wifi_manual: bool,
+    /// Wizard position: false = step 1 (Wi-Fi), true = step 2 (connect phone).
+    show_step2: bool,
+    /// Reveal the pairing PIN (toggled by clicking it); it's in the QR regardless.
+    show_pin: bool,
 }
 
 impl HostApp {
@@ -106,6 +139,14 @@ impl HostApp {
             recent: Arc::new(Mutex::new(recent)),
             address: None,
             qr: None,
+            logo: None,
+            app_logo: None,
+            wifi: crate::wifi::current_wifi(),
+            wifi_qr: None,
+            wifi_show_password: false,
+            wifi_manual: false,
+            show_step2: false,
+            show_pin: false,
         }
     }
 
@@ -176,6 +217,293 @@ impl HostApp {
         self.address = None;
         self.qr = None;
     }
+
+    /// Step 1 — get the phone onto the same network as this PC: a Wi-Fi "join"
+    /// QR, plus the network name and a reveal-on-click password (or a manual
+    /// fallback). Skipped with a note when this PC isn't on Wi-Fi.
+    fn step1_wifi(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        step_header(ui, "Step 1", "Connect to the same Wi-Fi");
+        let Some(wifi) = &self.wifi else {
+            ui.label("This PC isn't on Wi-Fi.");
+            ui.small("Connect your phone to the same network or router as this PC.");
+            return;
+        };
+        // Build the join QR lazily from the standard WIFI: payload.
+        if self.wifi_qr.is_none() {
+            if let Some(image) = crate::qr::branded_qr(&wifi.qr_payload()) {
+                self.wifi_qr =
+                    Some(ctx.load_texture("wifi_qr", image, egui::TextureOptions::LINEAR));
+            }
+        }
+        if !self.wifi_manual {
+            if let Some(qr) = &self.wifi_qr {
+                ui.add(
+                    egui::Image::from_texture(egui::load::SizedTexture::new(
+                        qr.id(),
+                        egui::vec2(190.0, 190.0),
+                    ))
+                    .rounding(14.0),
+                );
+            }
+            ui.small("Scan to join this PC's Wi-Fi.");
+            ui.add_space(4.0);
+        }
+        ui.label(egui::RichText::new(format!("Network: {}", wifi.ssid)).strong());
+        if let Some(masked) = wifi.masked_password() {
+            let shown = if self.wifi_show_password {
+                wifi.password.clone().unwrap_or_default()
+            } else {
+                masked
+            };
+            let hint = if self.wifi_show_password { "Click to hide" } else { "Click to reveal" };
+            let resp = ui
+                .add(egui::Label::new(format!("Password: {shown}")).sense(egui::Sense::click()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(hint);
+            if resp.clicked() {
+                self.wifi_show_password = !self.wifi_show_password;
+            }
+        } else {
+            ui.label("Password: (open network)");
+        }
+        let mut manual = self.wifi_manual;
+        if ui.checkbox(&mut manual, "Enter Wi-Fi details manually").changed() {
+            self.wifi_manual = manual;
+            if manual {
+                self.wifi_show_password = true; // reveal so it can be typed in
+            }
+        }
+    }
+
+    /// Step 2 — point the phone's Universal Screens app at this host: a QR carrying
+    /// the address + PIN, or the address/PIN to type.
+    fn step2_phone(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        step_header(ui, "Step 2", "Connect your phone");
+        ui.label("Open Universal Screens on your phone and scan this code.");
+        ui.add_space(8.0);
+        if self.running {
+            if let Some(address) = self.address.clone() {
+                if self.qr.is_none() {
+                    // The QR carries the address + PIN so a scan auto-pairs.
+                    let payload = format!("{address}?pin={:04}", self.pin);
+                    if let Some(image) = crate::qr::branded_qr(&payload) {
+                        self.qr =
+                            Some(ctx.load_texture("qr", image, egui::TextureOptions::LINEAR));
+                    }
+                }
+                if let Some(qr) = &self.qr {
+                    ui.add(
+                        egui::Image::from_texture(egui::load::SizedTexture::new(
+                            qr.id(),
+                            egui::vec2(190.0, 190.0),
+                        ))
+                        .rounding(14.0),
+                    );
+                }
+                ui.add_space(6.0);
+                ui.small("…or type the address and PIN:");
+                ui.heading(&address);
+                // PIN masked until clicked (it's baked into the QR regardless).
+                let pin_text =
+                    if self.show_pin { format!("PIN {:04}", self.pin) } else { "PIN ••••".to_owned() };
+                let hint = if self.show_pin { "Click to hide" } else { "Click to reveal" };
+                let resp = ui
+                    .add(
+                        egui::Label::new(egui::RichText::new(pin_text).heading())
+                            .sense(egui::Sense::click()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(hint);
+                if resp.clicked() {
+                    self.show_pin = !self.show_pin;
+                }
+            }
+        } else {
+            ui.add_space(20.0);
+            ui.label("Not connected.");
+            if ui.button("Start").clicked() {
+                self.start(ctx);
+            }
+        }
+    }
+
+    /// The Universal navbar row: product logo + "Geek Apps" switcher, an Actions
+    /// menu (host controls), then a Profile menu (theme/language) and the UNI·SIM
+    /// mark with a changelog popup. Mirrors the suite's web navbar layout.
+    fn show_navbar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        if self.logo.is_none() {
+            if let Some(img) = crate::qr::logo_image(48) {
+                self.logo =
+                    Some(ctx.load_texture("unisim-logo", img, egui::TextureOptions::LINEAR));
+            }
+        }
+        if self.app_logo.is_none() {
+            if let Some(img) = crate::qr::app_icon_image(64) {
+                self.app_logo =
+                    Some(ctx.load_texture("app-logo", img, egui::TextureOptions::LINEAR));
+            }
+        }
+        let logo = self.logo.as_ref().map(eframe::egui::TextureHandle::id);
+        let app_logo = self.app_logo.as_ref().map(eframe::egui::TextureHandle::id);
+        let dark = ui.visuals().dark_mode;
+        style_navbar(ui, dark);
+
+        egui::menu::bar(ui, |ui| {
+            // Left: product mark + "Universal Screens" → the Geek Apps switcher.
+            if let Some(id) = app_logo {
+                ui.add(egui::Image::from_texture(egui::load::SizedTexture::new(
+                    id,
+                    egui::vec2(24.0, 24.0),
+                )));
+            }
+            ui.menu_button(egui::RichText::new("Universal Screens").strong().size(15.0), |ui| {
+                ui.label(egui::RichText::new("Geek Apps").strong());
+                ui.label(egui::RichText::new("UNI·SIM open-source").weak().small());
+                ui.separator();
+                let _ = ui.selectable_label(true, "Universal Screens — this app");
+                ui.add_enabled(false, egui::Button::new("Universal QR  (soon)"));
+                ui.add_enabled(false, egui::Button::new("More apps  (soon)"));
+                ui.separator();
+                ui.hyperlink_to("Browse the suite ↗", OPENSOURCE_URL);
+            });
+
+            sep_dot(ui, dark);
+
+            // Actions: host controls (moved out of the old "More options").
+            ui.menu_button("Actions", |ui| {
+                if self.running {
+                    if ui.button("⏹  Stop hosting").clicked() {
+                        self.stop();
+                        ui.close_menu();
+                    }
+                } else if ui.button("▶  Start hosting").clicked() {
+                    self.start(ctx);
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("🔁  Regenerate PIN").clicked() {
+                    self.pin = gen_pin();
+                    if self.running {
+                        self.start(ctx); // restart so the new PIN is enforced
+                    }
+                    ui.close_menu();
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Port");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.port)
+                            .hint_text("auto")
+                            .desired_width(56.0),
+                    );
+                    if ui.button("Apply").clicked() {
+                        self.start(ctx);
+                    }
+                });
+                ui.small("Blank = first free port.");
+                ui.separator();
+                let has_recent = !self.recent.lock().unwrap().is_empty();
+                if ui
+                    .add_enabled(has_recent, egui::Button::new("🗑  Clear recent connections"))
+                    .clicked()
+                {
+                    self.recent.lock().unwrap().clear();
+                    ui.close_menu();
+                }
+            });
+
+            // Right side: Profile (settings) and the UNI·SIM changelog mark.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // UNI·SIM mark → "what's new" popup.
+                let mark = if let Some(id) = logo {
+                    ui.add(
+                        egui::ImageButton::new(egui::load::SizedTexture::new(
+                            id,
+                            egui::vec2(20.0, 20.0),
+                        ))
+                        .frame(false),
+                    )
+                } else {
+                    ui.button("UNI·SIM")
+                }
+                .on_hover_text("What's new");
+                let popup_id = ui.make_persistent_id("changelog_popup");
+                if mark.clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(popup_id));
+                }
+                egui::popup::popup_below_widget(
+                    ui,
+                    popup_id,
+                    &mark,
+                    egui::PopupCloseBehavior::CloseOnClickOutside,
+                    |ui| {
+                        ui.set_min_width(230.0);
+                        ui.label(
+                            egui::RichText::new(format!("Universal Screens v{APP_VERSION}")).strong(),
+                        );
+                        ui.separator();
+                        for line in CHANGELOG {
+                            ui.label(*line);
+                        }
+                    },
+                );
+
+                sep_dot(ui, dark);
+
+                // Security: a lock that opens an honest summary of what is and
+                // isn't protected.
+                let lock = ui.button("🔒").on_hover_text("Security");
+                let lock_popup = ui.make_persistent_id("security_popup");
+                if lock.clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(lock_popup));
+                }
+                egui::popup::popup_below_widget(
+                    ui,
+                    lock_popup,
+                    &lock,
+                    egui::PopupCloseBehavior::CloseOnClickOutside,
+                    |ui| {
+                        ui.set_max_width(320.0);
+                        ui.label(egui::RichText::new("🔒  Security").strong().size(15.0));
+                        ui.separator();
+                        ui.label(egui::RichText::new("What's protected").strong());
+                        ui.label("• A 4-digit pairing PIN is required to connect — scanning the QR fills it in automatically.");
+                        ui.label("• The host only accepts connections while this window is open; close it to stop.");
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Not fully locked down").strong());
+                        ui.label("• Traffic is sent unencrypted over your local network (no TLS). Only use it on networks you trust.");
+                        ui.label("• The PIN is a basic gate, not encryption: anyone on the same network who has the PIN (or sees the QR) can control this PC.");
+                        ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no login or per-device approval.");
+                        ui.label("• The host listens on all network interfaces on its port.");
+                        ui.add_space(6.0);
+                        ui.small("Tip: regenerate the PIN (Actions menu) after showing your screen to others.");
+                    },
+                );
+
+                sep_dot(ui, dark);
+                ui.menu_button("Profile", |ui| {
+                    // Dark mode reflects the effective theme and pins it once toggled.
+                    let mut dark = self.dark_mode.unwrap_or(ui.visuals().dark_mode);
+                    if ui.checkbox(&mut dark, "🌙  Dark mode").changed() {
+                        self.dark_mode = Some(dark);
+                    }
+                    if ui.button("Follow system theme").clicked() {
+                        self.dark_mode = None;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    ui.menu_button("🌐  Language", |ui| {
+                        let _ = ui.selectable_label(true, "English");
+                        ui.add_enabled(false, egui::Button::new("More coming soon"));
+                    });
+                    ui.separator();
+                    let mut dont = !self.auto_connect;
+                    if ui.checkbox(&mut dont, "Don't connect automatically").changed() {
+                        self.auto_connect = !dont;
+                    }
+                });
+            });
+        });
+    }
 }
 
 impl eframe::App for HostApp {
@@ -203,145 +531,108 @@ impl eframe::App for HostApp {
 
         // Colour the title bar to match the app (not the OS), when the theme changes.
         let dark = ctx.style().visuals.dark_mode;
-        if self.caption_dark != Some(dark) {
-            self.caption_dark = Some(dark);
-            if let Some(hwnd) = window_hwnd(frame) {
+        if let Some(hwnd) = window_hwnd(frame) {
+            if self.caption_dark != Some(dark) {
+                self.caption_dark = Some(dark);
                 set_title_bar(hwnd, ctx.style().visuals.panel_fill, dark);
             }
+            // Re-assert the transparent caption (small) icon every frame: winit/
+            // eframe re-applies the window icon (which feeds the taskbar) after our
+            // first frame, which would otherwise restore the icon in the title bar.
+            strip_title_chrome(hwnd);
         }
 
         // The UNI·SIM brand strip ("light bar") is painted on a foreground layer
         // across the very top (see paint_brand_strip) — no panel, so no seam line.
         paint_brand_strip(ctx);
 
+        // The Universal navbar — mirrors the @unisim/sdk web navbar so this host
+        // and the opensource.unisim.co.uk/screens page feel like one product:
+        // white bar, ~56px tall, with a slate bottom border.
+        let border = if dark {
+            egui::Color32::from_rgb(0x33, 0x3a, 0x46)
+        } else {
+            egui::Color32::from_rgb(0xe2, 0xe8, 0xf0) // slate-200
+        };
+        egui::TopBottomPanel::top("navbar")
+            .exact_height(56.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(ctx.style().visuals.panel_fill)
+                    .inner_margin(egui::Margin { left: 16.0, right: 12.0, top: 6.0, bottom: 6.0 })
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                self.show_navbar(ctx, ui);
+                // A 1px slate bottom border spanning the full width, like the web bar.
+                let y = ui.max_rect().bottom() + 6.0;
+                let screen = ctx.screen_rect();
+                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0, border));
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(4.0); // clear the brand strip
-            // This PC: a centred OS icon; click it to reveal the machine name.
-            ui.vertical_centered(|ui| {
-                let resp = device_icon(ui, DeviceKind::Laptop, 28.0)
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text("Click to show this PC's name");
-                if resp.clicked() {
-                    self.show_pc_info = !self.show_pc_info;
-                }
-                if self.show_pc_info {
-                    ui.label(format!("This PC: Windows · {}", host_name()));
-                }
-            });
-            ui.add_space(6.0);
-
-            ui.vertical_centered(|ui| {
-                ui.add_space(4.0);
-                ui.heading("Connect your phone");
-                ui.label("Open Screen Extender on your phone and scan this code.");
-                ui.add_space(10.0);
-
-                if self.running {
-                    if let Some(address) = self.address.clone() {
-                        if self.qr.is_none() {
-                            // The QR carries the address + PIN so a scan auto-pairs.
-                            let payload = format!("{address}?pin={:04}", self.pin);
-                            if let Some(image) = crate::qr::branded_qr(&payload) {
-                                self.qr =
-                                    Some(ctx.load_texture("qr", image, egui::TextureOptions::LINEAR));
-                            }
-                        }
-                        if let Some(qr) = &self.qr {
-                            ui.add(
-                                egui::Image::from_texture(egui::load::SizedTexture::new(
-                                    qr.id(),
-                                    egui::vec2(232.0, 232.0),
-                                ))
-                                .rounding(16.0),
-                            );
-                        }
-                        ui.add_space(6.0);
-                        ui.label("…or type the address and PIN:");
-                        ui.heading(&address);
-                        ui.heading(format!("PIN {:04}", self.pin));
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                // This PC: a centred OS icon; click it to reveal the machine name.
+                ui.vertical_centered(|ui| {
+                    let resp = device_icon(ui, DeviceKind::Laptop, 28.0)
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("Click to show this PC's name");
+                    if resp.clicked() {
+                        self.show_pc_info = !self.show_pc_info;
                     }
-                } else {
-                    ui.add_space(30.0);
-                    ui.label("Not connected.");
-                    if ui.button("Start").clicked() {
-                        self.start(ctx);
-                    }
-                }
-                ui.add_space(8.0);
-                ui.label(format!("Status: {}", self.status.lock().unwrap()));
-            });
-
-            // Recent connections.
-            let recent = self.recent.lock().unwrap().clone();
-            if !recent.is_empty() {
-                ui.add_space(10.0);
-                ui.separator();
-                ui.label("Recent connections");
-                for conn in &recent {
-                    ui.horizontal(|ui| {
-                        device_icon(ui, DeviceKind::from_tag(&conn.platform), 20.0);
-                        ui.label(format!("{} · {}", platform_display(&conn.platform), conn.peer));
-                    });
-                }
-            }
-
-            ui.add_space(12.0);
-            egui::CollapsingHeader::new("More options")
-                .default_open(false)
-                .show(ui, |ui| {
-                    let mut dont_auto = !self.auto_connect;
-                    if ui
-                        .checkbox(&mut dont_auto, "Don't connect automatically on launch")
-                        .changed()
-                    {
-                        self.auto_connect = !dont_auto;
-                    }
-
-                    // Dark mode: defaults to following the OS; the checkbox shows
-                    // the effective state and pins it once toggled.
-                    let mut dark = self.dark_mode.unwrap_or(ui.visuals().dark_mode);
-                    if ui.checkbox(&mut dark, "Dark mode").changed() {
-                        self.dark_mode = Some(dark);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label("Port:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.port)
-                                .hint_text("auto")
-                                .desired_width(70.0),
-                        );
-                        if ui.button("Apply").clicked() {
-                            self.start(ctx);
-                        }
-                    });
-                    ui.small("Leave blank to use the first free port automatically.");
-
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Pairing PIN: {:04}", self.pin));
-                        if ui.button("Regenerate").clicked() {
-                            self.pin = gen_pin();
-                            if self.running {
-                                self.start(ctx); // restart so the new PIN is enforced
-                            }
-                        }
-                    });
-                    ui.small("Clients must enter this PIN (or scan the QR) to connect.");
-
-                    ui.add_space(4.0);
-                    if self.running {
-                        if ui.button("Stop").clicked() {
-                            self.stop();
-                        }
-                    } else if ui.button("Start").clicked() {
-                        self.start(ctx);
-                    }
-                    if !self.recent.lock().unwrap().is_empty()
-                        && ui.button("Clear recent connections").clicked()
-                    {
-                        self.recent.lock().unwrap().clear();
+                    if self.show_pc_info {
+                        ui.label(format!("This PC: Windows · {}", host_name()));
                     }
                 });
+
+                ui.vertical_centered(|ui| {
+                    if self.show_step2 {
+                        self.step2_phone(ctx, ui);
+                        ui.add_space(8.0);
+                        ui.label(format!("Status: {}", self.status.lock().unwrap()));
+                        ui.add_space(8.0);
+                        if ui.button("Back to Wi-Fi step").clicked() {
+                            self.show_step2 = false;
+                        }
+                    } else {
+                        self.step1_wifi(ctx, ui);
+                        ui.add_space(14.0);
+                        // Confirm Step 1 → reveal Step 2.
+                        let next = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("✔  I'm connected — next")
+                                    .color(egui::Color32::WHITE)
+                                    .size(15.0),
+                            )
+                            .fill(BRAND)
+                            .min_size(egui::vec2(220.0, 36.0))
+                            .rounding(10.0),
+                        );
+                        if next.clicked() {
+                            self.show_step2 = true;
+                        }
+                    }
+                });
+
+                // Recent connections.
+                let recent = self.recent.lock().unwrap().clone();
+                if !recent.is_empty() {
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.label("Recent connections");
+                    for conn in &recent {
+                        ui.horizontal(|ui| {
+                            device_icon(ui, DeviceKind::from_tag(&conn.platform), 20.0);
+                            ui.label(format!(
+                                "{} · {}",
+                                platform_display(&conn.platform),
+                                conn.peer
+                            ));
+                        });
+                    }
+                }
+            });
         });
     }
 }
@@ -388,6 +679,69 @@ fn paint_brand_strip(ctx: &egui::Context) {
     ctx.request_repaint(); // keep the pulse animating
 }
 
+/// A "STEP N" eyebrow (brand orange) + title heading for the connect flow.
+fn step_header(ui: &mut egui::Ui, step: &str, title: &str) {
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(step.to_uppercase()).color(BRAND).strong().size(12.0));
+    ui.heading(title);
+    ui.add_space(6.0);
+}
+
+/// Style the navbar like the web `UniversalNavBar`: flat text "links" (slate, not
+/// boxed buttons) with a subtle rounded brand-tinted hover, and rounded dropdowns.
+fn style_navbar(ui: &mut egui::Ui, dark: bool) {
+    let link = if dark {
+        egui::Color32::from_rgb(0xcb, 0xd5, 0xe1) // slate-300
+    } else {
+        egui::Color32::from_rgb(0x37, 0x41, 0x51) // slate-700
+    };
+    let hover = if dark {
+        egui::Color32::from_rgb(0xf8, 0xfa, 0xfc)
+    } else {
+        egui::Color32::from_rgb(0x0f, 0x17, 0x2a) // slate-900
+    };
+    let tint = egui::Color32::from_rgba_unmultiplied(
+        BRAND.r(),
+        BRAND.g(),
+        BRAND.b(),
+        if dark { 46 } else { 26 },
+    );
+    let round = egui::Rounding::same(8.0);
+
+    let s = ui.style_mut();
+    s.spacing.button_padding = egui::vec2(10.0, 6.0);
+    s.spacing.item_spacing.x = 6.0;
+    s.visuals.menu_rounding = egui::Rounding::same(10.0);
+    if let Some(font) = s.text_styles.get_mut(&egui::TextStyle::Button) {
+        font.size = 14.0;
+    }
+
+    let w = &mut s.visuals.widgets;
+    for v in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+        v.bg_stroke = egui::Stroke::NONE;
+        v.rounding = round;
+        v.expansion = 0.0;
+    }
+    w.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    w.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    w.inactive.fg_stroke.color = link;
+    for v in [&mut w.hovered, &mut w.active, &mut w.open] {
+        v.weak_bg_fill = tint;
+        v.bg_fill = tint;
+        v.fg_stroke.color = hover;
+    }
+}
+
+/// A muted "·" separator between navbar items, matching the web bar.
+fn sep_dot(ui: &mut egui::Ui, dark: bool) {
+    let c = if dark {
+        egui::Color32::from_rgb(0x47, 0x55, 0x69)
+    } else {
+        egui::Color32::from_rgb(0xcb, 0xd5, 0xe1) // slate-300
+    };
+    ui.label(egui::RichText::new("·").color(c).size(16.0));
+}
+
 /// The Win32 `HWND` behind the eframe window, if available.
 fn window_hwnd(frame: &eframe::Frame) -> Option<HWND> {
     match frame.window_handle().ok()?.as_raw() {
@@ -417,6 +771,37 @@ fn set_title_bar(hwnd: HWND, bg: egui::Color32, dark: bool) {
             std::ptr::addr_of!(caption).cast(),
             std::mem::size_of::<COLORREF>() as u32,
         );
+        // Paint the caption *text* the same colour as the caption fill, so the
+        // window title is invisible in the header but still set (the taskbar
+        // button / hover shows the name).
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR,
+            std::ptr::addr_of!(caption).cast(),
+            std::mem::size_of::<COLORREF>() as u32,
+        );
+    }
+}
+
+/// Blank the *caption* (small) icon while leaving the big icon — which the
+/// taskbar and Alt-Tab use — as the UNI·SIM logo set via `with_icon`. On Windows
+/// 11's DWM caption, clearing the icon to null reveals the system's generic icon,
+/// so we set an explicit 1×1 fully-transparent icon (created once) for ICON_SMALL.
+/// Best-effort; quietly ignored if creation fails.
+fn strip_title_chrome(hwnd: HWND) {
+    static TRANSPARENT_ICON: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let icon = *TRANSPARENT_ICON.get_or_init(|| unsafe {
+        // Monochrome 1×1: AND mask = 1 (transparent), XOR = 0. Rows are
+        // DWORD-aligned, so one byte of data padded to 4.
+        let and_mask = [0xFFu8; 4];
+        let xor_mask = [0x00u8; 4];
+        CreateIcon(None, 1, 1, 1, 1, and_mask.as_ptr(), xor_mask.as_ptr())
+            .map(|h| h.0 as usize)
+            .unwrap_or(0)
+    });
+    unsafe {
+        // ICON_SMALL (0) → transparent; ICON_BIG keeps the taskbar logo.
+        let _ = SendMessageW(hwnd, WM_SETICON, Some(WPARAM(0)), Some(LPARAM(icon as isize)));
     }
 }
 

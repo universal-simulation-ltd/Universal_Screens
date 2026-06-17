@@ -1,4 +1,4 @@
-# Launch the Universal ScreenExtender client on Windows.
+# Launch the Universal Screens client on Windows.
 # This is a Rust workspace, not a web app — see docs/WINDOWS-CLIENT.md.
 #
 # Client = the Windows laptop that acts as a second screen for a Mac. The Mac
@@ -34,7 +34,7 @@ try {
         exit 2
     }
 
-    Write-Host "Universal ScreenExtender (client) -> connecting to $($args[0])" -ForegroundColor Green
+    Write-Host "Universal Screens (client) -> connecting to $($args[0])" -ForegroundColor Green
     cargo run --release -p extender-client -- @args
 } finally {
     Pop-Location

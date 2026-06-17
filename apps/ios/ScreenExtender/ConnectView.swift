@@ -16,7 +16,7 @@ struct ConnectView: View {
     var body: some View {
         List {
             Section {
-                Text("Screen Extender").font(.largeTitle).bold()
+                Text("Universal Screens").font(.largeTitle).bold()
                 Text("Presentation clicker").foregroundStyle(.secondary)
             }
 

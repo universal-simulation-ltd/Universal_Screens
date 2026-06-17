@@ -9,6 +9,7 @@
 mod gui;
 mod qr;
 mod snapshot;
+mod wifi;
 mod winlist;
 
 use std::io;

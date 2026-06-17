@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Universal ScreenExtender host on macOS.
+# Launch the Universal Screens host on macOS.
 # This is a Rust workspace, not a web app — see docs/WINDOWS-CLIENT.md for the
 # Windows-side runbook.
 #
@@ -32,7 +32,7 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Universal ScreenExtender (host) → listening on 0.0.0.0:9000"
+echo "Universal Screens (host) → listening on 0.0.0.0:9000"
 echo "Find this Mac's LAN IP with: ipconfig getifaddr en0   (or en1 for Wi-Fi)"
 echo "Then on the client machine, run: cargo run --release -p extender-client -- <mac-ip>:9000"
 echo ""

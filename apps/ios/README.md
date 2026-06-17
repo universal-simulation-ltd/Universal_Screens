@@ -1,4 +1,4 @@
-# Screen Extender — iOS app (scaffold)
+# Universal Screens — iOS app (scaffold)
 
 A SwiftUI client that connects to an `extender-host` as a **presentation
 clicker**, mirroring the Android app. It drives the shared Rust core through the C

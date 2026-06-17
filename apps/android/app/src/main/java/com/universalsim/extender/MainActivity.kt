@@ -152,7 +152,7 @@ fun ConnectScreen(status: String, onConnect: (addr: String, mode: Mode, pin: Int
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Screen Extender", style = MaterialTheme.typography.headlineMedium)
+        Text("Universal Screens", style = MaterialTheme.typography.headlineMedium)
 
         if (visible.isNotEmpty()) {
             Text("Saved hosts", style = MaterialTheme.typography.titleMedium)
@@ -380,7 +380,7 @@ private fun BigButton(label: String, onClick: () -> Unit) {
 }
 
 /** A 150dp-wide slide thumbnail above a nav button. When there's no slide (the
- *  ends of the deck, or before a scan) it shows the ScreenExtender icon as a
+ *  ends of the deck, or before a scan) it shows the Universal Screens icon as a
  *  placeholder. [dim] fades the previous-slide preview so the next one stands out. */
 @Composable
 private fun PreviewTile(bitmap: ImageBitmap?, dim: Boolean, label: String) {
@@ -397,7 +397,7 @@ private fun PreviewTile(bitmap: ImageBitmap?, dim: Boolean, label: String) {
         Box(mod, contentAlignment = Alignment.Center) {
             Image(
                 painter = painterResource(R.drawable.ic_screenextender),
-                contentDescription = "Screen Extender",
+                contentDescription = "Universal Screens",
                 modifier = Modifier.size(40.dp),
                 alpha = 0.3f,
             )

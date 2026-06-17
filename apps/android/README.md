@@ -1,4 +1,4 @@
-# Screen Extender — Android app
+# Universal Screens — Android app
 
 A single app that connects to a `extender-host` and works in three modes:
 

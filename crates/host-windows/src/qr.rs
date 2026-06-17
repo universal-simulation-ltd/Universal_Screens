@@ -11,7 +11,12 @@ use eframe::egui;
 use image::{imageops, Rgba, RgbaImage};
 
 /// The UNI·SIM mark (globe + orbiting stars, 256×256), embedded at build time.
+/// Used for the suite changelog mark and the centre of the connection QR.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/unisim-icon.png");
+/// The Universal Screens app icon (laptop + phone, 256×256). See
+/// `scripts/make-app-icon.py`. Used for the window/taskbar icon and the navbar
+/// product logo.
+const APP_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon.png");
 
 /// Build a black-on-white QR of `text` with the UNI·SIM logo centred, as an
 /// `egui::ColorImage`. `None` if the text won't fit in a QR code.
@@ -46,6 +51,40 @@ pub fn branded_qr(text: &str) -> Option<egui::ColorImage> {
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [dim as usize, dim as usize],
         &img.into_raw(),
+    ))
+}
+
+/// The UNI·SIM mark as an `egui::ColorImage` (square, `size` px), for the suite
+/// changelog mark. `None` if the embedded PNG can't be decoded.
+pub fn logo_image(size: u32) -> Option<egui::ColorImage> {
+    decode_square(LOGO_PNG, size)
+}
+
+/// The Universal Screens app icon as an `egui::ColorImage` (square, `size` px), for
+/// the navbar product logo. `None` if the embedded PNG can't be decoded.
+pub fn app_icon_image(size: u32) -> Option<egui::ColorImage> {
+    decode_square(APP_ICON_PNG, size)
+}
+
+/// The Universal Screens app icon as raw RGBA bytes (square, `size` px), for the
+/// window/taskbar icon. `None` if the embedded PNG can't be decoded.
+pub fn app_icon_rgba(size: u32) -> Option<Vec<u8>> {
+    let logo = image::load_from_memory(APP_ICON_PNG)
+        .ok()?
+        .resize_exact(size, size, imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    Some(logo.into_raw())
+}
+
+/// Decode `png` to a square `egui::ColorImage` of `size` px.
+fn decode_square(png: &[u8], size: u32) -> Option<egui::ColorImage> {
+    let rgba = image::load_from_memory(png)
+        .ok()?
+        .resize_exact(size, size, imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [size as usize, size as usize],
+        &rgba.into_raw(),
     ))
 }
 

@@ -14,7 +14,7 @@
 param([int]$Port = 9000)
 
 $ErrorActionPreference = 'Stop'
-$ruleName = "Screen Extender clicker (TCP $Port)"
+$ruleName = "Universal Screens clicker (TCP $Port)"
 $addRule = "New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Private,Domain | Out-Null"
 
 # Add the inbound firewall rule once (needs admin; relaunches elevated if needed).
