@@ -12,6 +12,7 @@ private struct WindowItem: Identifiable {
 /// pre-scan, a window picker, and the secondary actions behind "More options".
 struct ClickerView: View {
     let session: ExtenderSession
+    let addr: String
     let onDisconnect: () -> Void
 
     @State private var current: UIImage?
@@ -53,6 +54,7 @@ struct ClickerView: View {
                 else if let image { current = image }
             }
             sink.onWindowList = { list in windows = list.map { WindowItem(id: $0.id, title: $0.title) } }
+            sink.onHostInfo = { os, name in ConnectionStore.setIdentity(addr: addr, os: os, hostname: name) }
             session.startPump(sink)
             session.listWindows()
         }
