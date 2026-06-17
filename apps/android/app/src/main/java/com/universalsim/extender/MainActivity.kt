@@ -26,6 +26,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -211,6 +212,7 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
     var windowList by remember { mutableStateOf<List<Pair<Long, String>>>(emptyList()) }
     var windowMenuOpen by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    var startShowOnFocus by remember { mutableStateOf(true) }
     DisposableEffect(session) {
         session.startPump(object : ExtenderSession.FrameSink {
             override fun onStart(width: Int, height: Int, codec: Int, csd: ByteArray) {}
@@ -273,12 +275,18 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
                         windowList.forEach { (id, title) ->
                             DropdownMenuItem(
                                 text = { Text(title, maxLines = 1) },
-                                onClick = { session.focusWindow(id); windowMenuOpen = false },
+                                onClick = { session.focusWindow(id, startShowOnFocus); windowMenuOpen = false },
                             )
                         }
                     }
                 }
             }
+        }
+        // When set, focusing a window also starts its slideshow (F5). Turn off for
+        // PDFs in a browser, where F5 reloads the page.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = startShowOnFocus, onCheckedChange = { startShowOnFocus = it })
+            Text("Start show on focus (F5)", style = MaterialTheme.typography.bodySmall)
         }
         if (!scanned) {
             Text(

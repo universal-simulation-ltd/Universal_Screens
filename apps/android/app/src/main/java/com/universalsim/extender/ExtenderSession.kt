@@ -109,8 +109,8 @@ class ExtenderSession private constructor(private var handle: Long) {
     fun scanDeck() = ifLive { ExtenderNative.nativeScanDeck(handle) }
     /** Ask the host to (re)send its open-window list. */
     fun listWindows() = ifLive { ExtenderNative.nativeListWindows(handle) }
-    /** Bring the host window with [id] to the foreground. */
-    fun focusWindow(id: Long) = ifLive { ExtenderNative.nativeFocusWindow(handle, id) }
+    /** Bring the host window with [id] to the foreground; [startShow] also starts its slideshow. */
+    fun focusWindow(id: Long, startShow: Boolean) = ifLive { ExtenderNative.nativeFocusWindow(handle, id, startShow) }
 
     private inline fun ifLive(block: () -> Unit) {
         if (handle != 0L) block()

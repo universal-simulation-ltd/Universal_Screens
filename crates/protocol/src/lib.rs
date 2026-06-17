@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 /// clicker's next-slide look-ahead. v6 added [`Message::WindowList`] plus
 /// [`Input::ListWindows`] / [`Input::FocusWindow`], so a clicker can refocus the
 /// host window that should receive its keys. The host warns (but proceeds) on a
-/// version skew.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// version skew. v7 added a `start_show` flag to [`Input::FocusWindow`].
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Video codec used for the encoded frame stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,8 +156,9 @@ pub enum Input {
     /// Ask the host to (re)send its [`Message::WindowList`].
     ListWindows,
     /// Bring the host window with this id (from [`Message::WindowList`]) to the
-    /// foreground, so subsequent keystrokes land in it.
-    FocusWindow { id: i64 },
+    /// foreground, so subsequent keystrokes land in it. If `start_show` is set, the
+    /// host also sends F5 afterwards to start the slideshow / presenter mode.
+    FocusWindow { id: i64, start_show: bool },
 }
 
 /// The lifecycle phase of a touch contact (mirrors the common touch APIs).
@@ -351,7 +352,7 @@ mod tests {
             Input::Text { text: "héllo, 世界 🌍".to_string() },
             Input::ScanDeck,
             Input::ListWindows,
-            Input::FocusWindow { id: 1234567890 },
+            Input::FocusWindow { id: 1234567890, start_show: true },
         ];
 
         let mut buf = Vec::new();

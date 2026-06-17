@@ -119,8 +119,9 @@ enum SnapReq {
     Scan,
     /// (Re)send the list of open windows.
     ListWindows,
-    /// Bring the window with this handle to the foreground.
-    FocusWindow(i64),
+    /// Bring the window with this handle to the foreground; if the bool is set,
+    /// also start its slideshow (F5).
+    FocusWindow(i64, bool),
 }
 
 /// Read input events from the client and inject them into the local desktop until
@@ -150,8 +151,8 @@ fn serve(stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = snap_tx.send(SnapReq::ListWindows);
                 continue;
             }
-            Input::FocusWindow { id } => {
-                let _ = snap_tx.send(SnapReq::FocusWindow(id));
+            Input::FocusWindow { id, start_show } => {
+                let _ = snap_tx.send(SnapReq::FocusWindow(id, start_show));
                 continue;
             }
             _ => {}
@@ -233,11 +234,13 @@ fn handle_req(
             *refresh = true;
         }
         SnapReq::ListWindows => send_window_list(writer)?,
-        SnapReq::FocusWindow(id) => {
+        SnapReq::FocusWindow(id, start_show) => {
             winlist::focus_window(id);
-            // Once it's foreground, try to start its slideshow / presenter mode.
-            thread::sleep(FOCUS_SETTLE);
-            tap_vk(VK_F5);
+            if start_show {
+                // Once it's foreground, start its slideshow / presenter mode.
+                thread::sleep(FOCUS_SETTLE);
+                tap_vk(VK_F5);
+            }
             *refresh = true; // the newly-focused window becomes the next preview
         }
     }

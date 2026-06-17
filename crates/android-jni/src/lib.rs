@@ -347,14 +347,16 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeListW
 }
 
 /// Bring the host window with `id` (from a WindowList event) to the foreground.
+/// If `start_show` is set, the host also starts its slideshow (F5) afterwards.
 #[no_mangle]
 pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeFocusWindow(
     _env: JNIEnv,
     _class: JClass,
     handle: jlong,
     id: jlong,
+    start_show: jboolean,
 ) {
-    send_input(handle, Input::FocusWindow { id });
+    send_input(handle, Input::FocusWindow { id, start_show: start_show != 0 });
 }
 
 #[no_mangle]
