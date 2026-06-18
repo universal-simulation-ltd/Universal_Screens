@@ -13,6 +13,26 @@ transport decision the backlog asked for.
 M5 (shared `crates/core` session + mobile protocol additions) ✅,
 M6 (clicker / `ControlOnly`) ✅.
 
+> **Committed:** M7a–M7e landed in `feat/phone-present-upstream` (commit
+> `7068d00`, pushed). Built WASM artifact (`apps/web/pkg`) is git-ignored.
+
+## Pick up next (open question to answer)
+
+**Q (James): can we avoid typing the host in manually — like the QR code does for
+the mobile app?** Yes, and the path already exists in the backlog: have the host's
+connect QR encode a URL to the web client carrying the host (+ Wi-Fi + PIN), e.g.
+`https://unisim.co.uk/screens/connect?host=192.168.0.2:9002&pin=1234` (or a LAN
+`http://…`). Scanning it with the **phone camera** opens the browser client with
+the fields **pre-filled** (and it can auto-connect) — the browser parallel of the
+mobile app's QR pairing, and the same dual-purpose QR the backlog already wants
+(camera → website, in-app scan → direct connect). Open sub-questions to resolve
+next session: (a) which origin serves the client (host-bundled `http://` vs.
+`unisim.co.uk/screens`, tied to the mixed-content decision in M7f/Open-Q1);
+(b) whether the host advertises a `ws://host:9002` URL in its QR alongside the
+existing `ip:9000`; (c) LAN discovery (mDNS/Bonjour) as a no-QR fallback so the
+client can *list* hosts instead of taking a typed address. See M7e's deep-link
+item and Open question 6.
+
 ## Goal
 
 Port the native receiver **client** into the browser so someone can drive a
@@ -289,8 +309,14 @@ in `ClientHello`, v9) is the pairing primitive and carries over.
    committing against the WebTransport upgrade.
 4. **Un-interceptable browser shortcuts.** ⌘W/Ctrl-T/etc. can't be captured from
    a tab — a real capability gap vs. the native app. Document, don't fight it.
-5. **Keep four HID maps in sync.** Adding `hid.ts` is the 4th copy; consider a
-   single generated source of truth.
+5. **Keep four HID maps in sync.** Adding `hid.js`/`hid.ts` is the 4th copy;
+   consider a single generated source of truth.
+6. **Avoid typing the host manually (the QR question).** Today the connect screen
+   takes a typed `host:port`. The fix is a QR/deep-link flow — see
+   [Pick up next](#pick-up-next-open-question-to-answer): the host's QR encodes a
+   URL to the web client carrying host/Wi-Fi/PIN so a phone-camera scan opens it
+   pre-filled, plus optional mDNS discovery as a no-QR fallback. **Answer/spec
+   this next session.**
 
 ## Surface
 
