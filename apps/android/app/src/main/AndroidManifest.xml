@@ -23,9 +23,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Step 1 "Get the app" QR: an https App Link to the suite page. With
-                 the app installed (and assetlinks.json hosted on the domain) this
-                 opens the app; otherwise the browser shows the download page. -->
+            <!-- https App Links for the suite domain (verified via the domain's
+                 assetlinks.json). The "/screens" prefix covers two QRs:
+                   • /screens          — Step 1 "Get the app": installed → opens the
+                     app; not installed → the browser shows the marketing page.
+                   • /screens/connect  — Step 2 connection code: installed → opens
+                     the app, which pairs from the URL's query/fragment (see
+                     MainActivity.parseConnectPayload); not installed → the browser
+                     shows the "scan this inside the app" page. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

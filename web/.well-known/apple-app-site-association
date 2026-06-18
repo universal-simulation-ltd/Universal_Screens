@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.universalsim.extender"],
+        "components": [
+          { "/": "/screens", "comment": "Step 1 — get-the-app marketing page" },
+          { "/": "/screens/connect", "comment": "Step 2 — connection deep link" },
+          { "/": "/screens/connect*", "comment": "connection deep link with query/fragment" }
+        ]
+      }
+    ]
+  }
+}

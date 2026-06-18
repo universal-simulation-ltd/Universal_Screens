@@ -268,14 +268,19 @@ impl HostApp {
         scan_subheader(ui, "Scan directly in the Universal Screens App");
 
         if let Some(wifi) = &self.wifi {
-            // The one-scan combined QR (the app joins this Wi-Fi *and* connects).
+            // The one-scan connect QR (the app joins this Wi-Fi *and* connects).
             // Falls back to a plain Wi-Fi-join QR before the host is listening.
-            // Step 2 QRs carry the Universal Screens app icon (not the UNI·SIM
-            // mark) so they read as "scan these in the app".
+            // It encodes an https `…/screens/connect` URL: scanned *in the app* it
+            // deep-links straight in (Android App Link / iOS Universal Link) and
+            // pairs from the query params; scanned with a *plain phone camera* it
+            // lands on the friendly "scan this inside the app" page instead of a
+            // dead `unisimscreens://` link (the "wrong way round" fix). Step 2 QRs
+            // carry the Universal Screens app icon (not the UNI·SIM mark) so they
+            // read as "scan these in the app".
             if self.running && self.address.is_some() {
                 if self.combined_qr.is_none() {
                     if let Some(addr) = &self.address {
-                        let payload = combined_payload(wifi, addr, self.pin);
+                        let payload = connect_url(addr, self.pin, Some(wifi));
                         if let Some(image) = crate::qr::branded_qr_app(&payload) {
                             self.combined_qr = Some(ctx.load_texture(
                                 "combined_qr",
@@ -741,23 +746,40 @@ fn paint_brand_strip(ctx: &egui::Context) {
     ctx.request_repaint(); // keep the pulse animating
 }
 
-/// The one-scan combined payload: a custom-scheme URI the Universal Screens app
-/// recognises, carrying the host address + PIN *and* the Wi-Fi credentials so a
-/// single scan joins the network and connects. The phone's system camera can't
-/// act on it — it's for the in-app scanner.
-fn combined_payload(wifi: &crate::wifi::WifiInfo, host: &str, pin: u32) -> String {
+/// The connection payload encoded in the host's Step-2 QR: an **https** URL on the
+/// suite domain (`…/screens/connect`). Scanned *in the app* — or with a phone
+/// camera while the app is installed, via Android App Links / iOS Universal Links —
+/// it deep-links straight into Universal Screens and pairs from the query params.
+/// Scanned with a *plain phone camera without the app*, it opens the friendly
+/// `/screens/connect` page ("scan this inside the app") instead of being a dead end
+/// — the "wrong way round" fix.
+///
+/// The host address + PIN ride in the **query** (a private LAN IP + a 4-digit
+/// pairing gate — not secrets, and only the host can act on them). Any Wi-Fi
+/// credentials ride in the URL **fragment** (`#ssid=…&auth=…&pass=…`), which
+/// browsers keep client-side and never send to the server — so the Wi-Fi password
+/// reaches the app but never our web logs.
+///
+/// The app also still accepts the legacy `unisimscreens://connect?…` custom-scheme
+/// payload (older hosts in the wild), so this is a forward-only change.
+fn connect_url(host: &str, pin: u32, wifi: Option<&crate::wifi::WifiInfo>) -> String {
     let (ip, port) = host.rsplit_once(':').unwrap_or((host, "9000"));
     let mut s = format!(
-        "unisimscreens://connect?host={}&port={}&pin={:04}&ssid={}&auth={}",
+        "https://opensource.unisim.co.uk/screens/connect?host={}&port={}&pin={:04}",
         pe(ip),
         pe(port),
         pin,
-        pe(&wifi.ssid),
-        pe(&wifi.auth),
     );
-    if let Some(p) = &wifi.password {
-        s.push_str("&pass=");
-        s.push_str(&pe(p));
+    if let Some(wifi) = wifi {
+        // Wi-Fi creds go in the fragment so they never reach the web server.
+        s.push_str("#ssid=");
+        s.push_str(&pe(&wifi.ssid));
+        s.push_str("&auth=");
+        s.push_str(&pe(&wifi.auth));
+        if let Some(p) = &wifi.password {
+            s.push_str("&pass=");
+            s.push_str(&pe(p));
+        }
     }
     s
 }
@@ -787,28 +809,45 @@ mod tests {
     }
 
     #[test]
-    fn combined_payload_carries_wifi_and_host() {
+    fn connect_url_host_in_query_wifi_in_fragment() {
         let w = crate::wifi::WifiInfo {
             ssid: "My Net".to_owned(),
             password: Some("p@ss".to_owned()),
             auth: "WPA".to_owned(),
         };
-        let p = combined_payload(&w, "10.0.0.5:9100", 1234);
-        assert!(p.starts_with("unisimscreens://connect?"));
-        assert!(p.contains("host=10.0.0.5"), "{p}");
-        assert!(p.contains("port=9100"), "{p}");
-        assert!(p.contains("pin=1234"), "{p}");
-        assert!(p.contains("ssid=My%20Net"), "{p}");
-        assert!(p.contains("pass=p%40ss"), "{p}");
-        assert!(p.contains("auth=WPA"), "{p}");
+        let p = connect_url("10.0.0.5:9100", 1234, Some(&w));
+        assert!(p.starts_with("https://opensource.unisim.co.uk/screens/connect?"), "{p}");
+        // Host + PIN are server-visible (in the query, before any '#').
+        let (query, frag) = p.split_once('#').expect("a fragment carrying the Wi-Fi creds");
+        assert!(query.contains("host=10.0.0.5"), "{p}");
+        assert!(query.contains("port=9100"), "{p}");
+        assert!(query.contains("pin=1234"), "{p}");
+        // The Wi-Fi password must NOT be in the server-visible query.
+        assert!(!query.contains("ssid="), "ssid leaked into the query: {p}");
+        assert!(!query.contains("pass="), "Wi-Fi password leaked into the query: {p}");
+        // It rides in the fragment instead (kept client-side by browsers).
+        assert!(frag.contains("ssid=My%20Net"), "{p}");
+        assert!(frag.contains("pass=p%40ss"), "{p}");
+        assert!(frag.contains("auth=WPA"), "{p}");
     }
 
     #[test]
-    fn combined_payload_open_network_omits_pass() {
+    fn connect_url_open_network_omits_pass() {
         let w = crate::wifi::WifiInfo { ssid: "Cafe".to_owned(), password: None, auth: "nopass".to_owned() };
-        let p = combined_payload(&w, "192.168.0.2:9000", 7);
+        let p = connect_url("192.168.0.2:9000", 7, Some(&w));
         assert!(p.contains("pin=0007"), "{p}");
+        assert!(p.contains("#ssid=Cafe"), "{p}");
         assert!(!p.contains("pass="), "{p}");
+    }
+
+    #[test]
+    fn connect_url_without_wifi_is_query_only() {
+        let p = connect_url("192.168.0.2:9000", 42, None);
+        assert_eq!(
+            p,
+            "https://opensource.unisim.co.uk/screens/connect?host=192.168.0.2&port=9000&pin=0042"
+        );
+        assert!(!p.contains('#'), "no Wi-Fi → no fragment: {p}");
     }
 }
 

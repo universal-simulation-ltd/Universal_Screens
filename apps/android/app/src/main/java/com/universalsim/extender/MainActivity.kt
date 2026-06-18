@@ -1,6 +1,9 @@
 package com.universalsim.extender
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.graphics.SurfaceTexture
 import android.view.HapticFeedbackConstants
@@ -45,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,19 +80,125 @@ import kotlin.concurrent.thread
 /** The three ways to use the app; they differ only in UI + whether they stream. */
 enum class Mode { FULL_CONTROL, VIEWER, CLICKER, TRACKPAD, SECOND_SCREEN }
 
+/** A connection target decoded from a scanned QR or a deep link (App Link). */
+data class ConnectPayload(
+    val addr: String,    // "ip:port"
+    val pin: Int,
+    val ssid: String?,
+    val pass: String?,
+    val auth: String,
+)
+
+/**
+ * Parse any of the host's connect payloads into a [ConnectPayload], or null if the
+ * text isn't a recognised connect code. Three shapes are accepted:
+ *
+ *  • `https://opensource.unisim.co.uk/screens/connect?host=&port=&pin=#ssid=&auth=&pass=`
+ *    — the App-Link URL the host now encodes. Host + PIN are in the query; any
+ *    Wi-Fi credentials ride in the fragment (kept client-side by browsers, so a
+ *    plain camera that lands on the web page never leaks the password to the
+ *    server). Both query and fragment are read here.
+ *  • `unisimscreens://connect?host=&port=&pin=&ssid=&pass=&auth=` — the legacy
+ *    custom scheme (older hosts), everything in the query.
+ *  • `ip:port?pin=NNNN` — the older bare host QR.
+ */
+fun parseConnectPayload(text: String): ConnectPayload? {
+    val t = text.trim()
+    val isHttps = t.startsWith("https://", ignoreCase = true)
+    if (isHttps || t.startsWith("unisimscreens://", ignoreCase = true)) {
+        val uri = Uri.parse(t)
+        // For https, only `…/screens/connect` is a connect code (not the marketing
+        // `/screens` page, which also opens the app via the same App-Link filter).
+        if (isHttps && uri.path?.startsWith("/screens/connect") != true) return null
+        val p = uriParams(uri)
+        val host = p["host"].orEmpty()
+        if (host.isEmpty()) return null
+        return ConnectPayload(
+            addr = "$host:${p["port"] ?: "9000"}",
+            pin = p["pin"]?.filter { it.isDigit() }?.toIntOrNull() ?: 0,
+            ssid = p["ssid"]?.takeIf { it.isNotEmpty() },
+            pass = p["pass"]?.takeIf { it.isNotEmpty() },
+            auth = p["auth"] ?: "WPA",
+        )
+    }
+    // Bare "ip:port?pin=NNNN" host QR.
+    val q = t.indexOf("?pin=")
+    if (q >= 0) {
+        return ConnectPayload(
+            addr = t.substring(0, q),
+            pin = t.substring(q + 5).filter { it.isDigit() }.toIntOrNull() ?: 0,
+            ssid = null, pass = null, auth = "WPA",
+        )
+    }
+    return null
+}
+
+/** Merge a URI's query params with any `k=v&k=v` in its fragment (query wins). The
+ *  connect URL keeps Wi-Fi creds in the fragment, so we re-parse it as a query. */
+private fun uriParams(uri: Uri): Map<String, String> {
+    val out = HashMap<String, String>()
+    uri.encodedFragment?.let { frag ->
+        val f = Uri.parse("x://x?$frag")
+        for (k in f.queryParameterNames) f.getQueryParameter(k)?.let { out[k] = it }
+    }
+    for (k in uri.queryParameterNames) uri.getQueryParameter(k)?.let { out[k] = it }
+    return out
+}
+
+/**
+ * Act on a decoded [payload]: if it carries Wi-Fi creds (and the OS supports
+ * app-initiated joins) join that network first, then hand (addr, pin) to [onReady]
+ * to pick a mode. [onStatus] surfaces the "Joining…" / failure line (null clears it).
+ * Shared by the in-app scanner and the App-Link deep-link path.
+ */
+fun handleConnectPayload(
+    context: Context,
+    payload: ConnectPayload,
+    onStatus: (String?) -> Unit,
+    onReady: (String, Int) -> Unit,
+) {
+    val ssid = payload.ssid
+    if (!ssid.isNullOrEmpty() && WifiConnect.isSupported()) {
+        onStatus("Joining “$ssid”…")
+        WifiConnect.join(context, ssid, payload.pass, payload.auth) { ok ->
+            onStatus(if (ok) null else "Couldn't join Wi-Fi — join it manually, then connect.")
+            if (ok) onReady(payload.addr, payload.pin) // joined → choose a mode
+        }
+    } else {
+        // Already on the network (or Android < 10): go straight to mode pick.
+        onReady(payload.addr, payload.pin)
+    }
+}
+
 class MainActivity : ComponentActivity() {
+    // The deep link the app was opened with — a scanned `…/screens/connect` App
+    // Link (or the legacy `unisimscreens://` scheme). Consumed once by AppRoot,
+    // which then resets it to null. Held as Compose state so onNewIntent (the app
+    // was already open) recomposes and connects too.
+    private val deepLink = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        deepLink.value = intent?.dataString
         setContent {
+            val link by deepLink
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) { AppRoot() }
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    AppRoot(deepLink = link, onDeepLinkHandled = { deepLink.value = null })
+                }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        deepLink.value = intent.dataString
     }
 }
 
 @Composable
-fun AppRoot() {
+fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     val context = LocalContext.current
     var session by remember { mutableStateOf<ExtenderSession?>(null) }
     var mode by remember { mutableStateOf(Mode.CLICKER) }
@@ -99,6 +209,22 @@ fun AppRoot() {
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
     // True while a connection attempt is in flight (shows the Connecting screen).
     var connecting by remember { mutableStateOf(false) }
+
+    // A deep link (scanned `…/screens/connect` App Link, or the legacy
+    // `unisimscreens://` scheme) opens us straight here: parse it, optionally join
+    // the host's Wi-Fi, then jump to the mode picker — the same path as an in-app
+    // scan. Consumed once (onDeepLinkHandled resets it).
+    LaunchedEffect(deepLink) {
+        val link = deepLink ?: return@LaunchedEffect
+        onDeepLinkHandled()
+        val payload = parseConnectPayload(link) ?: return@LaunchedEffect
+        handleConnectPayload(
+            context,
+            payload,
+            onStatus = { status = it ?: "" },
+            onReady = { addr, pin -> pending = addr to pin },
+        )
+    }
 
     // chosenMode + whether to remember it for this host (so saved rows can skip
     // the picker next time). When `remember` is false we still save the host for
@@ -234,43 +360,25 @@ fun ConnectScreen(
     var showAdvanced by remember { mutableStateOf(false) }
     fun reload() { saved = ConnectionStore.load(context) }
 
-    // Scan the host's QR. Two formats:
-    //  • "ip:port?pin=NNNN"          — host QR: fill fields and connect.
-    //  • "unisimscreens://connect?…" — combined QR: join the host's Wi-Fi first
-    //    (one-tap system dialog) and then connect, all from one scan.
+    // Scan the host's Step-2 QR. It now encodes an https `…/screens/connect` URL
+    // (a plain phone camera lands on a help page; the app deep-links straight in),
+    // but the parser also still accepts the legacy `unisimscreens://connect?…`
+    // scheme and the bare `ip:port?pin=NNNN` host QR — see [parseConnectPayload].
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val text = result.contents ?: return@rememberLauncherForActivityResult
-        if (text.startsWith("unisimscreens://")) {
-            val uri = android.net.Uri.parse(text)
-            val host = uri.getQueryParameter("host").orEmpty()
-            val port = uri.getQueryParameter("port") ?: "9000"
-            val code = uri.getQueryParameter("pin")?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-            val ssid = uri.getQueryParameter("ssid")
-            val pass = uri.getQueryParameter("pass")
-            val auth = uri.getQueryParameter("auth") ?: "WPA"
-            val target = "$host:$port"
-            addr = target
-            pin = code.toString().padStart(4, '0')
-            if (!ssid.isNullOrEmpty() && WifiConnect.isSupported()) {
-                joinStatus = "Joining “$ssid”…"
-                WifiConnect.join(context, ssid, pass, auth) { ok ->
-                    joinStatus = if (ok) null else "Couldn't join Wi-Fi — join it manually, then connect."
-                    if (ok) onPrepare(target, code) // joined → choose a mode
-                }
-            } else {
-                // Already on the network (or Android < 10): go straight to mode pick.
-                onPrepare(target, code)
-            }
+        val payload = parseConnectPayload(text)
+        if (payload != null) {
+            addr = payload.addr
+            pin = payload.pin.toString().padStart(4, '0')
+            handleConnectPayload(
+                context,
+                payload,
+                onStatus = { joinStatus = it },
+                onReady = { a, p -> onPrepare(a, p) },
+            )
         } else {
-            val q = text.indexOf("?pin=")
-            if (q >= 0) {
-                addr = text.substring(0, q)
-                val p = text.substring(q + 5).filter { it.isDigit() }
-                pin = p
-                onPrepare(addr, p.toIntOrNull() ?: 0)
-            } else {
-                addr = text
-            }
+            // Not a recognised connect code — drop the raw text into the address box.
+            addr = text
         }
     }
 

@@ -172,8 +172,10 @@ mod tests {
 
     #[test]
     fn branded_qr_app_builds_with_app_icon_centre() {
-        let img = branded_qr_app("unisimscreens://connect?host=10.0.0.5&port=9100&pin=1234")
-            .expect("app QR should build");
+        let img = branded_qr_app(
+            "https://opensource.unisim.co.uk/screens/connect?host=10.0.0.5&port=9100&pin=1234",
+        )
+        .expect("app QR should build");
         assert_eq!(img.size[0], img.size[1]);
         let w = img.size[0];
         let (lo, hi) = (w * 2 / 5, w * 3 / 5);

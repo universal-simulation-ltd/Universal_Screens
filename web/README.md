@@ -1,9 +1,22 @@
-# Web pieces for the "Get the app" (Step 1) QR
+# Web pieces for the host QRs (Step 1 "Get the app" + Step 2 "Connect")
 
-The host's **Step 1** QR points at `https://opensource.unisim.co.uk/screens`. To make
-scanning it **open the app if installed** (Android App Links / iOS Universal Links)
-or **fall back to your existing `/screens` marketing page** if not, the only file
-this repo needs to carry is the Digital Asset Links file.
+The host shows two https QRs, both on the suite domain, so a phone **camera** is
+never a dead end and an **installed app** deep-links straight in:
+
+- **Step 1** points at `https://opensource.unisim.co.uk/screens` — installed → opens
+  the app; not installed → the marketing page (with download links).
+- **Step 2** (the connection code) points at
+  `https://opensource.unisim.co.uk/screens/connect?host=<ip>&port=<port>&pin=<pin>`
+  with any Wi-Fi credentials in the URL **fragment** (`#ssid=…&auth=…&pass=…`, kept
+  client-side by browsers so the password never reaches the server). Installed →
+  opens the app, which pairs from the query/fragment; not installed → the
+  `/screens/connect` page (`opensource-portal/public/screens/connect.html`) says
+  "scan this inside the app" and offers the download buttons. The host still keeps
+  the legacy `unisimscreens://connect?…` custom scheme working as a fallback (the
+  app parses both — see `MainActivity.parseConnectPayload` / `ContentView`).
+
+To make the **camera-opens-the-app** half work (Android App Links / iOS Universal
+Links) the domain must carry the association files below.
 
 ## The one required file
 
@@ -24,13 +37,23 @@ this repo needs to carry is the Digital Asset Links file.
    ```json
    "sha256_cert_fingerprints": ["<debug …>", "<play release …>"]
    ```
-2. **iOS Universal Links** need an `apple-app-site-association` file at the domain
-   root once the iOS app exists (Team ID + bundle id) — not included yet (iOS is
-   still a scaffold).
+2. **iOS Universal Links** need an `apple-app-site-association` (AASA) file at the
+   domain root once the iOS app exists. A **template** is provided here at
+   `.well-known/apple-app-site-association` — it claims `/screens` and
+   `/screens/connect`, but its `appIDs` is a placeholder (`TEAMID.…`). Before
+   deploying it to `opensource-portal/public/.well-known/` (served `application/json`,
+   HTTP 200, no redirects, **no file extension**): replace `TEAMID` with the Apple
+   Developer **Team ID**, add the `applinks:opensource.unisim.co.uk`
+   **Associated Domains** entitlement to the iOS app, and strip the `comment` keys
+   (Apple ignores them, but keep the file lean). It is **not** deployed yet — iOS is
+   still a Windows-side scaffold (no Xcode build); `ContentView.onOpenURL` already
+   parses the link so the app side is ready.
 
-The app's intent filters already target this URL
+The Android app's intent filters already target these URLs
 (`apps/android/.../AndroidManifest.xml`: `autoVerify="true"` on the
-`https opensource.unisim.co.uk /screens` link, plus the `unisimscreens://` scheme).
+`https opensource.unisim.co.uk /screens` **prefix** — which covers both `/screens`
+and `/screens/connect` — plus the `unisimscreens://` scheme). `assetlinks.json` uses
+`handle_all_urls`, so it already authorises `/screens/connect` with no change.
 
 ## Optional: smart-banner snippet for the existing /screens page
 
