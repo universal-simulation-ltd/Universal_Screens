@@ -75,11 +75,15 @@ fn run_inner(
     let region = capture_region(extend);
     // Learn the display size from a first capture; H.264 needs even dimensions.
     let (cap_w, cap_h, _) = capture(region).ok_or("screen capture failed")?;
-    let width = cap_w & !1;
-    let height = cap_h & !1;
-    if width == 0 || height == 0 {
+    let src_w = cap_w & !1;
+    let src_h = cap_h & !1;
+    if src_w == 0 || src_h == 0 {
         return Err("empty display".into());
     }
+    // Downscale large desktops before encoding — a phone screen doesn't need full
+    // res, and it keeps the software encoder smooth. The virtual desktop itself is
+    // unchanged; only the stream is scaled.
+    let (width, height) = encode_dims(src_w, src_h);
 
     let config = EncoderConfig::new()
         .bitrate(BitRate::from_bps(BITRATE_BPS))
@@ -101,6 +105,7 @@ fn run_inner(
     let mut pts: i64 = 0;
     let frame_dur = Duration::from_millis(u64::from(1000 / FPS));
     let mut packed: Vec<u8> = Vec::new();
+    let mut scaled: Vec<u8> = Vec::new();
 
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
@@ -110,13 +115,21 @@ fn run_inner(
             continue;
         };
         // A resolution change would need a fresh StreamStart — end the stream.
-        if cw & !1 != width || ch & !1 != height {
+        if cw & !1 != src_w || ch & !1 != src_h {
             break;
         }
-        pack_rows(&bgra, cw, width, height, &mut packed);
+        pack_rows(&bgra, cw, src_w, src_h, &mut packed);
+        let frame_bgra: &[u8] = if width != src_w || height != src_h {
+            scaled = downscale(&packed, src_w, src_h, width, height);
+            &scaled
+        } else {
+            &packed
+        };
 
-        let yuv =
-            YUVBuffer::from_rgb_source(BgraSliceU8::new(&packed, (width as usize, height as usize)));
+        let yuv = YUVBuffer::from_rgb_source(BgraSliceU8::new(
+            frame_bgra,
+            (width as usize, height as usize),
+        ));
         let annex_b = encoder.encode(&yuv)?.to_vec();
         if annex_b.is_empty() {
             // Encoder skipped this frame (rate control) — pace and continue.
@@ -185,6 +198,32 @@ unsafe extern "system" fn monitor_proc(
         rects.push((r.left, r.top, r.right - r.left, r.bottom - r.top));
     }
     BOOL(1) // keep enumerating
+}
+
+/// The dimensions to *encode* at: the source, capped so the long side is at most
+/// `MAX_LONG` (keeping aspect, rounded even). A phone doesn't need a full 1080p+
+/// desktop, and a smaller frame keeps the software encoder real-time.
+fn encode_dims(w: u32, h: u32) -> (u32, u32) {
+    const MAX_LONG: u32 = 1280;
+    let long = w.max(h);
+    if long <= MAX_LONG {
+        return (w, h);
+    }
+    let s = f64::from(MAX_LONG) / f64::from(long);
+    let nw = ((f64::from(w) * s) as u32 & !1).max(2);
+    let nh = ((f64::from(h) * s) as u32 & !1).max(2);
+    (nw, nh)
+}
+
+/// Downscale a tightly-packed BGRA buffer from `sw`×`sh` to `dw`×`dh`. Channel
+/// order is irrelevant to a per-channel resize, so the BGRA layout is preserved.
+fn downscale(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
+    match image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(sw, sh, src) {
+        Some(img) => {
+            image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle).into_raw()
+        }
+        None => src.to_vec(),
+    }
 }
 
 /// Copy the first `width*4` bytes of the first `height` rows out of a tightly-
