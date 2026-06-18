@@ -236,7 +236,9 @@ impl HostApp {
     /// A plain https URL — carries no secrets, and any camera can open it.
     fn step1_getapp(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         step_header(ui, "Step 1", "Get the app");
+        scan_subheader(ui, "Scan with your mobile phone camera");
         if self.applink_qr.is_none() {
+            // Step 1 keeps the UNI·SIM mark — it's a suite-page link any camera opens.
             if let Some(image) = crate::qr::branded_qr(OPENSOURCE_URL) {
                 self.applink_qr =
                     Some(ctx.load_texture("applink_qr", image, egui::TextureOptions::LINEAR));
@@ -252,6 +254,10 @@ impl HostApp {
             );
         }
         ui.small("Point your phone's camera here — it opens Universal Screens, or the download page if you don't have it yet.");
+        ui.add_space(2.0);
+        // Once the app is on the phone, the user continues on THIS PC — point them
+        // at the orange button below so the QR scan doesn't feel like a dead end.
+        ui.small("Got it on your phone? Tap “I have the app” below to continue here.");
     }
 
     /// Step 2 — one scan *in the app* to join this PC's Wi-Fi and connect: the
@@ -259,15 +265,18 @@ impl HostApp {
     /// password, and a manual address/PIN fallback for phones already on the network.
     fn step2_connect(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         step_header(ui, "Step 2", "Scan to connect");
+        scan_subheader(ui, "Scan directly in the Universal Screens App");
 
         if let Some(wifi) = &self.wifi {
             // The one-scan combined QR (the app joins this Wi-Fi *and* connects).
             // Falls back to a plain Wi-Fi-join QR before the host is listening.
+            // Step 2 QRs carry the Universal Screens app icon (not the UNI·SIM
+            // mark) so they read as "scan these in the app".
             if self.running && self.address.is_some() {
                 if self.combined_qr.is_none() {
                     if let Some(addr) = &self.address {
                         let payload = combined_payload(wifi, addr, self.pin);
-                        if let Some(image) = crate::qr::branded_qr(&payload) {
+                        if let Some(image) = crate::qr::branded_qr_app(&payload) {
                             self.combined_qr = Some(ctx.load_texture(
                                 "combined_qr",
                                 image,
@@ -288,7 +297,7 @@ impl HostApp {
                 ui.small("In the app, tap Scan and point it here — joins this Wi-Fi and connects.");
             } else {
                 if self.wifi_qr.is_none() {
-                    if let Some(image) = crate::qr::branded_qr(&wifi.qr_payload()) {
+                    if let Some(image) = crate::qr::branded_qr_app(&wifi.qr_payload()) {
                         self.wifi_qr =
                             Some(ctx.load_texture("wifi_qr", image, egui::TextureOptions::LINEAR));
                     }
@@ -328,27 +337,29 @@ impl HostApp {
             ui.small("This PC isn't on Wi-Fi — put your phone on the same network, then use the details below.");
         }
 
-        // A one-click firewall fix when inbound looks blocked (kept visible since
-        // it's the usual reason a phone on Wi-Fi can't reach the host).
-        if self.running && self.firewall_ok == Some(false) {
-            if let Some(address) = self.address.clone() {
-                ui.add_space(6.0);
-                ui.colored_label(BRAND, "Windows Firewall may block phones on Wi-Fi.");
-                if ui.button("Allow through firewall").clicked() {
-                    if let Some(port) =
-                        address.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())
-                    {
-                        crate::firewall::request_allow(port);
-                        self.firewall_ok = Some(true); // optimistic; UAC adds it
-                    }
-                }
-            }
-        }
-
-        // Everything secondary lives here: the manual address/PIN, status, and
-        // recent connections.
+        // Everything secondary lives here: the firewall fix, the manual
+        // address/PIN, status, and recent connections.
         ui.add_space(8.0);
         egui::CollapsingHeader::new("More details").default_open(false).show(ui, |ui| {
+            // A one-click firewall fix when inbound looks blocked — the usual
+            // reason a phone on Wi-Fi can't reach the host. Lives in here now so
+            // the connect step stays clean; still surfaced first inside the panel.
+            if self.running && self.firewall_ok == Some(false) {
+                if let Some(address) = self.address.clone() {
+                    ui.colored_label(BRAND, "Windows Firewall may block phones on Wi-Fi.");
+                    if ui.button("Allow through firewall").clicked() {
+                        if let Some(port) =
+                            address.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())
+                        {
+                            crate::firewall::request_allow(port);
+                            self.firewall_ok = Some(true); // optimistic; UAC adds it
+                        }
+                    }
+                    ui.add_space(6.0);
+                    ui.separator();
+                }
+            }
+
             if self.running {
                 if let Some(address) = self.address.clone() {
                     ui.small("Already on the network? Type the address and PIN:");
@@ -801,12 +812,20 @@ mod tests {
     }
 }
 
-/// A "STEP N" eyebrow (brand orange) + title heading for the connect flow.
+/// A bold "STEP N" eyebrow (brand orange) + a large, heavy title for the connect
+/// flow. Sized up deliberately so the two steps read at a glance.
 fn step_header(ui: &mut egui::Ui, step: &str, title: &str) {
     ui.add_space(8.0);
-    ui.label(egui::RichText::new(step.to_uppercase()).color(BRAND).strong().size(12.0));
-    ui.heading(title);
+    ui.label(egui::RichText::new(step.to_uppercase()).color(BRAND).strong().size(15.0));
+    ui.label(egui::RichText::new(title).strong().size(26.0));
     ui.add_space(6.0);
+}
+
+/// The bold "how to scan this step" sub-instruction, sized between the title and
+/// the small body hint so it stands out (item: make the scan line a lot bolder).
+fn scan_subheader(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).strong().size(15.0));
+    ui.add_space(2.0);
 }
 
 /// Style the navbar like the web `UniversalNavBar`: flat text "links" (slate, not
