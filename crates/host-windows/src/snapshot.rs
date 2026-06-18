@@ -47,6 +47,18 @@ pub fn capture_primary_jpeg(max_dim: u32, quality: u8) -> Option<(u32, u32, Vec<
 pub(crate) unsafe fn grab_primary_bgra() -> Option<(u32, u32, Vec<u8>)> {
     let width = GetSystemMetrics(SM_CXSCREEN);
     let height = GetSystemMetrics(SM_CYSCREEN);
+    grab_region_bgra(0, 0, width, height)
+}
+
+/// Capture an arbitrary virtual-desktop region (`left`/`top` in virtual-screen
+/// coordinates, so a secondary/virtual monitor works) into top-down BGRA. Used by
+/// the mirror (primary) and extend (virtual monitor) streams.
+pub(crate) unsafe fn grab_region_bgra(
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Option<(u32, u32, Vec<u8>)> {
     if width <= 0 || height <= 0 {
         return None;
     }
@@ -59,7 +71,9 @@ pub(crate) unsafe fn grab_primary_bgra() -> Option<(u32, u32, Vec<u8>)> {
     let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
     let old = SelectObject(hdc_mem, hbm.into());
 
-    let blt_ok = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_screen), 0, 0, SRCCOPY).is_ok();
+    // Source origin is the region's virtual-screen coordinate (can be negative or
+    // beyond the primary), so this grabs whichever monitor that region covers.
+    let blt_ok = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_screen), left, top, SRCCOPY).is_ok();
 
     let mut buf = vec![0u8; (width as usize) * (height as usize) * 4];
     // Negative biHeight requests top-down rows (origin at top-left).

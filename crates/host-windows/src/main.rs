@@ -194,7 +194,8 @@ fn serve(stream: TcpStream, mode: CaptureMode) -> Result<(), Box<dyn std::error:
     if mode == CaptureMode::ControlOnly {
         serve_clicker(stream, writer)
     } else {
-        serve_mirror(stream, writer)
+        // VirtualDisplay = extend (capture a secondary/virtual monitor); else mirror.
+        serve_mirror(stream, writer, mode == CaptureMode::VirtualDisplay)
     }
 }
 
@@ -240,12 +241,17 @@ fn serve_clicker(stream: TcpStream, writer: TcpStream) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// Mirror / remote control: stream the screen (H.264) on a worker thread while the
-/// input loop injects mouse/keys.
-fn serve_mirror(stream: TcpStream, writer: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+/// Mirror / extend / remote control: stream the screen (H.264) on a worker thread
+/// while the input loop injects mouse/keys. `extend` streams a secondary/virtual
+/// monitor instead of the primary.
+fn serve_mirror(
+    stream: TcpStream,
+    writer: TcpStream,
+    extend: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_worker = stop.clone();
-    let stream_thread = thread::spawn(move || stream::run(writer, &stop_worker));
+    let stream_thread = thread::spawn(move || stream::run(writer, &stop_worker, extend));
 
     let mut input = stream;
     while let Ok(event) = protocol::read_framed::<_, Input>(&mut input) {

@@ -17,24 +17,63 @@ use openh264::encoder::{
 };
 use openh264::formats::{BgraSliceU8, YUVBuffer};
 use openh264::OpenH264API;
+use windows::core::BOOL;
+use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+};
+
+/// `MONITORINFOF_PRIMARY` — the `dwFlags` bit marking the primary monitor.
+const MONITORINFOF_PRIMARY: u32 = 1;
 
 /// Target frame rate for the mirror (software encode — kept modest).
 const FPS: u32 = 20;
 /// Target H.264 bitrate.
 const BITRATE_BPS: u32 = 12_000_000;
 
-/// Capture + encode + stream the primary screen down `stream` until `stop` is set
-/// or the client disconnects. Best-effort: logs and returns on any error.
-pub(crate) fn run(stream: TcpStream, stop: &AtomicBool) {
-    if let Err(e) = run_inner(stream, stop) {
-        eprintln!("mirror stream ended: {e}");
+/// Capture + encode + stream a screen down `stream` until `stop` is set or the
+/// client disconnects. `extend` streams a secondary/virtual monitor (the phone as
+/// an extra display) instead of mirroring the primary. Best-effort: logs/returns
+/// on any error.
+pub(crate) fn run(stream: TcpStream, stop: &AtomicBool, extend: bool) {
+    if let Err(e) = run_inner(stream, stop, extend) {
+        eprintln!("screen stream ended: {e}");
     }
 }
 
-fn run_inner(stream: TcpStream, stop: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
+/// The virtual-screen region to capture: a secondary monitor when extending (the
+/// virtual display), else the whole primary. `None` means "use the primary".
+fn capture_region(extend: bool) -> Option<(i32, i32, i32, i32)> {
+    if !extend {
+        return None;
+    }
+    match first_secondary_monitor() {
+        Some(r) => Some(r),
+        None => {
+            eprintln!("extend: no secondary/virtual monitor found — mirroring the primary");
+            None
+        }
+    }
+}
+
+/// Grab the configured region (or the primary when `region` is `None`).
+fn capture(region: Option<(i32, i32, i32, i32)>) -> Option<(u32, u32, Vec<u8>)> {
+    unsafe {
+        match region {
+            Some((l, t, w, h)) => crate::snapshot::grab_region_bgra(l, t, w, h),
+            None => crate::snapshot::grab_primary_bgra(),
+        }
+    }
+}
+
+fn run_inner(
+    stream: TcpStream,
+    stop: &AtomicBool,
+    extend: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let region = capture_region(extend);
     // Learn the display size from a first capture; H.264 needs even dimensions.
-    let (cap_w, cap_h, _) =
-        unsafe { crate::snapshot::grab_primary_bgra() }.ok_or("screen capture failed")?;
+    let (cap_w, cap_h, _) = capture(region).ok_or("screen capture failed")?;
     let width = cap_w & !1;
     let height = cap_h & !1;
     if width == 0 || height == 0 {
@@ -60,7 +99,7 @@ fn run_inner(stream: TcpStream, stop: &AtomicBool) -> Result<(), Box<dyn std::er
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
 
-        let Some((cw, ch, bgra)) = (unsafe { crate::snapshot::grab_primary_bgra() }) else {
+        let Some((cw, ch, bgra)) = capture(region) else {
             thread::sleep(frame_dur);
             continue;
         };
@@ -105,6 +144,41 @@ fn run_inner(stream: TcpStream, stop: &AtomicBool) -> Result<(), Box<dyn std::er
         }
     }
     Ok(())
+}
+
+/// The virtual-screen rect `(left, top, width, height)` of the first non-primary
+/// monitor (the virtual display, when one exists), or `None`.
+fn first_secondary_monitor() -> Option<(i32, i32, i32, i32)> {
+    let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(monitor_proc),
+            LPARAM(std::ptr::addr_of_mut!(rects) as isize),
+        );
+    }
+    rects.into_iter().next()
+}
+
+/// `EnumDisplayMonitors` callback: append each *non-primary* monitor's rect to the
+/// `Vec<(i32,i32,i32,i32)>` passed via `data`.
+unsafe extern "system" fn monitor_proc(
+    hmon: HMONITOR,
+    _hdc: HDC,
+    _rect: *mut RECT,
+    data: LPARAM,
+) -> BOOL {
+    let rects = &mut *(data.0 as *mut Vec<(i32, i32, i32, i32)>);
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if GetMonitorInfoW(hmon, &mut info).as_bool() && info.dwFlags & MONITORINFOF_PRIMARY == 0 {
+        let r = info.rcMonitor;
+        rects.push((r.left, r.top, r.right - r.left, r.bottom - r.top));
+    }
+    BOOL(1) // keep enumerating
 }
 
 /// Copy the first `width*4` bytes of the first `height` rows out of a tightly-

@@ -72,7 +72,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlin.concurrent.thread
 
 /** The three ways to use the app; they differ only in UI + whether they stream. */
-enum class Mode { FULL_CONTROL, VIEWER, CLICKER, TRACKPAD }
+enum class Mode { FULL_CONTROL, VIEWER, CLICKER, TRACKPAD, SECOND_SCREEN }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,11 +107,12 @@ fun AppRoot() {
         currentPin = pin
         connecting = true
         status = ""
-        // Clicker and Trackpad need no video (control-only); the rest mirror.
-        val capture = if (chosenMode == Mode.CLICKER || chosenMode == Mode.TRACKPAD) {
-            ExtenderSession.MODE_CONTROL_ONLY
-        } else {
-            ExtenderSession.MODE_MIRROR
+        // Clicker/Trackpad need no video; Second screen extends (virtual display);
+        // the rest mirror the primary.
+        val capture = when (chosenMode) {
+            Mode.CLICKER, Mode.TRACKPAD -> ExtenderSession.MODE_CONTROL_ONLY
+            Mode.SECOND_SCREEN -> ExtenderSession.MODE_VIRTUAL
+            else -> ExtenderSession.MODE_MIRROR
         }
         thread {
             // Width/height advertise the phone panel; the host mirrors at its own
@@ -135,7 +136,8 @@ fun AppRoot() {
         live != null -> {
             // In the streaming modes, tapping the video hides the top bar so the
             // picture can fill the screen; tap again to bring it back.
-            val streaming = mode == Mode.VIEWER || mode == Mode.FULL_CONTROL
+            val streaming =
+                mode == Mode.VIEWER || mode == Mode.FULL_CONTROL || mode == Mode.SECOND_SCREEN
             var chrome by remember(live) { mutableStateOf(true) }
             Column(modifier = Modifier.fillMaxSize()) {
                 if (!streaming || chrome) {
@@ -149,6 +151,7 @@ fun AppRoot() {
                             Mode.VIEWER -> "Mirror"
                             Mode.FULL_CONTROL -> "Remote control"
                             Mode.TRACKPAD -> "Trackpad"
+                            Mode.SECOND_SCREEN -> "Second screen"
                         }
                         // Tap the mode to go back and pick a different one for this host.
                         Button(onClick = {
@@ -165,7 +168,7 @@ fun AppRoot() {
                 when (mode) {
                     Mode.CLICKER -> ClickerScreen(live, currentAddr)
                     Mode.TRACKPAD -> TrackpadScreen(live)
-                    Mode.VIEWER ->
+                    Mode.VIEWER, Mode.SECOND_SCREEN ->
                         StreamScreen(live, currentAddr, forwardInput = false) { chrome = !chrome }
                     Mode.FULL_CONTROL ->
                         StreamScreen(live, currentAddr, forwardInput = true) { chrome = !chrome }
@@ -385,7 +388,9 @@ fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -
         ModeOption("Trackpad", "Use the phone as a touchpad — move, tap, scroll") {
             onPick(Mode.TRACKPAD, rememberChoice)
         }
-        ModeOption("Second screen", "Use this phone as an extra display — coming soon", enabled = false) {}
+        ModeOption("Second screen", "Use the phone as an extra display (needs a virtual-display driver on the PC)") {
+            onPick(Mode.SECOND_SCREEN, rememberChoice)
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = rememberChoice, onCheckedChange = { rememberChoice = it })
