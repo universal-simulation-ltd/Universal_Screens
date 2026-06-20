@@ -23,6 +23,9 @@ struct ClickerView: View {
     @State private var windows: [WindowItem] = []
     @State private var startShowOnFocus = true
     @State private var showMore = false
+    /// When locked, every control on this screen is disabled so a stray touch can't
+    /// fire a key; only the central lock toggle stays live so it can be unlocked.
+    @State private var locked = false
 
     var body: some View {
         ScrollView {
@@ -34,15 +37,17 @@ struct ClickerView: View {
                         if current == nil { Text("Waiting for slide preview…").foregroundStyle(.secondary) }
                     }
 
-                controlsRow
+                controlsRow.disabled(locked)
 
                 Toggle("Start show on focus (F5)", isOn: $startShowOnFocus)
                     .font(.footnote)
+                    .disabled(locked)
 
                 navRow
 
                 Button(showMore ? "Fewer options" : "More options") { showMore.toggle() }
-                if showMore { moreOptions }
+                    .disabled(locked)
+                if showMore { moreOptions.disabled(locked) }
             }
             .padding(24)
         }
@@ -89,11 +94,14 @@ struct ClickerView: View {
         HStack(spacing: 24) {
             VStack {
                 previewImage(previous, height: 84).opacity(0.4)
-                bigButton("◀  Prev") { session.tapKey(HidKeys.pageUp) }
+                bigButton("◀  Prev") { session.tapKey(HidKeys.pageUp) }.disabled(locked)
             }
+            // The lock sits in the middle of the two nav buttons — a direct tap
+            // toggles it; a swipe over it is ignored.
+            LockToggle(locked: locked) { locked.toggle() }
             VStack {
                 previewImage(next, height: 84)
-                bigButton("Next  ▶") { session.tapKey(HidKeys.pageDown) }
+                bigButton("Next  ▶") { session.tapKey(HidKeys.pageDown) }.disabled(locked)
             }
         }
     }
@@ -136,5 +144,29 @@ struct ClickerView: View {
             Text(label).font(.title2).frame(width: 130, height: 80)
         }
         .buttonStyle(.borderedProminent)
+    }
+}
+
+// MARK: - Lock toggle
+
+/// A lock toggle that guards a screen against accidental presses. Locked → a closed
+/// padlock on a yellow background; unlocked → just an open padlock on a transparent
+/// background. `onTapGesture` fires only for a clean tap, so a swipe (a drag) over it
+/// is ignored; the filled content shape captures the touch so it never leaks through
+/// to a gesture surface underneath (e.g. the trackpad).
+struct LockToggle: View {
+    let locked: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Image(systemName: locked ? "lock.fill" : "lock.open")
+            .font(.system(size: 26))
+            .foregroundStyle(locked ? Color.black : Color.secondary)
+            .frame(width: 64, height: 64)
+            .background(locked ? Color.yellow : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
+            .onTapGesture { onToggle() }
+            .accessibilityLabel(locked ? "Locked. Tap to unlock." : "Unlocked. Tap to lock.")
     }
 }

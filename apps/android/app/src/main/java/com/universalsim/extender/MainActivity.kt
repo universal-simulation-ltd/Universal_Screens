@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -55,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -573,6 +575,9 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
     var windowMenuOpen by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
     var startShowOnFocus by remember { mutableStateOf(true) }
+    // When locked, every control on this screen is disabled so a stray touch can't
+    // fire a key; only the central lock toggle stays live so it can be unlocked.
+    var locked by remember { mutableStateOf(false) }
     DisposableEffect(session) {
         session.startPump(object : ExtenderSession.FrameSink {
             override fun onStart(width: Int, height: Int, codec: Int, csd: ByteArray) {}
@@ -632,11 +637,11 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Button(onClick = { session.scanDeck(); scanned = true }) {
+            Button(onClick = { session.scanDeck(); scanned = true }, enabled = !locked) {
                 Text(if (scanned) "Rescan deck" else "Scan deck")
             }
             Box {
-                Button(onClick = { session.listWindows(); windowMenuOpen = true }) {
+                Button(onClick = { session.listWindows(); windowMenuOpen = true }, enabled = !locked) {
                     Text("Focus window ▾")
                 }
                 DropdownMenu(expanded = windowMenuOpen, onDismissRequest = { windowMenuOpen = false }) {
@@ -656,7 +661,7 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
         // When set, focusing a window also starts its slideshow (F5). Turn off for
         // PDFs in a browser, where F5 reloads the page.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = startShowOnFocus, onCheckedChange = { startShowOnFocus = it })
+            Switch(checked = startShowOnFocus, onCheckedChange = { startShowOnFocus = it }, enabled = !locked)
             Text("Start show on focus (F5)", style = MaterialTheme.typography.bodySmall)
         }
         if (!scanned) {
@@ -674,40 +679,85 @@ fun ClickerScreen(session: ExtenderSession, addr: String) {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 PreviewTile(prevPreview, dim = true, label = "Previous slide")
-                BigButton("◀  Prev") { session.tapKey(HidKeys.PAGE_UP) }
+                BigButton("◀  Prev", enabled = !locked) { session.tapKey(HidKeys.PAGE_UP) }
             }
+            // The lock sits in the middle of the two nav buttons — a direct tap
+            // toggles it; a tap-and-swipe is ignored.
+            LockToggle(locked = locked) { locked = !locked }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 PreviewTile(nextPreview, dim = false, label = "Next slide")
-                BigButton("Next  ▶") { session.tapKey(HidKeys.PAGE_DOWN) }
+                BigButton("Next  ▶", enabled = !locked) { session.tapKey(HidKeys.PAGE_DOWN) }
             }
         }
         // Keep the remote uncluttered: the secondary actions hide behind a toggle.
-        TextButton(onClick = { showMore = !showMore }) {
+        TextButton(onClick = { showMore = !showMore }, enabled = !locked) {
             Text(if (showMore) "Fewer options" else "More options")
         }
         if (showMore) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Button(onClick = { session.tapKey(HidKeys.HOME) }) { Text("First") }
-                Button(onClick = { session.tapKey(HidKeys.END) }) { Text("Last") }
+                Button(onClick = { session.tapKey(HidKeys.HOME) }, enabled = !locked) { Text("First") }
+                Button(onClick = { session.tapKey(HidKeys.END) }, enabled = !locked) { Text("Last") }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 // No universal "blank" key: PowerPoint uses B (black), Keynote / Google
                 // Slides use '.' — so expose both (see docs/M6-presentation-clicker.md).
-                Button(onClick = { session.tapKey(HidKeys.B) }) { Text("Blank (PPT)") }
-                Button(onClick = { session.tapKey(HidKeys.PERIOD) }) { Text("Blank (.)") }
+                Button(onClick = { session.tapKey(HidKeys.B) }, enabled = !locked) { Text("Blank (PPT)") }
+                Button(onClick = { session.tapKey(HidKeys.PERIOD) }, enabled = !locked) { Text("Blank (.)") }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Button(onClick = { session.tapKey(HidKeys.F5) }) { Text("Start (F5)") }
-                Button(onClick = { session.tapKey(HidKeys.ESCAPE) }) { Text("End (Esc)") }
+                Button(onClick = { session.tapKey(HidKeys.F5) }, enabled = !locked) { Text("Start (F5)") }
+                Button(onClick = { session.tapKey(HidKeys.ESCAPE) }, enabled = !locked) { Text("End (Esc)") }
             }
         }
     }
 }
 
 @Composable
-private fun BigButton(label: String, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = Modifier.size(width = 150.dp, height = 90.dp)) {
+private fun BigButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(width = 150.dp, height = 90.dp),
+    ) {
         Text(label, style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+/**
+ * A lock toggle that guards a screen against accidental presses. Locked → a closed
+ * padlock on a yellow background; unlocked → just an open padlock on a transparent
+ * background. It reacts only to a clean, direct tap: a tap that turns into a swipe
+ * (or any drag passing over it) is ignored, and the touch is consumed so it never
+ * leaks through to a gesture surface underneath (e.g. the trackpad).
+ */
+@Composable
+private fun LockToggle(locked: Boolean, onToggle: () -> Unit) {
+    val tapSlop = 16f
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (locked) Color(0xFFFFD600) else Color.Transparent)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    var moved = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change != null) {
+                            moved += (change.position - change.previousPosition).getDistance()
+                            change.consume()
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    }
+                    if (moved < tapSlop) onToggle()
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (locked) "🔒" else "🔓", fontSize = 30.sp)
     }
 }
 
@@ -900,6 +950,9 @@ fun TrackpadScreen(session: ExtenderSession) {
     // Pointer-speed multiplier, persisted app-wide so it survives reconnects. Read
     // inside the gesture loop so changes take effect without restarting pointerInput.
     var sensitivity by remember { mutableStateOf(ConnectionStore.loadSensitivity(context)) }
+    // When locked, the pad ignores all touches and the buttons/slider are disabled,
+    // so a stray hand can't move the cursor; only the central lock toggle stays live.
+    var locked by remember { mutableStateOf(false) }
     val scrollDivisor = 40f
     val tapSlop = 16f
     // A click with a little haptic tick, like a real trackpad. button: 0=L, 1=R.
@@ -914,7 +967,8 @@ fun TrackpadScreen(session: ExtenderSession) {
                 .fillMaxWidth()
                 .weight(1f)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .pointerInput(session) {
+                .pointerInput(session, locked) {
+                    if (locked) return@pointerInput
                     awaitEachGesture {
                         awaitFirstDown()
                         var moved = 0f
@@ -943,12 +997,19 @@ fun TrackpadScreen(session: ExtenderSession) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "Trackpad\n\nDrag to move • tap to click\nTwo fingers: scroll • two-finger tap: right-click",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // The lock sits in the middle of the pad — a direct tap toggles it;
+                // its touches are consumed so they never move the cursor.
+                LockToggle(locked = locked) { locked = !locked }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    if (locked) "Locked — tap the lock to unlock"
+                    else "Trackpad\n\nDrag to move • tap to click\nTwo fingers: scroll • two-finger tap: right-click",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -961,12 +1022,13 @@ fun TrackpadScreen(session: ExtenderSession) {
             onValueChange = { sensitivity = it },
             onValueChangeFinished = { ConnectionStore.saveSensitivity(context, sensitivity) },
             valueRange = 0.5f..4f,
+            enabled = !locked,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { click(0) }, modifier = Modifier.weight(1f)) { Text("Left click") }
-            Button(onClick = { click(1) }, modifier = Modifier.weight(1f)) { Text("Right click") }
+            Button(onClick = { click(0) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Left click") }
+            Button(onClick = { click(1) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Right click") }
         }
     }
 }

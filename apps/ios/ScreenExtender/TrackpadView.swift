@@ -10,18 +10,29 @@ struct TrackpadView: View {
     let onSwitchMode: () -> Void
 
     @State private var sensitivity: Float = ConnectionStore.loadSensitivity()
+    /// When locked, the pad ignores all touches and the buttons/slider are disabled,
+    /// so a stray hand can't move the cursor; only the central lock toggle stays live.
+    @State private var locked = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             TrackpadSurface(session: session, sensitivity: sensitivity)
+                .allowsHitTesting(!locked)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: .secondarySystemBackground))
                 .overlay(alignment: .center) {
-                    Text("Trackpad\n\nDrag to move  •  tap to click\nTwo fingers: scroll  •  two-finger tap: right-click")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
+                    VStack(spacing: 16) {
+                        // The lock sits in the middle of the pad — a direct tap toggles
+                        // it; its touches are captured so they never move the cursor.
+                        LockToggle(locked: locked) { locked.toggle() }
+                        Text(locked
+                             ? "Locked — tap the lock to unlock"
+                             : "Trackpad\n\nDrag to move  •  tap to click\nTwo fingers: scroll  •  two-finger tap: right-click")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                    }
                 }
             controls
         }
@@ -51,6 +62,7 @@ struct TrackpadView: View {
             }
         }
         .padding(8)
+        .disabled(locked)
     }
 
     private func click(_ button: Int32) {
