@@ -1,0 +1,34 @@
+name: ScreenExtender
+options:
+  bundleIdPrefix: com.universalsim
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16"
+
+targets:
+  ScreenExtender:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ScreenExtender
+        excludes:
+          - "ScreenExtender-Bridging-Header.h"
+    dependencies:
+      - framework: libs/ExtenderMobile.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.universalsim.screenextender
+        SWIFT_OBJC_BRIDGING_HEADER: ScreenExtender/ScreenExtender-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../../crates/mobile-ffi/include
+        SWIFT_VERSION: "5.0"
+        ENABLE_PREVIEWS: "NO"
+    info:
+      path: ScreenExtender/Info.plist
+      properties:
+        CFBundleDisplayName: Universal Screens
+        NSLocalNetworkUsageDescription: "Universal Screens needs local network access to connect to a presentation host on the same Wi-Fi."
+        NSCameraUsageDescription: "Universal Screens uses the camera to scan the host's QR connect code."
+        NSBonjourServices:
+          - _extender._tcp

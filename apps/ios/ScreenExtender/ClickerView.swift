@@ -14,6 +14,7 @@ struct ClickerView: View {
     let session: ExtenderSession
     let addr: String
     let onDisconnect: () -> Void
+    var onSwitchMode: (() -> Void)? = nil
 
     @State private var current: UIImage?
     @State private var previous: UIImage?
@@ -62,7 +63,8 @@ struct ClickerView: View {
 
     private var header: some View {
         HStack {
-            Text("Clicker").font(.headline)
+            Button("Clicker") { onSwitchMode?() }.font(.headline)
+                .disabled(onSwitchMode == nil)
             Spacer()
             Button("Disconnect", action: onDisconnect)
         }

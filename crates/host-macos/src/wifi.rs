@@ -1,18 +1,17 @@
-//! Read the Mac's current Wi-Fi network so the GUI can embed the SSID in the
-//! combined connect QR (https URL fragment) and show the network name in the UI.
+//! Read the Mac's current Wi-Fi network so the GUI can embed the SSID and
+//! password in the combined connect QR (https URL fragment).
 //!
-//! Uses the `airport` CLI — private but present on macOS 10.7 through 14.
-//! Password extraction requires a keychain dialog and is deferred to a later
-//! version; the connect QR embeds the host address + PIN regardless, so the
-//! phone can connect once it's on the same network.
+//! SSID: via the `airport` CLI (private, present on macOS 10.7–14).
+//! Password: via `security find-generic-password` against the System keychain.
+//! macOS shows a one-time "Allow / Always Allow" dialog; after "Always Allow"
+//! subsequent reads are silent — same end-result as the Windows netsh path.
 
 use std::process::Command;
 
 /// The current Wi-Fi network.
 pub struct WifiInfo {
     pub ssid: String,
-    /// Cleartext key if we could read it (currently always `None` on macOS
-    /// without a keychain prompt — left in the struct for future use).
+    /// Cleartext key read from the System keychain (triggers a one-time dialog).
     pub password: Option<String>,
     /// QR auth tag: `"WPA"`, `"WEP"`, or `"nopass"`.
     pub auth: String,
@@ -26,7 +25,23 @@ impl WifiInfo {
 
 pub fn current_wifi() -> Option<WifiInfo> {
     let ssid = current_ssid()?;
-    Some(WifiInfo { ssid, password: None, auth: "WPA".to_owned() })
+    let password = keychain_wifi_password(&ssid);
+    Some(WifiInfo { ssid, password, auth: "WPA".to_owned() })
+}
+
+/// Read the Wi-Fi password for `ssid` from the System keychain.
+/// Triggers a macOS "Allow access" dialog on first call; silent after "Always Allow".
+fn keychain_wifi_password(ssid: &str) -> Option<String> {
+    let out = Command::new("security")
+        .args(["find-generic-password", "-a", ssid, "-w"])
+        .output()
+        .ok()?;
+    if out.status.success() {
+        let pw = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if !pw.is_empty() { Some(pw) } else { None }
+    } else {
+        None
+    }
 }
 
 /// SSID of the connected Wi-Fi interface, via the `airport` utility.

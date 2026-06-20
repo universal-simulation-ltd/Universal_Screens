@@ -552,40 +552,48 @@ impl eframe::App for HostApp {
                     egui::Color32::from_rgb(0x6b, 0x6b, 0x76)
                 };
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("With \u{2764} from UNISIM.co.uk").color(muted).size(12.0),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let lock = ui.button("\u{1f512}").on_hover_text("Security");
-                        let lock_popup = ui.make_persistent_id("security_popup");
-                        if lock.clicked() {
-                            ui.memory_mut(|m| m.toggle_popup(lock_popup));
-                        }
-                        egui::popup::popup_below_widget(
-                            ui,
-                            lock_popup,
-                            &lock,
-                            egui::PopupCloseBehavior::CloseOnClickOutside,
-                            |ui| {
-                                ui.set_max_width(320.0);
-                                ui.label(
-                                    egui::RichText::new("\u{1f512}  Security").strong().size(15.0),
-                                );
-                                ui.separator();
-                                ui.label(egui::RichText::new("What's protected").strong());
-                                ui.label("• A 4-digit pairing PIN is required to connect — scanning the QR fills it in automatically.");
-                                ui.label("• The host only accepts connections while this window is open; close it to stop.");
-                                ui.add_space(8.0);
-                                ui.label(egui::RichText::new("Not fully locked down").strong());
-                                ui.label("• Traffic is sent unencrypted over your local network (no TLS). Only use it on networks you trust.");
-                                ui.label("• The PIN is a basic gate, not encryption: anyone on the same network who has the PIN (or sees the QR) can control this Mac.");
-                                ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no per-device approval.");
-                                ui.label("• The host listens on all network interfaces on its port.");
-                                ui.add_space(6.0);
-                                ui.small("Tip: regenerate the PIN (Actions menu) after sharing your screen.");
-                            },
-                        );
+                    let btn_w = 28.0;
+                    ui.add_space(btn_w);
+                    let remaining = ui.available_width() - btn_w;
+                    ui.allocate_ui(egui::vec2(remaining, ui.available_height()), |ui| {
+                        ui.centered_and_justified(|ui| {
+                            ui.hyperlink_to(
+                                egui::RichText::new("With \u{2764} from UNISIM.co.uk")
+                                    .color(muted)
+                                    .size(12.0),
+                                "https://opensource.unisim.co.uk",
+                            );
+                        });
                     });
+                    let lock = ui.button("\u{1f512}").on_hover_text("Security");
+                    let lock_popup = ui.make_persistent_id("security_popup");
+                    if lock.clicked() {
+                        ui.memory_mut(|m| m.toggle_popup(lock_popup));
+                    }
+                    egui::popup::popup_below_widget(
+                        ui,
+                        lock_popup,
+                        &lock,
+                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                        |ui| {
+                            ui.set_max_width(320.0);
+                            ui.label(
+                                egui::RichText::new("\u{1f512}  Security").strong().size(15.0),
+                            );
+                            ui.separator();
+                            ui.label(egui::RichText::new("What's protected").strong());
+                            ui.label("• A 4-digit pairing PIN is required to connect — scanning the QR fills it in automatically.");
+                            ui.label("• The host only accepts connections while this window is open; close it to stop.");
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Not fully locked down").strong());
+                            ui.label("• Traffic is sent unencrypted over your local network (no TLS). Only use it on networks you trust.");
+                            ui.label("• The PIN is a basic gate, not encryption: anyone on the same network who has the PIN (or sees the QR) can control this Mac.");
+                            ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no per-device approval.");
+                            ui.label("• The host listens on all network interfaces on its port.");
+                            ui.add_space(6.0);
+                            ui.small("Tip: regenerate the PIN (Actions menu) after sharing your screen.");
+                        },
+                    );
                 });
             });
 

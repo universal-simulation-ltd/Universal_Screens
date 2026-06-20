@@ -113,6 +113,26 @@ final class ExtenderSession {
         extender_send_touch(handle, id, phase, x, y)
     }
 
+    func sendMouseMoveRelative(dx: Float, dy: Float) {
+        guard let handle else { return }
+        extender_send_mouse_move_relative(handle, dx, dy)
+    }
+
+    func sendMouseButton(button: Int32, pressed: Bool) {
+        guard let handle else { return }
+        let btn: ExtenderMouseButton = switch button {
+        case 1: EXTENDER_MOUSE_RIGHT
+        case 2: EXTENDER_MOUSE_MIDDLE
+        default: EXTENDER_MOUSE_LEFT
+        }
+        extender_send_mouse_button(handle, btn, pressed)
+    }
+
+    func sendScroll(dx: Float, dy: Float) {
+        guard let handle else { return }
+        extender_send_scroll(handle, dx, dy)
+    }
+
     /// Pre-scan the open document so the host can preview adjacent slides.
     func scanDeck() {
         guard let handle else { return }

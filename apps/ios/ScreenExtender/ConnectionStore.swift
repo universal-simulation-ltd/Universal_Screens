@@ -1,11 +1,14 @@
 import Foundation
 
-/// A remembered host shown on the connect screen for quick reconnect. `os` is
-/// learned from the host's HostInfo after connecting (empty until then).
+/// A remembered host shown on the connect screen for quick reconnect. `os` and
+/// `hostname` are learned from the host's HostInfo after connecting. `mode` is
+/// the last-chosen mode (empty = re-ask next time).
 struct SavedConnection: Codable, Identifiable {
     var addr: String
     var hostname: String = ""
-    var os: String = "" // "windows" | "macos" | "linux" | ""
+    var os: String = ""     // "windows" | "macos" | "linux" | ""
+    var mode: String = ""   // Mode.rawValue, empty = show picker next time
+    var pin: Int = 0
     var hidden: Bool = false
     var lastConnected: Double = 0
 
@@ -15,6 +18,7 @@ struct SavedConnection: Codable, Identifiable {
 /// Persists saved connections in `UserDefaults` as JSON, one entry per host:port.
 enum ConnectionStore {
     private static let key = "savedConnections"
+    private static let sensitivityKey = "trackpadSensitivity"
 
     static func load() -> [SavedConnection] {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -24,9 +28,12 @@ enum ConnectionStore {
     }
 
     /// Insert or update the entry for `addr`, stamping it most-recently-used.
-    static func remember(addr: String) {
+    /// Pass `mode: ""` to clear the remembered mode so the picker shows next time.
+    static func remember(addr: String, mode: String = "", pin: Int = 0) {
         var list = load()
         var entry = list.first { $0.addr == addr } ?? SavedConnection(addr: addr)
+        entry.mode = mode
+        entry.pin = pin
         entry.hidden = false
         entry.lastConnected = Date().timeIntervalSince1970
         list.removeAll { $0.addr == addr }
@@ -53,6 +60,19 @@ enum ConnectionStore {
     static func delete(addr: String) {
         save(load().filter { $0.addr != addr })
     }
+
+    // MARK: - Trackpad sensitivity
+
+    static func loadSensitivity() -> Float {
+        let v = UserDefaults.standard.float(forKey: sensitivityKey)
+        return v > 0 ? v : 1.0
+    }
+
+    static func saveSensitivity(_ value: Float) {
+        UserDefaults.standard.set(value, forKey: sensitivityKey)
+    }
+
+    // MARK: - Private
 
     private static func save(_ list: [SavedConnection]) {
         if let data = try? JSONEncoder().encode(list) {
