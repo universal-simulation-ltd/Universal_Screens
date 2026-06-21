@@ -1,0 +1,355 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0D65B0868127697F33DBDD3F /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17AC50A50AEA18D66558B793 /* ContentView.swift */; };
+		3FA888C8DE891836DFA9D0E0 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */; };
+		5BFDD788B2516A371DC5965F /* HidKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4353D077316F6FF60AD9ACD /* HidKeys.swift */; };
+		6E5FD101AF8C8C5775A1F310 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9694C23DA25CA1175158EB8 /* ConnectView.swift */; };
+		71E8B4D99144C7B4728ECF4E /* ExtenderMobile.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2F1963C701C29D05C9482B08 /* ExtenderMobile.xcframework */; };
+		79072F52C5AB085B7D794250 /* VideoDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD875701149E094733F7FEA /* VideoDecoder.swift */; };
+		AA5229D7BA9DEB31BD895DCB /* ClickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5142614823D65AFD5998F5E4 /* ClickerView.swift */; };
+		B8B6EF6783DDD2BC8421A914 /* ScreenExtenderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */; };
+		BAA41F97706C7C589B52CBDB /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */; };
+		C83EFE7F147BEE1300E7CC54 /* ExtenderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F1AE010ED690FC1609CD92 /* ExtenderSession.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		17AC50A50AEA18D66558B793 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		2F1963C701C29D05C9482B08 /* ExtenderMobile.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ExtenderMobile.xcframework; path = libs/ExtenderMobile.xcframework; sourceTree = "<group>"; };
+		4CD875701149E094733F7FEA /* VideoDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDecoder.swift; sourceTree = "<group>"; };
+		5142614823D65AFD5998F5E4 /* ClickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClickerView.swift; sourceTree = "<group>"; };
+		60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenExtenderApp.swift; sourceTree = "<group>"; };
+		62F3EBF21BA1262B132748DD /* ScreenExtender.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScreenExtender.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		88BAE13F8414308703A542A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
+		B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
+		D4353D077316F6FF60AD9ACD /* HidKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HidKeys.swift; sourceTree = "<group>"; };
+		D9694C23DA25CA1175158EB8 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		D9F1AE010ED690FC1609CD92 /* ExtenderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderSession.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		55100C06BE027A5688A0D5E3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				71E8B4D99144C7B4728ECF4E /* ExtenderMobile.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		154FD341E09EE5C2E8EE44E8 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2F1963C701C29D05C9482B08 /* ExtenderMobile.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		22F26553357B231DCA1C3A65 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				62F3EBF21BA1262B132748DD /* ScreenExtender.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BA8FB22BEF1FDADC72FB62DD /* ScreenExtender */ = {
+			isa = PBXGroup;
+			children = (
+				5142614823D65AFD5998F5E4 /* ClickerView.swift */,
+				B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */,
+				D9694C23DA25CA1175158EB8 /* ConnectView.swift */,
+				17AC50A50AEA18D66558B793 /* ContentView.swift */,
+				D9F1AE010ED690FC1609CD92 /* ExtenderSession.swift */,
+				D4353D077316F6FF60AD9ACD /* HidKeys.swift */,
+				88BAE13F8414308703A542A5 /* Info.plist */,
+				60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */,
+				8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */,
+				4CD875701149E094733F7FEA /* VideoDecoder.swift */,
+			);
+			path = ScreenExtender;
+			sourceTree = "<group>";
+		};
+		D7A78CA2A1A1E50BEF65446E = {
+			isa = PBXGroup;
+			children = (
+				BA8FB22BEF1FDADC72FB62DD /* ScreenExtender */,
+				154FD341E09EE5C2E8EE44E8 /* Frameworks */,
+				22F26553357B231DCA1C3A65 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		656616E15DB474DF096264DD /* ScreenExtender */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6EF66EFFD97361849677326C /* Build configuration list for PBXNativeTarget "ScreenExtender" */;
+			buildPhases = (
+				94174CA41DA1AA5F98FCF0C7 /* Sources */,
+				55100C06BE027A5688A0D5E3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ScreenExtender;
+			packageProductDependencies = (
+			);
+			productName = ScreenExtender;
+			productReference = 62F3EBF21BA1262B132748DD /* ScreenExtender.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		51704E3CA66317FA5E65F056 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 8C0475951F4B6F874AB74377 /* Build configuration list for PBXProject "ScreenExtender" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D7A78CA2A1A1E50BEF65446E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 22F26553357B231DCA1C3A65 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				656616E15DB474DF096264DD /* ScreenExtender */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		94174CA41DA1AA5F98FCF0C7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA5229D7BA9DEB31BD895DCB /* ClickerView.swift in Sources */,
+				6E5FD101AF8C8C5775A1F310 /* ConnectView.swift in Sources */,
+				BAA41F97706C7C589B52CBDB /* ConnectionStore.swift in Sources */,
+				0D65B0868127697F33DBDD3F /* ContentView.swift in Sources */,
+				C83EFE7F147BEE1300E7CC54 /* ExtenderSession.swift in Sources */,
+				5BFDD788B2516A371DC5965F /* HidKeys.swift in Sources */,
+				B8B6EF6783DDD2BC8421A914 /* ScreenExtenderApp.swift in Sources */,
+				3FA888C8DE891836DFA9D0E0 /* StreamView.swift in Sources */,
+				79072F52C5AB085B7D794250 /* VideoDecoder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2B1D5FFFC39DF4C60CEEE7EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		673BF0156B2BE07A043C00D9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C117AC9CFF511D6B5EB52BFD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = ZH9C5TS86A;
+				ENABLE_PREVIEWS = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"libs\"",
+				);
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../crates/mobile-ffi/include";
+				INFOPLIST_FILE = ScreenExtender/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.universalsim.screenextender;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ScreenExtender/ScreenExtender-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DC369EC89AF785C043C0C342 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = ZH9C5TS86A;
+				ENABLE_PREVIEWS = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"libs\"",
+				);
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../crates/mobile-ffi/include";
+				INFOPLIST_FILE = ScreenExtender/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.universalsim.screenextender;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ScreenExtender/ScreenExtender-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6EF66EFFD97361849677326C /* Build configuration list for PBXNativeTarget "ScreenExtender" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C117AC9CFF511D6B5EB52BFD /* Debug */,
+				DC369EC89AF785C043C0C342 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8C0475951F4B6F874AB74377 /* Build configuration list for PBXProject "ScreenExtender" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				673BF0156B2BE07A043C00D9 /* Debug */,
+				2B1D5FFFC39DF4C60CEEE7EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 51704E3CA66317FA5E65F056 /* Project object */;
+}

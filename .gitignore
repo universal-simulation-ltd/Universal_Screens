@@ -6,3 +6,4 @@
 native/**/.build/
 native/**/DerivedData/
 *.xcuserstate
+**/xcuserdata/

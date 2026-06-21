@@ -161,7 +161,7 @@ final class VideoDecoder {
         blob.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             let pointers: [UnsafePointer<UInt8>] = offsets.map { base + $0 }
-            pointers.withUnsafeBufferPointer { pptr in
+            _ = pointers.withUnsafeBufferPointer { pptr in
                 sizes.withUnsafeBufferPointer { sptr in
                     if codec == 1 {
                         CMVideoFormatDescriptionCreateFromHEVCParameterSets(
