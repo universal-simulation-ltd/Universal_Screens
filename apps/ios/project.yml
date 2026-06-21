@@ -20,6 +20,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.universalsim.screenextender
+        DEVELOPMENT_TEAM: "ZH9C5TS86A"
+        CODE_SIGN_STYLE: Automatic
         SWIFT_OBJC_BRIDGING_HEADER: ScreenExtender/ScreenExtender-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/../../crates/mobile-ffi/include
         SWIFT_VERSION: "5.0"
