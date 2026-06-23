@@ -1,0 +1,17 @@
+[package]
+name = "extender-web-bridge"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# M7a transport spike: a WebSocket front-end for the existing TCP host protocol,
+# so a browser tab can reach an `extender-host`. See docs/M7-browser-client.md.
+
+[dependencies]
+tungstenite = "0.24"
+
+[dev-dependencies]
+# The round-trip test builds real protocol messages to prove the bridge forwards
+# the exact `postcard` bytes the native client/host exchange.
+extender-protocol.workspace = true
+postcard = { version = "1.1.3", features = ["use-std"] }

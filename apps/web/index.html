@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Universal Screens</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --accent: #ff6a00;
+    --accent-press: #e85f00;
+    --bg: #f4f4f6;
+    --card: #ffffff;
+    --text: #18181b;
+    --muted: #6b6b76;
+    --line: #e4e4ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f0f12; --card: #1b1b20; --text: #f4f4f6; --muted: #9a9aa6; --line: #2b2b33; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    display: flex; justify-content: center; align-items: flex-start;
+  }
+
+  /* ---- connect view (centered narrow card, like the phone app) ---- */
+  #connect-view { width: 100%; max-width: 460px; padding: 2rem 1.25rem 3rem; }
+  .brand { text-align: center; margin-bottom: 1.75rem; }
+  .brand svg { width: 64px; height: 64px; }
+  /* SVG presentation attributes can't read CSS var()s — paint via CSS instead. */
+  .brand .r-back { fill: none; stroke: var(--muted); stroke-width: 3; }
+  .brand .r-front { fill: var(--accent); }
+  .brand h1 { font-size: 1.6rem; font-weight: 800; margin: .6rem 0 .15rem; letter-spacing: -.01em; }
+  .brand p { margin: 0; color: var(--muted); font-size: .92rem; }
+
+  .section-label { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 1.4rem .25rem .5rem; }
+
+  .field { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .6rem; }
+  .field label { font-size: .8rem; color: var(--muted); }
+  .field input { font: inherit; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--card); color: var(--text); }
+  .fields-row { display: flex; gap: .6rem; }
+  .fields-row .field:first-child { flex: 1; }
+
+  /* mode rows + saved rows share the card-row look */
+  .row-btn {
+    display: flex; align-items: center; gap: .85rem; width: 100%; text-align: left;
+    padding: .8rem .85rem; margin-bottom: .55rem; border: 1px solid var(--line);
+    border-radius: .75rem; background: var(--card); color: var(--text); cursor: pointer;
+    font: inherit; transition: border-color .12s, transform .04s;
+  }
+  .row-btn:hover { border-color: var(--accent); }
+  .row-btn:active { transform: scale(.99); }
+  .row-btn .glyph { font-size: 1.5rem; width: 1.9rem; text-align: center; flex: none; }
+  .row-btn .body { min-width: 0; }
+  .row-btn .body .title { font-weight: 600; }
+  .row-btn .body .blurb { font-size: .82rem; color: var(--muted); }
+  .row-btn .del { margin-left: auto; flex: none; border: none; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: .2rem .4rem; border-radius: .4rem; }
+  .row-btn .del:hover { color: #d22; background: #0001; }
+
+  #saved-toggle { background: none; border: none; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; padding: .2rem; display: flex; align-items: center; gap: .4rem; }
+  #saved-toggle .chev { transition: transform .15s; color: var(--muted); }
+  #saved-toggle.open .chev { transform: rotate(90deg); }
+  #saved-list { margin-top: .5rem; }
+
+  #connect-status { margin-top: 1rem; color: var(--muted); font-size: .85rem; min-height: 1.2em; text-align: center; }
+  .footer { margin-top: 1.5rem; text-align: center; }
+  .link-btn { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; text-decoration: underline; cursor: pointer; }
+
+  /* ---- session view (full screen) ---- */
+  #session-view { display: none; width: 100%; height: 100%; flex-direction: column; background: #000; }
+  body.in-session #connect-view { display: none; }
+  body.in-session { align-items: stretch; }
+  body.in-session #session-view { display: flex; }
+  .topbar { display: flex; align-items: center; gap: .5rem; padding: .5rem .75rem; background: var(--card); color: var(--text); border-bottom: 1px solid var(--line); }
+  .topbar .host { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .spacer { flex: 1; }
+  .topbar button { font: inherit; padding: .35rem .7rem; border-radius: .5rem; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .topbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #screen { width: 100%; height: 100%; display: block; background: #000; outline: none; touch-action: none; }
+  #video-hint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #fff8; font-size: .95rem; text-align: center; padding: 2rem; pointer-events: none; }
+  #log { font: 11px/1.4 ui-monospace, monospace; color: #cfcfd6; background: #000; max-height: 6.5rem; overflow: auto; padding: .35rem .6rem; border-top: 1px solid #222; white-space: pre-wrap; }
+  .ok { color: #4ade80; } .err { color: #f87171; } .dim { opacity: .65; }
+</style>
+</head>
+<body>
+  <main id="connect-view">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect class="r-back" x="6" y="14" width="38" height="28" rx="5"/>
+        <rect class="r-front" x="20" y="24" width="38" height="28" rx="5"/>
+      </svg>
+      <h1>Universal Screens</h1>
+      <p>Mirror, remote control &amp; presentation clicker</p>
+    </div>
+
+    <div id="saved-section" hidden>
+      <button id="saved-toggle"><span class="chev">▶</span> Saved connections</button>
+      <div id="saved-list" hidden></div>
+    </div>
+
+    <div class="section-label">New connection</div>
+    <div class="fields-row">
+      <div class="field"><label for="addr">Bridge host:port</label><input id="addr" value="127.0.0.1:9002" /></div>
+      <div class="field" style="max-width:5.5rem"><label for="pin">PIN</label><input id="pin" value="0" inputmode="numeric" /></div>
+    </div>
+    <div id="modes"></div>
+
+    <div id="connect-status"></div>
+    <div class="footer">
+      <button id="selftest" class="link-btn">Run decode self-test</button>
+    </div>
+  </main>
+
+  <section id="session-view">
+    <div class="topbar">
+      <span class="host" id="host-label">Connecting…</span>
+      <span class="spacer"></span>
+      <button id="btn-lock" hidden>Lock cursor</button>
+      <button id="btn-fullscreen">Fullscreen</button>
+      <button id="btn-disconnect" class="primary">Disconnect</button>
+    </div>
+    <div id="stage">
+      <canvas id="screen" tabindex="0"></canvas>
+      <div id="video-hint"></div>
+    </div>
+    <div id="log"></div>
+  </section>
+
+  <script type="module">
+    import { boot } from "./src/client.js";
+    boot();
+  </script>
+</body>
+</html>

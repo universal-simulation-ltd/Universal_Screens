@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Universal Screens — browser client spike (M7a)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.25rem; }
+  h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1rem; opacity: .7; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; margin-bottom: .75rem; }
+  label { display: flex; flex-direction: column; font-size: .8rem; gap: .15rem; }
+  input, select { font: inherit; padding: .3rem .4rem; }
+  button { font: inherit; padding: .4rem .9rem; cursor: pointer; border-radius: .4rem; border: 1px solid #f60; background: #f60; color: #fff; }
+  button.secondary { background: transparent; color: inherit; }
+  button:disabled { opacity: .5; cursor: default; }
+  #log { font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; background: #0001; border: 1px solid #0002; border-radius: .4rem; padding: .6rem .75rem; height: 22rem; overflow: auto; }
+  .ok { color: #1a8f3c; } .err { color: #d22; } .dim { opacity: .6; }
+</style>
+</head>
+<body>
+  <h1>Universal Screens — browser client spike</h1>
+  <p class="sub">M7a transport proof: WebSocket → <code>extender-web-bridge</code> → host. Completes the
+  <code>ClientHello</code> handshake and decodes the downstream <code>Message</code> stream. No render yet (that's M7c).</p>
+
+  <div class="row">
+    <label>Bridge host:port<input id="addr" value="127.0.0.1:9002" size="18" /></label>
+    <label>PIN<input id="pin" value="0" size="6" inputmode="numeric" /></label>
+    <label>Mode
+      <select id="mode">
+        <option value="1">Mirror primary</option>
+        <option value="0">Virtual display (extend)</option>
+        <option value="2">Control only</option>
+      </select>
+    </label>
+    <button id="connect">Connect</button>
+    <button id="disconnect" class="secondary" disabled>Disconnect</button>
+    <button id="sendtest" class="secondary" disabled>Send test input</button>
+  </div>
+
+  <div id="log"></div>
+
+<script type="module">
+// ----------------------------------------------------------------------------
+// Minimal `postcard` codec — just enough for the M7a spike. The real client
+// uses a wasm-bindgen shim over crates/protocol (M7b); this hand-rolled subset
+// proves the transport without that toolchain. Keep it in step with
+// crates/protocol/src/lib.rs until the shim replaces it.
+// ----------------------------------------------------------------------------
+
+// PROTOCOL_VERSION in crates/protocol/src/lib.rs. Bump in lockstep.
+const PROTOCOL_VERSION = 10;
+
+class Reader {
+  constructor(bytes) { this.b = bytes; this.i = 0; }
+  u8() { return this.b[this.i++]; }
+  bool() { return this.u8() !== 0; }
+  // Unsigned LEB128 varint (postcard's encoding for u16/u32/u64/usize).
+  varint() {
+    let result = 0n, shift = 0n;
+    for (;;) {
+      const byte = BigInt(this.b[this.i++]);
+      result |= (byte & 0x7fn) << shift;
+      if ((byte & 0x80n) === 0n) break;
+      shift += 7n;
+    }
+    return result;
+  }
+  u32() { return Number(this.varint()); }
+  // Signed varint: postcard zig-zag encodes, then LEB128.
+  ivar() { const z = this.varint(); return Number((z >> 1n) ^ -(z & 1n)); }
+  bytes() { const n = this.u32(); const out = this.b.slice(this.i, this.i + n); this.i += n; return out; }
+  str() { return new TextDecoder().decode(this.bytes()); }
+}
+
+class Writer {
+  constructor() { this.parts = []; }
+  u8(n) { this.parts.push(Uint8Array.of(n & 0xff)); return this; }
+  varint(n) {
+    let v = BigInt(n); const out = [];
+    do { let byte = Number(v & 0x7fn); v >>= 7n; if (v !== 0n) byte |= 0x80; out.push(byte); } while (v !== 0n);
+    this.parts.push(Uint8Array.from(out)); return this;
+  }
+  f32(n) { const a = new Uint8Array(4); new DataView(a.buffer).setFloat32(0, n, true); this.parts.push(a); return this; }
+  finish() {
+    const len = this.parts.reduce((s, p) => s + p.length, 0);
+    const out = new Uint8Array(len); let o = 0;
+    for (const p of this.parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
+}
+
+// ClientHello (a struct, fields in declaration order). platform=0 (Unknown):
+// a browser isn't one of the native ClientPlatform variants.
+function encodeHello({ width, height, captureMode, pin }) {
+  return new Writer()
+    .varint(PROTOCOL_VERSION).varint(width).varint(height)
+    .varint(captureMode).varint(0 /* platform: Unknown */).varint(pin)
+    .finish();
+}
+
+// Input enum — only MouseMove (variant 0) for the "send test input" button.
+function encodeMouseMove(x, y) { return new Writer().varint(0).f32(x).f32(y).finish(); }
+
+// Message enum (downstream), discriminants in declaration order.
+function decodeMessage(bytes) {
+  const r = new Reader(bytes);
+  const tag = r.u32();
+  switch (tag) {
+    case 0: { // StreamStart
+      const width = r.u32(), height = r.u32(), codec = r.u32();
+      const count = r.u32(), parameterSets = [];
+      for (let k = 0; k < count; k++) parameterSets.push(r.bytes());
+      return { kind: "StreamStart", width, height, codec: codec === 0 ? "H264" : "Hevc", parameterSets };
+    }
+    case 1: { // Frame
+      const ptsValue = r.ivar(), ptsTimescale = r.ivar(), keyframe = r.bool(), data = r.bytes();
+      return { kind: "Frame", ptsValue, ptsTimescale, keyframe, data };
+    }
+    case 2: { // Snapshot
+      const width = r.u32(), height = r.u32(), slot = r.ivar(), data = r.bytes();
+      return { kind: "Snapshot", width, height, slot, dataLen: data.length };
+    }
+    case 3: return { kind: "HostInfo", os: r.str(), name: r.str() }; // HostInfo
+    case 4: { // WindowList
+      const n = r.u32(), windows = [];
+      for (let k = 0; k < n; k++) windows.push([r.ivar(), r.str()]);
+      return { kind: "WindowList", windows };
+    }
+    default: return { kind: "Unknown", tag };
+  }
+}
+
+// Derive the WebCodecs avc1 codec string + an avcC description box from the raw
+// SPS/PPS NALs in StreamStart — the M7c decoder config, probed here (not used to
+// render) to de-risk it early.
+function avcConfigFromParameterSets(sets) {
+  const sps = sets[0], pps = sets[1];
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  const codec = `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`;
+  const avcc = new Uint8Array([
+    1, sps[1], sps[2], sps[3], 0xff,
+    0xe1, (sps.length >> 8) & 0xff, sps.length & 0xff, ...sps,
+    1, (pps.length >> 8) & 0xff, pps.length & 0xff, ...pps,
+  ]);
+  return { codec, description: avcc };
+}
+
+// ----------------------------------------------------------------------------
+// UI wiring
+// ----------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(msg, cls = "") {
+  const t = new Date().toISOString().slice(11, 23);
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${t}  ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+let ws = null, frames = 0, keyframes = 0, bytes = 0;
+
+$("connect").onclick = () => {
+  const addr = $("addr").value.trim();
+  ws = new WebSocket(`ws://${addr}/`);
+  ws.binaryType = "arraybuffer";
+  frames = keyframes = bytes = 0;
+
+  ws.onopen = () => {
+    log(`connected to ws://${addr}`, "ok");
+    const hello = encodeHello({
+      width: window.screen.width * (window.devicePixelRatio || 1) | 0,
+      height: window.screen.height * (window.devicePixelRatio || 1) | 0,
+      captureMode: Number($("mode").value),
+      pin: Number($("pin").value) || 0,
+    });
+    ws.send(hello);
+    log(`sent ClientHello (${hello.length} bytes, protocol v${PROTOCOL_VERSION})`);
+    $("connect").disabled = true;
+    $("disconnect").disabled = false;
+    $("sendtest").disabled = false;
+  };
+
+  ws.onmessage = async (ev) => {
+    const m = decodeMessage(new Uint8Array(ev.data));
+    switch (m.kind) {
+      case "StreamStart": {
+        const sizes = m.parameterSets.map((s) => s.length).join(", ");
+        log(`StreamStart ${m.width}x${m.height} ${m.codec}; ${m.parameterSets.length} parameter set(s) [${sizes} bytes]`, "ok");
+        if (m.codec === "H264" && m.parameterSets.length >= 2) {
+          const cfg = avcConfigFromParameterSets(m.parameterSets);
+          log(`derived WebCodecs codec string: ${cfg.codec}`);
+          if (window.VideoDecoder?.isConfigSupported) {
+            try {
+              const sup = await VideoDecoder.isConfigSupported({ codec: cfg.codec, description: cfg.description });
+              log(`WebCodecs config supported: ${sup.supported} (M7c will use this)`, sup.supported ? "ok" : "err");
+            } catch (e) { log(`WebCodecs probe error: ${e}`, "err"); }
+          } else log("WebCodecs VideoDecoder not available in this browser", "err");
+        }
+        break;
+      }
+      case "Frame":
+        frames++; if (m.keyframe) keyframes++; bytes += m.data.length;
+        if (frames <= 3 || frames % 30 === 0)
+          log(`Frame #${frames} ${m.keyframe ? "[KEY]" : ""} ${m.data.length} bytes (total ${frames} frames, ${keyframes} key, ${(bytes / 1024).toFixed(0)} KiB)`, "dim");
+        break;
+      case "HostInfo": log(`HostInfo: ${m.os} "${m.name}"`); break;
+      case "WindowList": log(`WindowList: ${m.windows.length} window(s)`); break;
+      case "Snapshot": log(`Snapshot slot ${m.slot} ${m.width}x${m.height} (${m.dataLen} bytes)`); break;
+      default: log(`message tag ${m.tag} (not decoded)`, "dim");
+    }
+  };
+
+  ws.onclose = () => { log("disconnected", "dim"); reset(); };
+  ws.onerror = () => log("websocket error (is the bridge running?)", "err");
+};
+
+$("disconnect").onclick = () => ws?.close();
+$("sendtest").onclick = () => {
+  if (ws?.readyState === 1) { ws.send(encodeMouseMove(0.5, 0.5)); log("sent test Input::MouseMove(0.5, 0.5)"); }
+};
+
+function reset() {
+  $("connect").disabled = false;
+  $("disconnect").disabled = true;
+  $("sendtest").disabled = true;
+  ws = null;
+}
+
+log("ready — start the host, then `cargo run -p extender-web-bridge`, then Connect.", "dim");
+</script>
+</body>
+</html>

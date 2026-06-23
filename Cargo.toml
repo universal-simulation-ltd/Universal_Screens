@@ -9,6 +9,8 @@ members = [
     "crates/client",
     "crates/mobile-ffi",
     "crates/android-jni",
+    "crates/web-bridge",
+    "crates/protocol-wasm",
 ]
 
 [workspace.package]

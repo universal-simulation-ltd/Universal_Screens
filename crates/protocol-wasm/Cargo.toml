@@ -1,0 +1,19 @@
+[package]
+name = "extender-protocol-wasm"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# M7b: a thin wasm-bindgen shim over crates/protocol so the browser client
+# (de)serializes the wire format with the canonical Rust codec — zero drift from
+# the native client/host. All browser glue (WebSocket, WebCodecs, canvas, input)
+# stays in TypeScript; only the wire format is WASM. See docs/M7-browser-client.md.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+extender-protocol.workspace = true
+postcard = { version = "1.1.3", features = ["use-std"] }
+serde = { version = "1.0.228", features = ["derive"] }
+wasm-bindgen = "0.2"

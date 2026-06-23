@@ -1,0 +1,50 @@
+// WebSocket transport to the host (via crates/web-bridge). Each WS binary
+// message is one `postcard` body: downstream → a decoded `Message`, upstream →
+// the bytes from a `protocol.encode_*` call. See docs/M7-browser-client.md.
+import { protocol } from "./wasm.js";
+
+export class Transport {
+  /// `addr` is the bridge `host:port` (it speaks `ws://`).
+  constructor(addr) {
+    this.addr = addr;
+    this.ws = null;
+    this.onMessage = null; // (DecodedMessage) => void
+    this.onOpen = null;
+    this.onClose = null;
+    this.onError = null;
+  }
+
+  connect() {
+    this.ws = new WebSocket(`ws://${this.addr}/`);
+    this.ws.binaryType = "arraybuffer";
+    this.ws.onopen = () => this.onOpen?.();
+    this.ws.onclose = () => this.onClose?.();
+    this.ws.onerror = (e) => this.onError?.(e);
+    this.ws.onmessage = (ev) => {
+      try {
+        this.onMessage?.(protocol.decode_message(new Uint8Array(ev.data)));
+      } catch (e) {
+        this.onError?.(e);
+      }
+    };
+  }
+
+  /// Send the first upstream message. `captureMode` is the u8 code
+  /// (0 extend / 1 mirror / 2 control-only); platform is fixed to 0 (browser).
+  sendHello({ width, height, captureMode, pin }) {
+    this.send(protocol.encode_hello(protocol.protocol_version(), width, height, captureMode, 0, pin));
+  }
+
+  /// Forward raw encoded `Input` bytes (from a `protocol.encode_*` call).
+  send(bytes) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(bytes);
+  }
+
+  get connected() {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  close() {
+    this.ws?.close();
+  }
+}
