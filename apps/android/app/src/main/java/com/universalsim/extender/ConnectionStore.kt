@@ -17,6 +17,7 @@ data class SavedConnection(
     val pin: Int = 0, // host pairing code (0 = none)
     val hidden: Boolean = false,
     val lastConnected: Long = 0L,
+    val customName: String = "", // user-given friendly name ("" = use hostname)
 )
 
 /**
@@ -50,6 +51,7 @@ object ConnectionStore {
                     pin = o.optInt("pin", 0),
                     hidden = o.optBoolean("hidden", false),
                     lastConnected = o.optLong("lastConnected", 0L),
+                    customName = o.optString("customName"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -75,6 +77,11 @@ object ConnectionStore {
         save(context, load(context).map { if (it.addr == addr) it.copy(hidden = hidden) else it })
     }
 
+    /** Set (or clear, with "") the user's friendly name for a saved host. */
+    fun setCustomName(context: Context, addr: String, name: String) {
+        save(context, load(context).map { if (it.addr == addr) it.copy(customName = name.trim()) else it })
+    }
+
     fun delete(context: Context, addr: String) {
         save(context, load(context).filterNot { it.addr == addr })
     }
@@ -90,7 +97,8 @@ object ConnectionStore {
                     .put("mode", c.mode)
                     .put("pin", c.pin)
                     .put("hidden", c.hidden)
-                    .put("lastConnected", c.lastConnected),
+                    .put("lastConnected", c.lastConnected)
+                    .put("customName", c.customName),
             )
         }
         prefs(context).edit().putString(KEY, arr.toString()).apply()
