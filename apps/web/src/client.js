@@ -65,10 +65,19 @@ function renderSaved() {
   for (const h of list) {
     const row = document.createElement("button");
     row.className = "row-btn";
-    const title = h.hostname || h.addr;
-    row.innerHTML = `<span class="glyph">${DEVICE_GLYPH[h.os] ?? "🖥️"}</span><span class="body"><div class="title">${title}</div><div class="blurb">${h.addr}</div></span><span class="del" title="Forget">×</span>`;
+    // Title: the user's friendly name with the host in brackets, e.g.
+    // "Office Mac (Kyjams-iMac)"; else just the hostname (or address).
+    const base = h.hostname || h.addr;
+    const cn = (h.customName ?? "").trim();
+    const title = cn ? `${cn} (${base})` : base;
+    row.innerHTML = `<span class="glyph">${DEVICE_GLYPH[h.os] ?? "🖥️"}</span><span class="body"><div class="title">${title}</div><div class="blurb">${h.addr}</div></span><span class="ren" title="Rename">✎</span><span class="del" title="Forget">×</span>`;
     row.addEventListener("click", (e) => {
       if (e.target.classList.contains("del")) { saved.remove(h.addr); renderSaved(); return; }
+      if (e.target.classList.contains("ren")) {
+        const next = prompt("Friendly name for this host (leave blank to reset to its device name):", cn);
+        if (next !== null) { saved.setCustomName(h.addr, next); renderSaved(); }
+        return;
+      }
       connect(h.addr, MODES[0]); // reconnect in Remote control
     });
     box.appendChild(row);

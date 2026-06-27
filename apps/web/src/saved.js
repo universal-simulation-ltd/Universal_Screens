@@ -18,10 +18,23 @@ function write(list) {
 
 /// Record a connect to `addr` (creates or refreshes its entry).
 export function touch(addr, now) {
-  const list = load().filter((h) => h.addr !== addr);
   const prev = load().find((h) => h.addr === addr);
-  list.push({ addr, hostname: prev?.hostname ?? "", os: prev?.os ?? "", lastConnected: now });
+  const list = load().filter((h) => h.addr !== addr);
+  list.push({
+    addr,
+    hostname: prev?.hostname ?? "",
+    os: prev?.os ?? "",
+    customName: prev?.customName ?? "",
+    lastConnected: now,
+  });
   write(list);
+}
+
+/// Set (or clear, with "") the user's friendly name for a saved host.
+export function setCustomName(addr, name) {
+  const list = load();
+  const e = list.find((h) => h.addr === addr);
+  if (e) { e.customName = (name ?? "").trim(); write(list); }
 }
 
 /// Attach the host's identity (from a HostInfo message) to a saved entry.

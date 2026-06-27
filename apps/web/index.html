@@ -57,7 +57,11 @@
   .row-btn .body { min-width: 0; }
   .row-btn .body .title { font-weight: 600; }
   .row-btn .body .blurb { font-size: .82rem; color: var(--muted); }
-  .row-btn .del { margin-left: auto; flex: none; border: none; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: .2rem .4rem; border-radius: .4rem; }
+  /* Rename (✎) sits first of the trailing controls and takes the auto margin so
+     it + Forget (×) group together on the right. */
+  .row-btn .ren { margin-left: auto; flex: none; border: none; background: none; color: var(--muted); font-size: 1rem; cursor: pointer; padding: .2rem .4rem; border-radius: .4rem; }
+  .row-btn .ren:hover { color: var(--accent); background: #0001; }
+  .row-btn .del { margin-left: 0; flex: none; border: none; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: .2rem .4rem; border-radius: .4rem; }
   .row-btn .del:hover { color: #d22; background: #0001; }
 
   #saved-toggle { background: none; border: none; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; padding: .2rem; display: flex; align-items: center; gap: .4rem; }
