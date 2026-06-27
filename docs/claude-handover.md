@@ -4,6 +4,31 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-27 (Web viewer: transparent overlay top bar)
+
+Backlog sweep. Did the one contained, verifiable Screens item; the rest need
+on-device hardware testing and were intentionally left (see below).
+
+- **Web client top bar is now a transparent overlay** (`apps/web/index.html`,
+  CSS only). The session-view `.topbar` was a solid `--card` strip above the
+  canvas; it's now `position: absolute` over the top of `#stage` with a
+  translucent dark gradient (`rgba(0,0,0,.55)→0`) + safe-area top padding, so the
+  streaming canvas gets the full height by default — matching the iPhone client.
+  `pointer-events: none` on the bar with `pointer-events: auto` on the buttons
+  means only the controls capture clicks; the rest of the strip passes through to
+  the canvas (important for remote-control mode). Buttons got a translucent
+  blurred pill style so they read over bright video. Committed to `main`.
+
+### Screens backlog items still open (need a host + device to verify — NOT done)
+- **Trackpad click-and-drag** (input protocol, client+host).
+- **Remote control viewer can't click/interact** (input forwarding bug).
+- **Host rename/delete of virtual displays** (macOS `CGVirtualDisplay` can't be
+  renamed live — needs recreate; + GUI in `host-macos/gui.rs` / Windows host).
+- **Android parity + connection-quality audit** vs. the iPhone client.
+These touch live input/streaming on a working tool, so they want real hardware in
+the loop rather than a blind edit. Branches `feat/ios-device-named-displays`,
+`fix/v10-client-recompile`, `build/android-gradlew-exec` remain unmerged.
+
 ## Update — 2026-06-27 (v10 client recompile — web, desktop, Android)
 
 Follow-up to the protocol v9→v10 bump below: all clients recompiled against v10.

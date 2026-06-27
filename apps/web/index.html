@@ -74,11 +74,31 @@
   body.in-session #connect-view { display: none; }
   body.in-session { align-items: stretch; }
   body.in-session #session-view { display: flex; }
-  .topbar { display: flex; align-items: center; gap: .5rem; padding: .5rem .75rem; background: var(--card); color: var(--text); border-bottom: 1px solid var(--line); }
-  .topbar .host { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The top bar overlays the streaming canvas (like the iPhone client) rather
+     than sitting above it, so the video gets the full height by default. It's a
+     translucent dark gradient so the host name + buttons stay legible over bright
+     video without an opaque strip eating screen space. Only the bar's own
+     controls capture clicks — the rest of the strip passes through to the canvas. */
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; align-items: center; gap: .5rem;
+    padding: calc(env(safe-area-inset-top, 0px) + .5rem) .75rem .9rem;
+    color: #fff;
+    background: linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,0));
+    pointer-events: none;
+  }
+  .topbar .host { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
   .topbar .spacer { flex: 1; }
-  .topbar button { font: inherit; padding: .35rem .7rem; border-radius: .5rem; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .topbar button {
+    pointer-events: auto;
+    font: inherit; padding: .35rem .7rem; border-radius: .5rem;
+    border: 1px solid rgba(255,255,255,.25);
+    background: rgba(20,20,24,.55); color: #fff;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    cursor: pointer;
+  }
   .topbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* Stage fills the whole session view; the bar floats over its top edge. */
   #stage { position: relative; flex: 1; min-height: 0; }
   #screen { width: 100%; height: 100%; display: block; background: #000; outline: none; touch-action: none; }
   #video-hint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #fff8; font-size: .95rem; text-align: center; padding: 2rem; pointer-events: none; }
