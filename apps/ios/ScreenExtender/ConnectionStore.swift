@@ -12,6 +12,9 @@ struct SavedConnection: Codable, Identifiable {
     var pin: Int = 0
     var hidden: Bool = false
     var lastConnected: Double = 0
+    /// User-given friendly name for this saved host. Shown as the main label with
+    /// the hostname/address in brackets when set. Defaults to "" (use hostname).
+    var customName: String = ""
 
     var id: String { addr }
 }
@@ -56,6 +59,14 @@ enum ConnectionStore {
         var list = load()
         guard let i = list.firstIndex(where: { $0.addr == addr }) else { return }
         list[i].hidden = hidden
+        save(list)
+    }
+
+    /// Set (or clear, with "") the user's friendly name for a saved host.
+    static func setCustomName(addr: String, _ name: String) {
+        var list = load()
+        guard let i = list.firstIndex(where: { $0.addr == addr }) else { return }
+        list[i].customName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         save(list)
     }
 

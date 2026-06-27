@@ -17,6 +17,9 @@ struct ConnectView: View {
     @State private var showHidden = false
     @State private var showAdvanced = false
     @State private var showScanner = false
+    // Saved-host rename: the host being renamed (drives the alert) + the draft.
+    @State private var renameTarget: SavedConnection?
+    @State private var renameDraft = ""
 
     private var visible: [SavedConnection] {
         saved.filter { showHidden || !$0.hidden }.sorted { $0.lastConnected > $1.lastConnected }
@@ -48,6 +51,22 @@ struct ConnectView: View {
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .onAppear { saved = ConnectionStore.load() }
+        .alert("Rename host", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("Name", text: $renameDraft)
+            Button("Save") {
+                if let t = renameTarget {
+                    ConnectionStore.setCustomName(addr: t.addr, renameDraft)
+                    saved = ConnectionStore.load()
+                }
+                renameTarget = nil
+            }
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+        } message: {
+            Text("Give this saved host a friendly name. Leave blank to reset to its device name.")
+        }
         .sheet(isPresented: $showScanner) {
             QRScannerView { text in
                 showScanner = false
@@ -111,6 +130,14 @@ struct ConnectView: View {
         }
     }
 
+    /// Row title: the user's friendly name with the host in brackets, e.g.
+    /// "Office Mac (Kyjams-iMac)"; else just the hostname (or address).
+    private func savedTitle(_ host: SavedConnection) -> String {
+        let base = host.hostname.isEmpty ? host.addr : host.hostname
+        let name = host.customName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? base : "\(name) (\(base))"
+    }
+
     private func savedRow(_ host: SavedConnection) -> some View {
         Button {
             if let m = Mode(rawValue: host.mode) {
@@ -125,7 +152,7 @@ struct ConnectView: View {
                     .frame(width: 44, height: 44)
                     .background(Color.brandOrange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(host.hostname.isEmpty ? host.addr : host.hostname)
+                    Text(savedTitle(host))
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(host.mode.isEmpty ? host.addr : "\(host.addr)  ·  \(modeLabel(host.mode))")
@@ -134,6 +161,12 @@ struct ConnectView: View {
                 }
                 Spacer(minLength: 8)
                 Menu {
+                    Button {
+                        renameDraft = host.customName
+                        renameTarget = host
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
                     Button {
                         ConnectionStore.setHidden(addr: host.addr, !host.hidden)
                         saved = ConnectionStore.load()
