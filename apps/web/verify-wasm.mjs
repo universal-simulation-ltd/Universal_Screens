@@ -24,7 +24,7 @@ function check(name, actual, expected) {
 
 // Canonical bytes (from the Rust test) the wasm must reproduce / parse.
 check("protocol_version", protocol_version(), 10);
-check("encode_hello", hex(encode_hello(10, 1920, 1080, 1, 0, 4321)), "0a800fb8080100e121");
+check("encode_hello", hex(encode_hello(10, 1920, 1080, 1, 0, 4321)), "0a800fb8080100e12100");
 check("encode_mouse_move", hex(encode_mouse_move(0.5, 0.5)), "000000003f0000003f");
 
 const ss = decode_message(fromHex("00800fb8080002046742c01f0468ce3c80"));

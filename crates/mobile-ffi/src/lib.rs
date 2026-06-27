@@ -566,7 +566,8 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, 0, 0) };
+        let session =
+            unsafe { extender_session_connect(c_addr.as_ptr(), 1280, 720, 0, 0, ptr::null()) };
         assert!(!session.is_null());
 
         // Start event: codec/geometry + Annex-B parameter sets.
@@ -621,7 +622,8 @@ mod tests {
 
         let c_addr = CString::new(addr).unwrap();
         // 2 = control-only (the clicker's mode); 0 = no pairing PIN.
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0) };
+        let session =
+            unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0, ptr::null()) };
         assert!(!session.is_null());
 
         // 0x4E = Page Down (next slide).
@@ -650,7 +652,8 @@ mod tests {
         });
 
         let c_addr = CString::new(addr).unwrap();
-        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0) };
+        let session =
+            unsafe { extender_session_connect(c_addr.as_ptr(), 1920, 1080, 2, 0, ptr::null()) };
         assert!(!session.is_null());
         let mut len = 0usize;
 
