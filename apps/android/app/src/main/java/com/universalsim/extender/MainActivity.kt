@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -395,6 +396,9 @@ fun ConnectScreen(
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
+    // Saved-host rename: the host being renamed (drives the dialog) + the draft.
+    var renaming by remember { mutableStateOf<SavedConnection?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     fun reload() { saved = ConnectionStore.load(context) }
 
     // Scan the host's Step-2 QR. It now encodes an https `…/screens/connect` URL
@@ -465,6 +469,7 @@ fun ConnectScreen(
                         val m = runCatching { Mode.valueOf(c.mode) }.getOrNull()
                         if (m != null) onConnect(c.addr, m, c.pin) else onPrepare(c.addr, c.pin)
                     },
+                    onRename = { renameDraft = c.customName; renaming = c },
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
                     onDelete = { ConnectionStore.delete(context, c.addr); reload() },
                 )
@@ -504,6 +509,35 @@ fun ConnectScreen(
         }
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
+
+        // Rename dialog for a saved host.
+        renaming?.let { target ->
+            AlertDialog(
+                onDismissRequest = { renaming = null },
+                title = { Text("Rename host") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Give this saved host a friendly name. Leave blank to reset to its device name.")
+                        OutlinedTextField(
+                            value = renameDraft,
+                            onValueChange = { renameDraft = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        ConnectionStore.setCustomName(context, target.addr, renameDraft)
+                        renaming = null
+                        reload()
+                    }) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renaming = null }) { Text("Cancel") }
+                },
+            )
+        }
     }
 }
 
@@ -570,6 +604,7 @@ private fun ModeOption(
 private fun SavedConnectionRow(
     conn: SavedConnection,
     onConnect: () -> Unit,
+    onRename: () -> Unit,
     onToggleHide: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -582,13 +617,18 @@ private fun SavedConnectionRow(
             Text(deviceEmoji(conn.os), fontSize = 22.sp)
             Spacer(Modifier.width(10.dp))
             Column(horizontalAlignment = Alignment.Start) {
-                Text(conn.hostname.ifEmpty { conn.addr })
+                // Friendly name with the host in brackets, e.g. "Office Mac
+                // (Kyjams-iMac)"; else just the hostname (or address).
+                val base = conn.hostname.ifEmpty { conn.addr }
+                val title = if (conn.customName.isBlank()) base else "${conn.customName} ($base)"
+                Text(title)
                 // Show the remembered mode only if there is one; otherwise just the
                 // address (tapping re-asks for the mode).
                 val sub = if (conn.mode.isBlank()) conn.addr else "${conn.addr}  ·  ${modeLabel(conn.mode)}"
                 Text(sub, style = MaterialTheme.typography.bodySmall)
             }
         }
+        TextButton(onClick = onRename) { Text("Rename") }
         TextButton(onClick = onToggleHide) { Text(if (conn.hidden) "Unhide" else "Hide") }
         TextButton(onClick = onDelete) { Text("Delete") }
     }
