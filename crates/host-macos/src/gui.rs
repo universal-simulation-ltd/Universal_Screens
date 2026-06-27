@@ -35,6 +35,11 @@ const CHANGELOG: &[&str] = &[
 struct RecentConn {
     platform: String,
     peer: String,
+    /// Optional friendly name the user gave this saved connection. Shown as the
+    /// main label (with the device/IP underneath) when set. `#[serde(default)]`
+    /// keeps recents saved before this field existed loadable.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 struct HostApp {
@@ -70,6 +75,8 @@ struct HostApp {
     /// The display id whose inline rename editor is open (None = closed). The
     /// editor isn't shown by default — it opens when "Rename" is clicked.
     renaming_id: Option<u32>,
+    /// The recent-connection peer (IP) whose inline rename editor is open.
+    renaming_peer: Option<String>,
 }
 
 impl HostApp {
@@ -117,6 +124,7 @@ impl HostApp {
             vdisplays: Arc::new(Mutex::new(crate::host::VDisplays::default())),
             rename_draft: String::new(),
             renaming_id: None,
+            renaming_peer: None,
         }
     }
 
@@ -160,10 +168,17 @@ impl HostApp {
                         let ip =
                             peer.rsplit_once(':').map_or(peer.clone(), |(a, _)| a.to_owned());
                         let mut list = recent.lock().unwrap();
+                        // Preserve any friendly name the user gave this peer when it
+                        // reconnects (we re-insert it at the top).
+                        let prior_name = list.iter().find(|c| c.peer == ip).and_then(|c| c.name.clone());
                         list.retain(|c| c.peer != ip);
                         list.insert(
                             0,
-                            RecentConn { platform: platform_tag(platform).to_owned(), peer: ip },
+                            RecentConn {
+                                platform: platform_tag(platform).to_owned(),
+                                peer: ip,
+                                name: prior_name,
+                            },
                         );
                         list.truncate(RECENT_MAX);
                         *status.lock().unwrap() = format!("Connected: {peer}");
@@ -337,15 +352,54 @@ impl HostApp {
             if !recent.is_empty() {
                 ui.separator();
                 ui.label("Recent connections");
+                let mut rename_peer: Option<(String, String)> = None; // (peer, new name)
                 for conn in recent.iter().take(3) {
+                    // Main label is the friendly name (with device in brackets) when
+                    // set, else the device type; the IP shows underneath.
+                    let label = match &conn.name {
+                        Some(n) if !n.trim().is_empty() => {
+                            format!("{} ({})", n.trim(), platform_display(&conn.platform))
+                        }
+                        _ => platform_display(&conn.platform).to_string(),
+                    };
                     ui.horizontal(|ui| {
                         device_icon(ui, DeviceKind::from_tag(&conn.platform), 18.0);
-                        ui.label(format!(
-                            "{} · {}",
-                            platform_display(&conn.platform),
-                            conn.peer
-                        ));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(label.as_str()).strong());
+                            ui.small(conn.peer.as_str());
+                        });
+                        // Rename opens an inline editor (closed by default), same as
+                        // the virtual-displays panel.
+                        if ui.button("Rename").clicked() {
+                            if self.renaming_peer.as_deref() == Some(conn.peer.as_str()) {
+                                self.renaming_peer = None;
+                            } else {
+                                self.renaming_peer = Some(conn.peer.clone());
+                                self.renaming_id = None; // close any display editor
+                                self.rename_draft = conn.name.clone().unwrap_or_default();
+                            }
+                        }
                     });
+                    if self.renaming_peer.as_deref() == Some(conn.peer.as_str()) {
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut self.rename_draft);
+                            if ui.button("Apply").clicked() {
+                                rename_peer = Some((conn.peer.clone(), self.rename_draft.clone()));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.renaming_peer = None;
+                            }
+                        });
+                        ui.small("Leave blank to reset to the device name.");
+                    }
+                }
+                if let Some((peer, new_name)) = rename_peer {
+                    let trimmed = new_name.trim();
+                    let mut list = self.recent.lock().unwrap();
+                    if let Some(c) = list.iter_mut().find(|c| c.peer == peer) {
+                        c.name = if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) };
+                    }
+                    self.renaming_peer = None;
                 }
             }
         });
