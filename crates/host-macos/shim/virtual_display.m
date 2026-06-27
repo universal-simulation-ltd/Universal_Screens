@@ -51,11 +51,35 @@
 
 // ---- shim ----
 
-static CGVirtualDisplay *g_display = nil;
+// Created displays are retained here keyed by their CGDirectDisplayID, so several
+// can coexist and each can be torn down individually (releasing the object lets
+// macOS remove the display). Guarded by @synchronized since create runs on the
+// server thread and destroy can be called from the GUI thread.
+static NSMutableDictionary<NSNumber *, CGVirtualDisplay *> *g_displays = nil;
+
+static NSMutableDictionary *displaysTable(void) {
+    if (g_displays == nil) {
+        g_displays = [[NSMutableDictionary alloc] init];
+    }
+    return g_displays;
+}
+
+// Release a previously-created virtual display so the window server tears it down.
+// Returns 1 if a display with that id was held (and is now removed), else 0.
+uint32_t extender_vdisplay_destroy(uint32_t displayID) {
+    @synchronized(displaysTable()) {
+        NSNumber *key = @(displayID);
+        if (displaysTable()[key] != nil) {
+            [displaysTable() removeObjectForKey:key]; // ARC releases → display removed
+            return 1;
+        }
+    }
+    return 0;
+}
 
 // Create one virtual display at the given pixel size, labelled `name` (the
-// connecting device — falls back to a default when null/empty). Retained for the
-// process lifetime. Returns its CGDirectDisplayID, or 0 on failure.
+// connecting device — falls back to a default when null/empty). Retained until
+// destroyed (or process exit). Returns its CGDirectDisplayID, or 0 on failure.
 uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *name) {
     NSString *displayName = (name != NULL && name[0] != '\0')
         ? [NSString stringWithUTF8String:name]
@@ -94,6 +118,9 @@ uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *n
         return 0;
     }
 
-    g_display = display; // retained (ARC strong global) for the process lifetime
-    return display.displayID;
+    uint32_t did = display.displayID;
+    @synchronized(displaysTable()) {
+        displaysTable()[@(did)] = display; // retained by the table until destroyed
+    }
+    return did;
 }

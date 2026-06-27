@@ -62,6 +62,11 @@ struct HostApp {
     own_ip: Arc<Mutex<Option<String>>>,
     /// Stop flag for the beacon sender (set in stop(), started fresh in start()).
     beacon_stop: Arc<AtomicBool>,
+    /// Virtual displays created for second-screen sessions — listed in the GUI so
+    /// the user can rename / remove them. Shared with the serve loop.
+    vdisplays: Arc<Mutex<crate::host::VDisplays>>,
+    /// In-progress friendly-name edit in the Virtual displays panel.
+    rename_draft: String,
 }
 
 impl HostApp {
@@ -106,6 +111,8 @@ impl HostApp {
             listener_stop,
             own_ip,
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
+            vdisplays: Arc::new(Mutex::new(crate::host::VDisplays::default())),
+            rename_draft: String::new(),
         }
     }
 
@@ -138,8 +145,9 @@ impl HostApp {
         let recent = self.recent.clone();
         let ctx = ctx.clone();
         let pin = self.pin;
+        let vdisplays = self.vdisplays.clone();
         thread::spawn(move || {
-            serve_loop(&listener, &stop, pin, &|event| {
+            serve_loop(&listener, &stop, pin, &vdisplays, &|event| {
                 match event {
                     HostEvent::Waiting => {
                         *status.lock().unwrap() = "Waiting for your phone…".to_owned();
@@ -480,6 +488,83 @@ impl HostApp {
             });
         });
     }
+
+    /// Lists the virtual displays created for second-screen sessions, and lets the
+    /// user give them a friendly name (overriding the per-device label) or remove
+    /// them — straight from the Mac, as the backlog asked.
+    fn show_virtual_displays(&mut self, ui: &mut egui::Ui) {
+        // Snapshot under the lock so the UI never holds it while drawing.
+        let (entries, friendly): (Vec<(u32, String, (u32, u32))>, Option<String>) = {
+            let s = self.vdisplays.lock().unwrap();
+            (
+                s.entries.iter().map(|d| (d.id, d.name.clone(), d.size)).collect(),
+                s.friendly_name.clone(),
+            )
+        };
+
+        ui.add_space(12.0);
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("Virtual displays ({})", entries.len())).strong(),
+        )
+        .default_open(!entries.is_empty())
+        .show(ui, |ui| {
+            let mut remove_id: Option<u32> = None;
+            let mut apply_name = false;
+            let mut clear_name = false;
+
+            if entries.is_empty() {
+                ui.label(
+                    egui::RichText::new(
+                        "None yet. Connect a phone in Second-screen mode to create one.",
+                    )
+                    .weak(),
+                );
+            }
+            for (id, name, (w, h)) in &entries {
+                ui.horizontal(|ui| {
+                    ui.label("🖥");
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(name).strong());
+                        ui.small(format!("{w}×{h} · id {id}"));
+                    });
+                    if ui.button("Remove").clicked() {
+                        remove_id = Some(*id);
+                    }
+                });
+            }
+
+            ui.add_space(6.0);
+            ui.separator();
+            ui.label(egui::RichText::new("Friendly name").strong());
+            ui.small(
+                "Overrides the connecting device's name. Applies the next time a \
+                 display is created (e.g. reconnect the phone).",
+            );
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.rename_draft);
+                if ui.button("Apply").clicked() {
+                    apply_name = true;
+                }
+            });
+            if let Some(f) = &friendly {
+                ui.small(format!("Current override: \u{201c}{f}\u{201d}"));
+                if ui.button("Clear name override").clicked() {
+                    clear_name = true;
+                }
+            }
+
+            if let Some(id) = remove_id {
+                crate::host::remove_display(&self.vdisplays, id);
+            }
+            if apply_name {
+                crate::host::set_friendly_name(&self.vdisplays, Some(self.rename_draft.clone()));
+            }
+            if clear_name {
+                crate::host::set_friendly_name(&self.vdisplays, None);
+                self.rename_draft.clear();
+            }
+        });
+    }
 }
 
 impl eframe::App for HostApp {
@@ -614,6 +699,8 @@ impl eframe::App for HostApp {
                 ui.vertical_centered(|ui| {
                     self.show_connect(ctx, ui);
                 });
+
+                self.show_virtual_displays(ui);
             });
         });
     }

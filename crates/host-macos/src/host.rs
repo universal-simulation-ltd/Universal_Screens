@@ -8,7 +8,7 @@ use std::net::TcpStream;
 use std::ptr;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use apple_cf::iosurface::IOSurface;
@@ -30,20 +30,56 @@ const BITRATE: i32 = 40_000_000;
 
 extern "C" {
     fn extender_vdisplay_create(width: u32, height: u32, name: *const c_char) -> u32;
+    /// Release a virtual display so the window server removes it. Returns 1 if a
+    /// display with that id was held, else 0.
+    fn extender_vdisplay_destroy(id: u32) -> u32;
 }
 
 /// Global bounds of a display: origin x/y and width/height in points.
 type Bounds = (f64, f64, f64, f64);
 
 /// A live virtual display kept alive across client reconnects.
+#[derive(Clone)]
 pub(crate) struct Display {
-    id: u32,
-    size: (u32, u32),
+    pub(crate) id: u32,
+    pub(crate) size: (u32, u32),
     bounds: Bounds,
     /// The descriptor name the display was created with. A `CGVirtualDisplay`
     /// can't be renamed in place, so a differing name forces a recreate — this is
-    /// how the label follows whichever device is currently connected.
-    name: String,
+    /// how the label follows whichever device is currently connected (or the
+    /// user's friendly-name override, when set).
+    pub(crate) name: String,
+}
+
+/// Shared registry of virtual displays, so the GUI can list / rename / remove the
+/// displays the server thread creates. There's at most one live virtual display
+/// in the current single-session host, but this is a `Vec` so the list UI and a
+/// future multi-display host need no reshaping.
+#[derive(Default)]
+pub(crate) struct VDisplays {
+    /// Displays currently registered with the window server.
+    pub(crate) entries: Vec<Display>,
+    /// User-set friendly name. When present it overrides the connecting device's
+    /// name on the next (re)create, so the display stops being relabelled per
+    /// device and reads as whatever the user chose.
+    pub(crate) friendly_name: Option<String>,
+}
+
+/// Remove (tear down) the virtual display with `id`, dropping it from the
+/// registry. Safe to call from the GUI thread; the shim guards its own table. If
+/// a session is actively streaming this display the stream will end — that's the
+/// intended "remove it" behaviour.
+pub(crate) fn remove_display(state: &Arc<Mutex<VDisplays>>, id: u32) {
+    unsafe { extender_vdisplay_destroy(id) };
+    let mut s = state.lock().unwrap();
+    s.entries.retain(|d| d.id != id);
+}
+
+/// Set (or clear, with `None`) the user's friendly-name override. Applies on the
+/// next connect / display (re)create; existing live displays keep their current
+/// name until then.
+pub(crate) fn set_friendly_name(state: &Arc<Mutex<VDisplays>>, name: Option<String>) {
+    state.lock().unwrap().friendly_name = name.filter(|n| !n.trim().is_empty());
 }
 
 /// Serve a video/control session. Dispatches on `mode`: extend creates (or
@@ -55,12 +91,12 @@ pub(crate) fn serve_session(
     target_w: u32,
     target_h: u32,
     name: &str,
-    display: &mut Option<Display>,
+    vdisplays: &Arc<Mutex<VDisplays>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
 
     let (id, size, bounds) = match mode {
-        CaptureMode::VirtualDisplay => ensure_display(display, target_w, target_h, name)?,
+        CaptureMode::VirtualDisplay => ensure_display(vdisplays, target_w, target_h, name)?,
         CaptureMode::MirrorPrimary | CaptureMode::ControlOnly => primary_display()?,
     };
 
@@ -249,34 +285,59 @@ fn post_mouse(
     }
 }
 
-/// Get or create a virtual display of `(w, h)` pixels named `name`. Recreates the
-/// display when the requested size *or* name changes (the name can't be set on a
-/// live `CGVirtualDisplay`), so the macOS display label tracks whichever device
-/// is connected.
+/// Get or create a virtual display of `(w, h)` pixels for the connecting
+/// `device_name`. Reuses a live display that still matches (size + resolved
+/// name); otherwise tears down the stale one(s) and creates fresh. The resolved
+/// name is the user's friendly-name override when set, else the device name (a
+/// `CGVirtualDisplay` can't be renamed in place, so a differing name forces a
+/// recreate). Keeps the shared `VDisplays` registry in sync so the GUI list is
+/// accurate.
 pub(crate) fn ensure_display(
-    slot: &mut Option<Display>,
+    state: &Arc<Mutex<VDisplays>>,
     w: u32,
     h: u32,
-    name: &str,
+    device_name: &str,
 ) -> Result<(u32, (u32, u32), Bounds), Box<dyn std::error::Error>> {
-    let needs_create = slot
-        .as_ref()
-        .map_or(true, |d| d.size != (w, h) || d.name != name);
-    if needs_create {
-        if slot.is_some() {
-            println!("recreating virtual display as \"{name}\" ({w}x{h})");
+    let desired_name = {
+        let s = state.lock().unwrap();
+        s.friendly_name
+            .clone()
+            .unwrap_or_else(|| device_name.to_string())
+    };
+
+    // Reconcile against what the window server actually has, reuse a match, and
+    // tear down any stale/mismatched displays — all under the lock, but the
+    // (potentially slow) create happens after we release it.
+    {
+        let active = CGDisplay::active_displays().unwrap_or_default();
+        let mut s = state.lock().unwrap();
+        s.entries.retain(|d| active.contains(&d.id));
+        if let Some(d) = s
+            .entries
+            .iter()
+            .find(|d| d.size == (w, h) && d.name == desired_name)
+            .cloned()
+        {
+            return Ok((d.id, d.size, d.bounds));
         }
-        let c_name = CString::new(name).unwrap_or_default();
-        let id = unsafe { extender_vdisplay_create(w, h, c_name.as_ptr()) };
-        if id == 0 {
-            return Err("CGVirtualDisplay rejected the requested size".into());
+        let stale: Vec<u32> = s.entries.iter().map(|d| d.id).collect();
+        for id in stale {
+            println!("recreating virtual display as \"{desired_name}\" ({w}x{h})");
+            unsafe { extender_vdisplay_destroy(id) };
         }
-        let bounds = wait_for_display(id)
-            .ok_or("virtual display did not register with the window server")?;
-        println!("created virtual display {id}: \"{name}\" {w}x{h} px");
-        *slot = Some(Display { id, size: (w, h), bounds, name: name.to_string() });
+        s.entries.clear();
     }
-    let d = slot.as_ref().expect("display set above");
+
+    let c_name = CString::new(desired_name.as_str()).unwrap_or_default();
+    let id = unsafe { extender_vdisplay_create(w, h, c_name.as_ptr()) };
+    if id == 0 {
+        return Err("CGVirtualDisplay rejected the requested size".into());
+    }
+    let bounds = wait_for_display(id)
+        .ok_or("virtual display did not register with the window server")?;
+    println!("created virtual display {id}: \"{desired_name}\" {w}x{h} px");
+    let d = Display { id, size: (w, h), bounds, name: desired_name };
+    state.lock().unwrap().entries.push(d.clone());
     Ok((d.id, d.size, d.bounds))
 }
 

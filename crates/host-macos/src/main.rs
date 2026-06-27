@@ -13,6 +13,7 @@ mod wifi;
 use std::io;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -42,7 +43,8 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         protocol::PROTOCOL_VERSION
     );
     let stop = AtomicBool::new(false);
-    serve_loop(&listener, &stop, 0, &|event| match event {
+    let vdisplays = Arc::new(Mutex::new(host::VDisplays::default()));
+    serve_loop(&listener, &stop, 0, &vdisplays, &|event| match event {
         HostEvent::Waiting => println!("waiting for a client to connect..."),
         HostEvent::Connected { peer, platform } => {
             println!("client connected: {peer} ({platform:?})");
@@ -61,11 +63,11 @@ pub(crate) fn serve_loop(
     listener: &TcpListener,
     stop: &AtomicBool,
     expected_pin: u32,
+    vdisplays: &Arc<Mutex<host::VDisplays>>,
     on_event: &(dyn Fn(HostEvent) + Sync),
 ) {
     let _ = listener.set_nonblocking(true);
     on_event(HostEvent::Waiting);
-    let mut display: Option<host::Display> = None;
 
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
@@ -88,7 +90,7 @@ pub(crate) fn serve_loop(
                     on_event(HostEvent::Connected { peer: peer.clone(), platform });
                     let result = match mode {
                         CaptureMode::ControlOnly => host::serve_control_only(stream),
-                        _ => host::serve_session(stream, mode, w, h, &name, &mut display),
+                        _ => host::serve_session(stream, mode, w, h, &name, vdisplays),
                     };
                     if let Err(e) = result {
                         on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));

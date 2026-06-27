@@ -4,6 +4,41 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-27 (macOS host: list / rename / remove virtual displays)
+
+Backlog "rename + delete virtual displays from the PC side" — done for the
+**macOS** host (`extender-host-macos`). `cargo build -p extender-host-macos` clean
+(one pre-existing `listener_stop` dead-code warning, unrelated). **Needs an
+on-device test** (Mac host + iPhone in Second-screen mode) to confirm create →
+list → rename → remove behaves.
+
+- **Shim** (`shim/virtual_display.m`): replaced the single `g_display` global with
+  an `NSMutableDictionary` keyed by `CGDirectDisplayID` (`@synchronized`-guarded),
+  and added `extender_vdisplay_destroy(id)` — removing the dict entry drops the
+  last ARC ref so the window server tears the display down.
+- **Host** (`host.rs`): new shared `VDisplays` registry (`Arc<Mutex<…>>`):
+  `entries: Vec<Display>` (now `Clone`, fields `pub(crate)`) + a `friendly_name`
+  override. `ensure_display` rewritten to work against the registry — reconciles
+  against `CGDisplay::active_displays()`, reuses a live match (size + resolved
+  name), tears down stale/mismatched ones (no leak), and the resolved name is the
+  user's `friendly_name` override when set else the connecting device name. New
+  `remove_display()` (calls destroy + drops the entry — callable from the GUI
+  thread) and `set_friendly_name()`. `serve_session`/`serve_loop`/`run_cli`
+  thread the `Arc<Mutex<VDisplays>>` through instead of a server-thread-local
+  `Option<Display>`.
+- **GUI** (`gui.rs`): a "Virtual displays (n)" collapsing panel — lists each live
+  display (name · WxH · id) with a **Remove** button, plus a **Friendly name**
+  field (Apply / Clear). The override applies on the next display (re)create
+  (a CGVirtualDisplay can't be renamed live), which also stops the label flipping
+  per connected device.
+- **Single-display reality:** the host still serves one virtual display at a time,
+  so the list shows 0–1 entries; it's a `Vec`/registry so the UI + a future
+  multi-display host need no reshaping.
+- **Windows host:** intentionally NOT changed — it captures a pre-existing
+  secondary monitor (whose name belongs to the display driver) rather than
+  creating a `CGVirtualDisplay`, so "rename/delete a virtual display we made"
+  doesn't map to it. Backlog item is macOS-complete; Windows N/A by design.
+
 ## Update — 2026-06-27 (Viewer transparent overlay top bar — web + Android)
 
 Backlog sweep. Web + Android viewers now match the iPhone's transparent overlay;
