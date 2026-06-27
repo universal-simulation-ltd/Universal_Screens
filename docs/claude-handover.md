@@ -4,6 +4,31 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-27 (v10 client recompile — web, desktop, Android)
+
+Follow-up to the protocol v9→v10 bump below: all clients recompiled against v10.
+
+- **Desktop client** (`extender-client`): rebuilt clean.
+- **Web** (`protocol-wasm` → `apps/web/pkg`): rebuilt with `wasm-pack --dev --target
+  web`; `node apps/web/verify-wasm.mjs` passes ALL OK at v10. (Stale `encode_hello`
+  byte expectation + 3 five-arg `extender_session_connect` test calls fixed — PR #14.)
+- **Android**: full toolchain set up on this Mac and the APK built against v10.
+  - Installed **NDK r27c** at `~/Library/Android/sdk/android-ndk-r27c` (downloaded
+    directly from Google — there was no `sdkmanager`/`cmdline-tools`). Point
+    `cargo-ndk` at it with `ANDROID_NDK_HOME=~/Library/Android/sdk/android-ndk-r27c`.
+  - Installed Rust targets `aarch64/armv7/x86_64-linux-android` + `cargo-ndk` v4.1.2.
+  - Build: `ANDROID_NDK_HOME=… cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o
+    apps/android/app/src/main/jniLibs build -p extender-android-jni --release`, then
+    `cd apps/android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+    ./gradlew assembleDebug`. APK → `apps/android/app/build/outputs/apk/debug/app-debug.apk`.
+  - **Fixed:** `apps/android/gradlew` was committed non-executable (100644); restored
+    the exec bit so the documented `./gradlew` build works.
+  - **Not installed:** no Android device was connected (`adb devices` empty). APK is
+    built but needs `adb install -r …` on a device.
+
+All clients are now v10-consistent. The Android Rust targets / `cargo-ndk` / NDK are
+one-time installs — future Android builds just need the `cargo ndk` + `./gradlew` steps.
+
 ## Update — 2026-06-27 (device-named virtual displays + emoji host icons)
 
 **Shipped this session (iOS + macOS host):**
