@@ -4,6 +4,45 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-28 (Rename saved hosts on every client + capture-teardown fix)
+
+On-device test session (Mac host + iPhone JPM). Follow-ups to the virtual-display
+work below.
+
+- **Capture no longer wedges the accept loop.** Removing the streamed display (or
+  any SCStream error) killed frame delivery, but `stream_to_client` blocked on
+  `rx.recv()` forever, so `serve_video` never returned and the next connect did
+  nothing. `serve_video` now attaches an SCStream delegate
+  (`new_with_delegate` + `StreamCallbacks`) that flips a `dead` flag on
+  error/stop, and `stream_to_client` polls with `recv_timeout` and returns when
+  dead/disconnected. **Confirmed on device:** connect → stream → Remove →
+  `SCStream stopped` → reconnect creates a fresh display and streams. (`d1ab9dc`)
+- **Display rename label = `Friendly (Device)`** e.g. "Screen (iPhone)". The
+  virtual-displays panel's per-row **Rename** sets the row's main name (no separate
+  "override" line, no Clear button — blank resets). `resolved_name(friendly,
+  device)` is the single source of truth; `Display` stores `device_base` so the
+  live label updates immediately and re-renaming doesn't nest brackets. (`f8806f2`)
+- **Rename saved hosts — shipped on ALL surfaces** (same friendly-name pattern,
+  shown as `Custom (host)`):
+  - **macOS host** Recent connections list — per-row Rename + inline editor;
+    `RecentConn.name` (serde-default), preserved across reconnect. (`0491eee`)
+  - **iPhone** Saved Connections — `SavedConnection.customName` +
+    `ConnectionStore.setCustomName`; row ⋯ menu → Rename → alert+TextField.
+    Built for device + **installed on iPhone JPM** (`xcodebuild` device build,
+    `devicectl install`). (`7b1b57b`)
+  - **Web** client — `saved.js` `customName`/`setCustomName`; `renderSaved` shows
+    a ✎ rename (prompt) + × forget. (`4f23661`)
+  - **Android** — `SavedConnection.customName` + `setCustomName` (model was
+    already there); added the Rename button + AlertDialog in `SavedConnectionRow`.
+    `:app:compileDebugKotlin` clean. (`dcd60e3`)
+- **iOS build/install recipe (works):** `xcodegen generate` then
+  `xcodebuild -project ScreenExtender.xcodeproj -scheme ScreenExtender -configuration
+  Debug -destination 'id=<device-udid>' -allowProvisioningUpdates -derivedDataPath
+  build/dd build`, then `xcrun devicectl device install app --device <udid>
+  build/dd/Build/Products/Debug-iphoneos/ScreenExtender.app`. Team ZH9C5TS86A,
+  automatic signing. The **simulator** build fails to link (xcframework has no
+  x86_64 slice — only `ios-arm64` + `ios-arm64-simulator`); device builds are fine.
+
 ## Update — 2026-06-27 (macOS host: list / rename / remove virtual displays)
 
 Backlog "rename + delete virtual displays from the PC side" — done for the
