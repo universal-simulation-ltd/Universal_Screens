@@ -38,7 +38,7 @@ for Windows* → Windows is the host, phone is the client).
 | Mode | What | Status |
 |---|---|---|
 | **Clicker** | slide remote: keys + live slide previews, deck pre-scan, window picker, PIN pairing | ✅ |
-| **Trackpad** | relative mouse, tap/scroll/right-click, sensitivity slider, haptics | ✅ |
+| **Trackpad** | relative mouse, tap/scroll/right-click, click-and-drag (tap-and-a-half + Drag-lock button), sensitivity slider, haptics | ✅ |
 | **Mirror** | view the host screen (H.264) — letterboxed, pinch-zoom/pan, cursor shown | ✅ |
 | **Remote control** | mirror + forward touch/keys; hold-handle to toggle the bar | ✅ |
 | **Second screen** | host streams a *virtual* monitor (extend) | ✅ app+host; needs a virtual-display driver — see [docs/SECOND-SCREEN.md](docs/SECOND-SCREEN.md) |

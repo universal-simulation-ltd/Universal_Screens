@@ -4,6 +4,35 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-28 (Trackpad click-and-drag)
+
+Backlog item *"with the trackpad we need to be able to do a click and drag"*.
+Added two complementary ways to drag, with parity across iOS + Android, plus the
+host-side fix that makes a held-button drag actually register on macOS.
+
+- **Tap-and-a-half gesture** — a one-finger move that closely follows a tap
+  (within 300 ms) presses the left button at the start of the move and releases
+  it on lift, so you tap, then tap-hold-drag. A plain quick double-tap still
+  double-clicks (the second, stationary tap clicks normally).
+- **Drag-lock button** — a new **Drag / Drop** button between Left/Right click
+  holds the left button down so any one-finger move drags; tap **Drop** (or the
+  centre lock, or leave the screen) to release. The hint text + a `DisposableEffect`
+  / `onDisappear` safety release cover the held state.
+- **Host fix (macOS):** `crates/host` + `crates/host-macos` now track the held
+  left button and post moves as `LeftMouseDragged` (not `MouseMoved`) while it's
+  down — Quartz only treats the former as a drag, so without this a held-button
+  move wouldn't select text / drag windows. The **Windows host needs no change**
+  (`MOUSEEVENTF_MOVE` + a held button drags natively).
+- **No protocol change** — uses the existing `Input::MouseButton`/`MouseMoveRelative`,
+  so it's backward compatible. For the best macOS drag, release host + app
+  together (an old macOS host degrades gracefully — moves just may not drag).
+- **Build:** Android `:app:compileDebugKotlin` green. iOS `TrackpadView.swift` and
+  the macOS host changes are reviewed-not-compiled on this Windows box (no Xcode /
+  no macOS toolchain) — verify the drag on device next macOS+phone session.
+- Files: `apps/android/.../MainActivity.kt` (`TrackpadScreen`),
+  `apps/ios/ScreenExtender/TrackpadView.swift`, `crates/host/src/main.rs`,
+  `crates/host-macos/src/host.rs`.
+
 ## Update — 2026-06-28 (Rename saved hosts on every client + capture-teardown fix)
 
 On-device test session (Mac host + iPhone JPM). Follow-ups to the virtual-display

@@ -329,30 +329,42 @@ fn serve(
 /// the captured display's pixels.
 fn receive_and_inject(mut stream: TcpStream, bounds: Bounds) {
     let mut cursor = (bounds.0, bounds.1);
+    // Track whether the left button is held so moves can be posted as drags —
+    // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
+    // held-button move otherwise wouldn't select text / drag windows.
+    let mut left_down = false;
     while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
-        inject(input, bounds, &mut cursor);
+        inject(input, bounds, &mut cursor, &mut left_down);
     }
 }
 
 /// Inject one input event via CoreGraphics. `cursor` tracks the last pointer
 /// position so button and scroll events fire where the pointer is. Normalized
 /// pointer coords map into the captured display's global `bounds` (the virtual
-/// display in extend mode, or the primary display in mirror mode).
-fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64)) {
+/// display in extend mode, or the primary display in mirror mode). `left_down`
+/// tracks the held left button so moves drag rather than hover.
+fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64), left_down: &mut bool) {
     let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
         return;
+    };
+    // While the left button is held, a move is a drag, not a hover.
+    let move_type = |down: bool| {
+        if down { CGEventType::LeftMouseDragged } else { CGEventType::MouseMoved }
     };
     match input {
         Input::MouseMove { x, y } => {
             *cursor = normalized_to_global(bounds, x, y);
-            post_mouse(source, CGEventType::MouseMoved, *cursor, CGMouseButton::Left);
+            post_mouse(source, move_type(*left_down), *cursor, CGMouseButton::Left);
         }
         Input::MouseMoveRelative { dx, dy } => {
             cursor.0 = (cursor.0 + f64::from(dx)).clamp(bounds.0, bounds.0 + bounds.2 - 1.0);
             cursor.1 = (cursor.1 + f64::from(dy)).clamp(bounds.1, bounds.1 + bounds.3 - 1.0);
-            post_mouse(source, CGEventType::MouseMoved, *cursor, CGMouseButton::Left);
+            post_mouse(source, move_type(*left_down), *cursor, CGMouseButton::Left);
         }
         Input::MouseButton { button, pressed } => {
+            if button == Button::Left {
+                *left_down = pressed;
+            }
             let (event_type, cg_button) = match (button, pressed) {
                 (Button::Left, true) => (CGEventType::LeftMouseDown, CGMouseButton::Left),
                 (Button::Left, false) => (CGEventType::LeftMouseUp, CGMouseButton::Left),

@@ -39,10 +39,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -1028,13 +1030,31 @@ fun TrackpadScreen(session: ExtenderSession) {
     // When locked, the pad ignores all touches and the buttons/slider are disabled,
     // so a stray hand can't move the cursor; only the central lock toggle stays live.
     var locked by remember { mutableStateOf(false) }
+    // Click-and-drag is offered two ways: a "tap-and-a-half" gesture (tap, then
+    // tap-hold-move) and the Drag-lock button below, which holds the left button
+    // down so a plain one-finger move drags. dragLock is read inside the gesture
+    // loop (snapshot state) so toggling it takes effect without restarting input.
+    var dragLock by remember { mutableStateOf(false) }
+    var lastTapUp by remember { mutableStateOf(0L) }
     val scrollDivisor = 40f
     val tapSlop = 16f
+    val doubleTapWindowMs = 300L
     // A click with a little haptic tick, like a real trackpad. button: 0=L, 1=R.
     fun click(button: Int) {
         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         session.sendMouseButton(button, true)
         session.sendMouseButton(button, false)
+    }
+    // Hold (or release) the left button so one-finger moves drag.
+    fun setDragLock(on: Boolean) {
+        if (on == dragLock) return
+        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        session.sendMouseButton(0, on)
+        dragLock = on
+    }
+    // Safety net: never leave a button stuck down if we navigate away mid-drag.
+    DisposableEffect(Unit) {
+        onDispose { if (dragLock) session.sendMouseButton(0, false) }
     }
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
         Box(
@@ -1046,8 +1066,12 @@ fun TrackpadScreen(session: ExtenderSession) {
                     if (locked) return@pointerInput
                     awaitEachGesture {
                         awaitFirstDown()
+                        // A gesture that closely follows a tap is a "tap-and-a-half":
+                        // a one-finger move turns into a drag (press now, release on lift).
+                        val tapAndHalf = System.currentTimeMillis() - lastTapUp < doubleTapWindowMs
                         var moved = 0f
                         var maxPointers = 1
+                        var pressedForDrag = false
                         while (true) {
                             val event = awaitPointerEvent()
                             maxPointers = maxOf(maxPointers, event.changes.count { it.pressed })
@@ -1058,15 +1082,28 @@ fun TrackpadScreen(session: ExtenderSession) {
                                     // Two fingers → scroll (natural direction).
                                     session.sendScroll(pan.x / scrollDivisor * sensitivity, -pan.y / scrollDivisor * sensitivity)
                                 } else {
+                                    // Begin a tap-and-a-half drag once the move clears the tap slop.
+                                    if (tapAndHalf && !dragLock && !pressedForDrag && moved >= tapSlop) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        session.sendMouseButton(0, true)
+                                        pressedForDrag = true
+                                    }
                                     session.sendMouseMoveRelative(pan.x * sensitivity, pan.y * sensitivity)
                                 }
                                 event.changes.forEach { it.consume() }
                             }
                             if (event.changes.none { it.pressed }) break
                         }
-                        // A near-stationary lift is a click (two fingers = right).
-                        if (moved < tapSlop) {
-                            click(if (maxPointers >= 2) 1 else 0)
+                        when {
+                            // End a tap-and-a-half drag on lift.
+                            pressedForDrag -> session.sendMouseButton(0, false)
+                            // Drag-lock keeps the button held across lifts — don't click, don't drop.
+                            dragLock -> {}
+                            // A near-stationary lift is a click (two fingers = right).
+                            moved < tapSlop -> {
+                                click(if (maxPointers >= 2) 1 else 0)
+                                lastTapUp = System.currentTimeMillis()
+                            }
                         }
                     }
                 },
@@ -1075,11 +1112,12 @@ fun TrackpadScreen(session: ExtenderSession) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 // The lock sits in the middle of the pad — a direct tap toggles it;
                 // its touches are consumed so they never move the cursor.
-                LockToggle(locked = locked) { locked = !locked }
+                LockToggle(locked = locked) { locked = !locked; if (locked) setDragLock(false) }
                 Spacer(Modifier.height(16.dp))
                 Text(
                     if (locked) "Locked — tap the lock to unlock"
-                    else "Trackpad\n\nDrag to move • tap to click\nTwo fingers: scroll • two-finger tap: right-click",
+                    else if (dragLock) "Dragging — move to drag\nTap “Drop” to release"
+                    else "Trackpad\n\nDrag to move • tap to click • double-tap-drag to drag\nTwo fingers: scroll • two-finger tap: right-click",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -1103,6 +1141,17 @@ fun TrackpadScreen(session: ExtenderSession) {
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { click(0) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Left click") }
+            // Drag lock: hold the left button so a one-finger move drags; tap again to drop.
+            if (dragLock) {
+                Button(
+                    onClick = { setDragLock(false) },
+                    enabled = !locked,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Drop") }
+            } else {
+                OutlinedButton(onClick = { setDragLock(true) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Drag") }
+            }
             Button(onClick = { click(1) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Right click") }
         }
     }
