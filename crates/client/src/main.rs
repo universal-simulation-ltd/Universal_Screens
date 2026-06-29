@@ -35,6 +35,14 @@ const FALLBACK_RES: (u32, u32) = (1920, 1080);
 /// with `--res N` (default `[0]`, native). Index into this list.
 const SCALE_PRESETS: [u32; 4] = [100, 75, 67, 50];
 
+/// openh264 (this client's software decoder) tops out at ~4K UHD. A larger
+/// capture makes the host's VideoToolbox encoder emit a stream openh264 rejects
+/// outright — every slice fails with `dsNoParamSets` and the window stays black.
+/// Empirically 3840×2160 decodes but 3968×2232 does not, so cap the resolution
+/// we advertise to this box. Phone clients decode in hardware (MediaCodec) and
+/// aren't bound by this.
+const MAX_DECODE_DIM: (u32, u32) = (3840, 2160);
+
 /// One decoded frame, tightly packed RGBA (stride == width * 4).
 struct Frame {
     width: u32,
@@ -505,9 +513,26 @@ fn scaled_even(native: (u32, u32), percent: u32) -> (u32, u32) {
     (w, h)
 }
 
-/// Resolve the resolution to advertise: pick the monitor's native size, then
-/// apply the chosen [`SCALE_PRESETS`] entry (default `[0]`, native). Prints the
-/// preset menu so the user can re-run with a different `--res N`.
+/// Shrink `(w, h)` to fit inside the [`MAX_DECODE_DIM`] box, preserving aspect
+/// ratio (dimensions stay even). A no-op for sizes that already fit — so only
+/// oversized displays (4K+) are touched. Scaling by the tighter of the two
+/// ratios caps the offending dimension, so ultrawide/tall displays are handled
+/// too, not just total area.
+fn cap_to_decodable(w: u32, h: u32) -> (u32, u32) {
+    let (max_w, max_h) = MAX_DECODE_DIM;
+    if w <= max_w && h <= max_h {
+        return (w, h);
+    }
+    let scale = f64::min(f64::from(max_w) / f64::from(w), f64::from(max_h) / f64::from(h));
+    let cw = (((f64::from(w) * scale) as u32) & !1).max(2);
+    let ch = (((f64::from(h) * scale) as u32) & !1).max(2);
+    (cw, ch)
+}
+
+/// Resolve the resolution to advertise: pick the monitor's native size, apply
+/// the chosen [`SCALE_PRESETS`] entry (default `[0]`, native), then clamp it to
+/// what openh264 can decode ([`cap_to_decodable`]). Prints the preset menu so
+/// the user can re-run with a different `--res N`.
 fn resolve_resolution(
     event_loop: &ActiveEventLoop,
     window: &Window,
@@ -532,8 +557,12 @@ fn resolve_resolution(
     };
     let pct = SCALE_PRESETS[idx];
     let (w, h) = scaled_even(native, pct);
-    println!("reporting [{idx}] {w}x{h} ({pct}%) to host");
-    (w, h)
+    let (cw, ch) = cap_to_decodable(w, h);
+    if (cw, ch) != (w, h) {
+        println!("capping {w}x{h} -> {cw}x{ch} for the openh264 decoder (max ~4K UHD)");
+    }
+    println!("reporting [{idx}] {cw}x{ch} ({pct}%) to host");
+    (cw, ch)
 }
 
 struct App {
