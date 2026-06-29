@@ -13,6 +13,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread;
 
+use apple_cf::dispatch_queue::dispatch_async_and_wait;
 use apple_cf::iosurface::IOSurface;
 use apple_cf::raw;
 use core_graphics::display::CGDisplay;
@@ -300,15 +301,25 @@ fn serve(
     let (tx, rx) = mpsc::sync_channel::<EncodedFrame>(2);
     let frame_no = Arc::new(AtomicI64::new(0));
 
+    // Deliver capture callbacks on our own *serial* queue so teardown can drain
+    // it. ScreenCaptureKit can run one more `did_output_sample_buffer` after
+    // `stop_capture()` returns, but the handler closure (which owns `tx`) is
+    // freed when `sc` drops — a late callback would then use-after-free the
+    // channel and segfault. Owning the queue lets us post a barrier that waits
+    // for any in-flight callback before anything is dropped (see below).
+    let capture_queue =
+        DispatchQueue::new("uk.co.unisim.screens.capture", DispatchQoS::UserInteractive);
+
     let mut sc = SCStream::new(&filter, &config);
     {
         let encoder = encoder.clone();
         let frame_no = frame_no.clone();
-        sc.add_output_handler(
+        sc.add_output_handler_with_queue(
             move |sample: CMSampleBuffer, _ty: SCStreamOutputType| {
                 capture_and_encode(&sample, &encoder, &frame_no, &tx);
             },
             SCStreamOutputType::Screen,
+            Some(&capture_queue),
         );
     }
 
@@ -320,6 +331,12 @@ fn serve(
     sc.start_capture()?;
     let result = stream_to_client(stream, &rx, width, height);
     let _ = sc.stop_capture();
+    // Barrier: an empty block on the serial capture queue can only run once
+    // every already-queued sample callback has finished, so after this returns
+    // nothing can touch `tx` (or the closure) — safe to drop `sc` and the
+    // channel below without the use-after-free that crashed the host on
+    // disconnect.
+    dispatch_async_and_wait(&capture_queue, || {});
     let _ = input_thread.join();
     result
 }
