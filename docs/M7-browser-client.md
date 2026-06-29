@@ -50,7 +50,7 @@ Concretely the tab must:
    **Extend** modes (clicker `ControlOnly` is a nice-to-have, not the headline).
 
 This is the "browser as a computer" item under **Screens App** in
-`Docs_UNI_SIM/backlog-unisim.md`. The marketing wiring (`/screens` page:
+`backlog-unisim.md` (at the UNISIM umbrella root). The marketing wiring (`/screens` page:
 "Direct from your browser" + "Download the apps") is **step 2** here and depends
 on the sibling "/screens marketing page" task existing first.
 
