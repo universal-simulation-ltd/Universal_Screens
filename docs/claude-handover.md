@@ -64,15 +64,34 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
     21). Needs an **on-device pass** + the Worker **deployed** to confirm the live link.
     Build with `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
     ANDROID_HOME=~/Library/Android/sdk ./gradlew :app:compileDebugKotlin`.
-- **Next:** **deploy the portal Worker** (so the Android cast can actually connect) +
-  an on-device M8c pass → then M8d (desktop dials the room → browser *video* viewer:
-  host capture + M7 decode, the highest-reuse video case).
-- Deploy state: M8 doc merged (Universal_Screens PR #20); M8a/M8b/M8c-browser merged
-  (opensource-portal PR #6/#7/#8); M8c-Android merged (Universal_Screens PR #23).
-  **All un-deployed** — live site untouched until `wrangler deploy` in
-  `backoffice/opensource-portal`. The Android cast feature won't connect until that
-  deploy happens. *(Note: pre-existing unpushed commits sit in the sibling
-  `Docs_UNI_SIM` repo — untouched this session, not mine to ship.)*
+- **M8d SHIPPED** (transport) + **M8g SHIPPED** (marketing).
+  - *M8d* (Universal_Screens PR #25): desktop → browser viewer over the cloud.
+    `crates/web-bridge::dial_room()` (the bridge inside out — host dials
+    `wss://…/screens/room?code=…&role=sender`, waits `paired`, bridges to local
+    `serve()`; `native-tls` for wss; `--room CODE` CLI). `apps/web/src/room.js`
+    `RoomTransport` (M7 Transport adapted to the room; decode injected, WASM-free).
+    Verified: `cargo test -p extender-web-bridge` (7 green incl. a `dial_room`
+    fake-room↔fake-host test) + a `RoomTransport` Node test vs the real DO. **Live
+    wss + host capture + real-stream decode need an on-hardware pass.**
+  - *M8g* (opensource-portal PR #9): "Use this screen as a receiver" hero CTA +
+    section on `/screens` → `/screens/receive`.
+- **Deploy state:** the user **deployed the portal Worker and confirmed M8c
+  on-device** (2026-06-30) — the rendezvous is live; cast control works. Since then,
+  M8d (US #25) and M8g (portal #9) merged but are **NOT yet deployed** (portal needs
+  another `wrangler deploy` for the M8g page; M8d's `dial_room` is a host/CLI binary,
+  not the site). *(Pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM`
+  repo — untouched this session, not mine to ship.)*
+- **Next / remaining (hardware-gated):**
+  - **M8d wiring:** a host-GUI code field to start the dial (today: run
+    `extender-web-bridge --room CODE`); decide where the video viewer is served
+    (`apps/web` at `/screens` vs bundling the WASM decode into the portal receiver).
+    Then an on-hardware desktop→browser video pass.
+  - **M8e — WebRTC media upgrade:** large; `webrtc-rs` in the host + WebRTC in the
+    apps + a TURN fallback (Cloudflare Calls). Essentially unverifiable without
+    hardware — recommend its own on-hardware session.
+  - **M8f — phone self-capture:** large new capability (Android MediaProjection /
+    iOS ReplayKit + an encoder) so a phone can *cast its screen into* the browser.
+    Also its own session.
 
 ## Update — 2026-06-28 (Trackpad click-and-drag)
 

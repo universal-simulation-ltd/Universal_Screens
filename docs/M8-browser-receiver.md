@@ -1,6 +1,6 @@
 # M8 — Browser receiver ("the browser tab is the screen an app connects *to*")
 
-**Status:** M8a (rendezvous) + M8b (receiver page) + M8c (control round-trip) ✅ — the rest 🚧 planning. This doc is the milestone
+**Status:** M8a + M8b + M8c + M8d-transport + M8g ✅ — M8e/M8f 🚧 (hardware-gated). This doc is the milestone
 plan for the inverse of M7: instead of the browser being a *client* that dials a
 native host, the browser tab becomes a **receiver** the apps connect *into*. The
 rendezvous gate (M8a) is built and verified; see the M8a sub-increment below.
@@ -216,11 +216,24 @@ The DO room is **both** the rendezvous (Problem 1) and the Phase-1 relay
     `CastFlow`/`CastModePicker`/`CastClickerScreen` **reusing the existing
     `TrackpadScreen`**; "Cast to a browser" entry + `?code=` deep-link/scan routing.
     `compileDebugKotlin` green; **needs an on-device pass + the Worker deployed.**
-- **M8d — desktop → browser viewer (relay).** The desktop host learns to **dial the
-  room** (outbound `tungstenite` WebSocket) instead of only LAN-listening, then runs
-  the *existing* `serve()` over it. Browser renders with the M7 decode pipeline.
-  This is "remote access to my desktop from any browser tab, across networks" — the
-  highest-reuse video case, still over the relay.
+- **M8d — desktop → browser viewer (relay).** ✅ **Transport done** (PR #25). The
+  desktop **dials the room** instead of LAN-listening, then runs the *existing*
+  `serve()` over it; the browser renders with the M7 decode pipeline. "Remote access
+  to my desktop from any browser tab, across networks" — the highest-reuse video
+  case, over the relay.
+  - *Rust* (`crates/web-bridge`): `dial_room()` = the web-bridge inside out —
+    dials `wss://…/screens/room?code=…&role=sender`, waits for `paired`, bridges the
+    room to a loopback connection to the local `serve()` (untouched). `native-tls`
+    for `wss`; `signal_type()` JSON-less signal parse; `--room CODE` CLI mode.
+  - *Browser* (`apps/web`): `RoomTransport` = the M7 `Transport` adapted to the room
+    (text → signals, binary → decoder; decode injected, WASM-free).
+  - *Verified:* `cargo test -p extender-web-bridge` (7 green, incl. a `dial_room`
+    fake-room↔fake-host integration test) + a `RoomTransport` Node test against the
+    real DO. **Live `wss` + host capture + real-stream decode need an on-hardware pass.**
+  - *Remaining wiring (follow-up):* a host-GUI code field to start the dial (today:
+    `extender-web-bridge --room CODE`), and **where the video viewer is served** —
+    `apps/web` at `/screens` (M7f/M7h) vs bundling the WASM decode into the portal
+    receiver page. This is the packaging decision M7f already flagged.
 - **M8e — WebRTC media upgrade (optional, big).** Swap the video path to WebRTC
   (DO signals SDP/ICE; add a TURN fallback — Cloudflare Calls). New WebRTC stacks in
   the Rust host (`webrtc-rs`) + Android/iOS. Relay stays the fallback. This is the
@@ -229,8 +242,10 @@ The DO room is **both** the rendezvous (Problem 1) and the Phase-1 relay
   self-capture via Android **MediaProjection** / iOS **ReplayKit**, encode, and
   stream into the room (relay, then WebRTC). Phones are client-only today, so this
   is the most net-new app work — sequence it last.
-- **M8g — marketing wiring.** On `/screens`, add "**Use this screen as a
-  receiver**" alongside the existing "Direct from your browser" (M7h) CTA.
+- **M8g — marketing wiring.** ✅ **Done** (`opensource-portal` PR #9). A hero CTA
+  "**Use this screen as a receiver**" + a "make this screen a receiver" section on
+  `/screens`, pointing at `/screens/receive`. Copy reflects the shipped control
+  modes (M8c); not deployed.
 
 M8a is the gate. M8c is the first usable win. M8d is the headline (browser as a
 desktop viewer over any network). M8e/M8f are the heavy follow-ons.
