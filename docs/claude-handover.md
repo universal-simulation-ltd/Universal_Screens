@@ -48,13 +48,31 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
     (`connect.html`) before the Worker runs (assets-first default). So the live
     connect page is the static file; the Worker route never fires. That's why the
     code handling went into `connect.html`, and `src/worker.js` was untouched in M8b.
-- **Next:** M8c (control-only relay — phone clicker/trackpad → browser, first real
-  end-to-end win, no WebRTC/capture) → M8d (desktop dials the room → browser viewer).
-- Deploy state: M8 doc merged (Universal_Screens PR #20); M8a code merged
-  (opensource-portal PR #6); M8b code merged (opensource-portal PR #7). **All
-  un-deployed** — live site untouched until `wrangler deploy`. No host/app code
-  touched. *(Note: pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM`
-  repo — untouched this session, not mine to ship.)*
+- **M8c SHIPPED** (control round-trip — first real end-to-end win). The browser
+  receiver is now a *remote-controlled screen* and the phone drives it.
+  - *Wire format:* a small **JSON control protocol** keyed by `t`
+    (`move`/`click`/`btn`/`scroll`/`key`/`hello`), NOT the binary `postcard` `Input`
+    enum (that needs the WASM shim + FFI — saved for the video path M8d/M8e).
+  - *Browser* (`opensource-portal` PR #8): `control.js` (pure `applyControl` reducer
+    + `control.test.mjs`, 17 cases), `receive.html` control stage, `control-sender.html`
+    (browser sender / another-browser remote). Verified via a live relay-through-the-DO
+    round-trip + reducer unit tests.
+  - *Android* (PR #23): `InputTarget` interface (`ExtenderSession` + new `RoomSession`
+    implement it); `RoomSession` = OkHttp WS → control JSON; `CastFlow` reuses the
+    existing `TrackpadScreen` + a `CastClickerScreen`; "Cast to a browser" button +
+    `?code=` deep-link/scan routing. **`compileDebugKotlin` green** (Gradle 8.7 / JBR
+    21). Needs an **on-device pass** + the Worker **deployed** to confirm the live link.
+    Build with `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+    ANDROID_HOME=~/Library/Android/sdk ./gradlew :app:compileDebugKotlin`.
+- **Next:** **deploy the portal Worker** (so the Android cast can actually connect) +
+  an on-device M8c pass → then M8d (desktop dials the room → browser *video* viewer:
+  host capture + M7 decode, the highest-reuse video case).
+- Deploy state: M8 doc merged (Universal_Screens PR #20); M8a/M8b/M8c-browser merged
+  (opensource-portal PR #6/#7/#8); M8c-Android merged (Universal_Screens PR #23).
+  **All un-deployed** — live site untouched until `wrangler deploy` in
+  `backoffice/opensource-portal`. The Android cast feature won't connect until that
+  deploy happens. *(Note: pre-existing unpushed commits sit in the sibling
+  `Docs_UNI_SIM` repo — untouched this session, not mine to ship.)*
 
 ## Update — 2026-06-28 (Trackpad click-and-drag)
 
