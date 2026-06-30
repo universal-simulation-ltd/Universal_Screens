@@ -1,6 +1,6 @@
 # M8 — Browser receiver ("the browser tab is the screen an app connects *to*")
 
-**Status:** M8a (rendezvous) ✅ — the rest 🚧 planning. This doc is the milestone
+**Status:** M8a (rendezvous) + M8b (receiver page) ✅ — the rest 🚧 planning. This doc is the milestone
 plan for the inverse of M7: instead of the browser being a *client* that dials a
 native host, the browser tab becomes a **receiver** the apps connect *into*. The
 rendezvous gate (M8a) is built and verified; see the M8a sub-increment below.
@@ -185,10 +185,18 @@ The DO room is **both** the rendezvous (Problem 1) and the Phase-1 relay
   peer-left, bad-code rejection); `deploy --dry-run` clean. Two-tab demo at
   `public/screens/room-spike.html`. **Not deployed** (live site untouched). Pure
   web; no app changes.
-- **M8b — receiver page + QR.** New `apps/web` view: mint a code, render it as text
-  + branded QR (reuse the host's QR style), join the room, wait for a peer. Extend
-  `serveScreensConnect()` with the `code`/`role` branch (worker.js:202) and the
-  `unisimscreens://` scheme with `connect?code=…`.
+- **M8b — receiver page + QR.** ✅ **Done** (in `opensource-portal`, PR #7). Built as a
+  **static page** `public/screens/receive.html` (not `apps/web` — the site is a
+  static-assets Worker with no build step): mints a 4-char code, renders it big + as
+  a **QR** (vendored MIT QR generator `public/screens/vendor/qrcode-generator.js`, so
+  no build/CDN), joins the room as `role=receiver`, shows waiting → connected →
+  peer-left. The QR encodes `/screens/connect?code=…&role=sender` so a phone camera
+  lands in the app. **Routing gotcha learned:** `serveScreensConnect()` in the Worker
+  is *dead* for `/screens/connect` — Cloudflare serves the matching static asset
+  (`public/screens/connect.html`) **before** the Worker runs (assets-first default),
+  so the `code`/`role` deep-link branch went into **`connect.html`**, not the Worker.
+  Verified against `wrangler dev` (QR API correct, both connect branches serve,
+  `/screens/receive` 200). No video yet — that's M8c. **Not deployed.**
 - **M8c — control-only round-trip (relay).** "Use this as a remote-controlled
   screen": browser joins as host-surface, the Android app joins as a clicker/
   trackpad client, `Input` frames relay through the DO. Reuses the whole `Input`
@@ -257,9 +265,12 @@ because traffic now traverses a cloud rendezvous:
   `RENDEZVOUS` binding + `v1` migration in `wrangler.jsonc`, demo
   `public/screens/room-spike.html`. Still to do (M8b): extend `serveScreensConnect()`
   with the `code`/`role` branch.
-- `apps/web/` — receiver view (mint code, render QR, join room), reusing
-  `src/decoder.js` / `src/renderer.js` / `src/input.js` / the WASM shim; add a
-  `src/rendezvous.js` (DO WebSocket client) + the post-pair mode picker. (M8b–M8d)
+- `opensource-portal/public/screens/` — ✅ (M8b) `receive.html` (mint code + QR +
+  join room as `role=receiver`), `connect.html` (the `code`/`role` deep-link branch —
+  the live lander, *not* the dead Worker `serveScreensConnect()`), vendored
+  `vendor/qrcode-generator.js`. The post-pair **mode picker** and the actual
+  **decode/render** (reusing `apps/web` `decoder.js`/`renderer.js`/WASM shim) arrive
+  with the video path in M8c/M8d.
 - `crates/host` + `crates/host-windows` — outbound "dial the room" mode (reuse
   `serve()` over a `tungstenite` socket, like `crates/web-bridge` does in reverse).
   (M8d)

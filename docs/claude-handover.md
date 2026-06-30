@@ -37,13 +37,24 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
   two-tab demo `public/screens/room-spike.html`. Verified 9/9 against `wrangler dev`;
   `deploy --dry-run` clean. **Merged (opensource-portal PR #6), NOT deployed** — the
   live site is untouched until someone runs `wrangler deploy`.
-- **Next:** M8b (receiver page + QR; extend `serveScreensConnect()` with `code`/
-  `role`) → M8c (control-only relay, first end-to-end win) → M8d (desktop→browser
-  viewer: host dials the room).
+- **M8b SHIPPED** (receiver page + QR). In `opensource-portal` (PR #7): static
+  `public/screens/receive.html` (mints a 4-char code, renders it + a QR, joins the
+  room as `role=receiver`, shows waiting→connected→peer-left), the `code`/`role`
+  deep-link branch added to **`public/screens/connect.html`**, and a vendored MIT QR
+  lib (`public/screens/vendor/qrcode-generator.js`, no build step). Verified against
+  `wrangler dev`. **Not deployed.**
+  - **Routing gotcha (write this down):** the Worker's `serveScreensConnect()` is
+    *dead* for `/screens/connect` — Cloudflare serves the matching **static asset**
+    (`connect.html`) before the Worker runs (assets-first default). So the live
+    connect page is the static file; the Worker route never fires. That's why the
+    code handling went into `connect.html`, and `src/worker.js` was untouched in M8b.
+- **Next:** M8c (control-only relay — phone clicker/trackpad → browser, first real
+  end-to-end win, no WebRTC/capture) → M8d (desktop dials the room → browser viewer).
 - Deploy state: M8 doc merged (Universal_Screens PR #20); M8a code merged
-  (opensource-portal PR #6), un-deployed. No host/app code touched. *(Note:
-  pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM` repo — untouched
-  this session, not mine to ship.)*
+  (opensource-portal PR #6); M8b code merged (opensource-portal PR #7). **All
+  un-deployed** — live site untouched until `wrangler deploy`. No host/app code
+  touched. *(Note: pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM`
+  repo — untouched this session, not mine to ship.)*
 
 ## Update — 2026-06-28 (Trackpad click-and-drag)
 
