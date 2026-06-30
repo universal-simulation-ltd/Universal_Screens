@@ -230,10 +230,13 @@ The DO room is **both** the rendezvous (Problem 1) and the Phase-1 relay
   - *Verified:* `cargo test -p extender-web-bridge` (7 green, incl. a `dial_room`
     fake-room↔fake-host integration test) + a `RoomTransport` Node test against the
     real DO. **Live `wss` + host capture + real-stream decode need an on-hardware pass.**
-  - *Remaining wiring (follow-up):* a host-GUI code field to start the dial (today:
-    `extender-web-bridge --room CODE`), and **where the video viewer is served** —
-    `apps/web` at `/screens` (M7f/M7h) vs bundling the WASM decode into the portal
-    receiver page. This is the packaging decision M7f already flagged.
+  - *Host-GUI entry:* ✅ done (PR #28) — a "Cast to a browser screen" field in both
+    host GUIs (`crates/host-macos` + `crates/host-windows`) spawns `dial_room` on a
+    thread; macOS compiles, Windows mirrors it (reviewed-not-compiled here).
+  - *Remaining wiring (follow-up):* **where the video viewer is served** — `apps/web`
+    at `/screens` (M7f/M7h) vs bundling the WASM decode into the portal receiver
+    page — plus an **on-hardware desktop→browser video pass**. The packaging decision
+    M7f already flagged.
 - **M8e — WebRTC media upgrade (optional, big).** Swap the video path to WebRTC
   (DO signals SDP/ICE; add a TURN fallback — Cloudflare Calls). New WebRTC stacks in
   the Rust host (`webrtc-rs`) + Android/iOS. Relay stays the fallback. This is the

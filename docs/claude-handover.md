@@ -4,7 +4,7 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
-## Update — 2026-06-30 (M8 browser-receiver design doc — planning only)
+## Update — 2026-06-30 (M8 browser receiver — built M8a–M8d + M8g; M8e/M8f specced)
 
 Answered the question *"can the website have a receiver page — open it in a
 browser, it shows a QR / code, and an app connects **to** the browser?"* Yes —
@@ -81,17 +81,25 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
   another `wrangler deploy` for the M8g page; M8d's `dial_room` is a host/CLI binary,
   not the site). *(Pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM`
   repo — untouched this session, not mine to ship.)*
-- **Next / remaining (hardware-gated):**
-  - **M8d wiring:** a host-GUI code field to start the dial (today: run
-    `extender-web-bridge --room CODE`); decide where the video viewer is served
-    (`apps/web` at `/screens` vs bundling the WASM decode into the portal receiver).
-    Then an on-hardware desktop→browser video pass.
-  - **M8e — WebRTC media upgrade:** large; `webrtc-rs` in the host + WebRTC in the
-    apps + a TURN fallback (Cloudflare Calls). Essentially unverifiable without
-    hardware — recommend its own on-hardware session.
-  - **M8f — phone self-capture:** large new capability (Android MediaProjection /
-    iOS ReplayKit + an encoder) so a phone can *cast its screen into* the browser.
-    Also its own session.
+- **M8d host-GUI entry SHIPPED** (PR #28): a "Cast to a browser screen" field in
+  both host GUIs (`crates/host-macos` + `crates/host-windows`) spawns `dial_room` on
+  a thread, bridging the host's listener to the room. `cargo build -p
+  extender-host-macos` green; Windows mirrors it (reviewed-not-compiled here). Build
+  the macOS host with `JAVA_HOME` not needed — just `cargo build -p
+  extender-host-macos` (uses native-tls via Security.framework).
+- **M8e + M8f DESIGN SPECS written** (PR #27): `docs/M8e-webrtc-media.md` (DO =
+  signaling only; WebRTC data channel carrying postcard frames first, media track
+  later; STUN + Cloudflare-Calls TURN; relay fallback) and `docs/M8f-phone-capture.md`
+  (MediaProjection/ReplayKit → same StreamStart/Frame; reuses the M8d viewer; extend
+  mobile-ffi with frame encoders). Both phased with a verifiable gate.
+- **Next / remaining (hardware-gated, each its own session):**
+  - **M8d finish:** decide where the video viewer is served (`apps/web` at `/screens`
+    vs bundling the WASM decode into the portal receiver) + an on-hardware
+    desktop→browser **video** pass (transport + host-GUI entry are in).
+  - **M8e — WebRTC** (spec ready): start at M8e-b (browser↔browser data channel over
+    the DO) — that part *is* verifiable in-browser; host/app WebRTC need hardware.
+  - **M8f — phone self-capture** (spec ready): start at M8f-a/b (Android
+    MediaProjection + mobile-ffi frame encoders); browser viewer is free (M8d reuse).
 
 ## Update — 2026-06-28 (Trackpad click-and-drag)
 
