@@ -8,7 +8,7 @@ import kotlin.concurrent.thread
  *
  * Construct with [connect] off the main thread — it does blocking network I/O.
  */
-class ExtenderSession private constructor(private var handle: Long) {
+class ExtenderSession private constructor(private var handle: Long) : InputTarget {
 
     /** Sink for downstream stream events, driven on the pump thread. */
     interface FrameSink {
@@ -94,19 +94,19 @@ class ExtenderSession private constructor(private var handle: Long) {
     // ---- input ----
 
     /** A key tap: down then up. The clicker's workhorse. */
-    fun tapKey(hid: Int) {
+    override fun tapKey(hid: Int) {
         if (handle == 0L) return
         ExtenderNative.nativeSendKey(handle, hid, true)
         ExtenderNative.nativeSendKey(handle, hid, false)
     }
 
     fun sendKey(hid: Int, pressed: Boolean) = ifLive { ExtenderNative.nativeSendKey(handle, hid, pressed) }
-    fun sendMouseMoveRelative(dx: Float, dy: Float) = ifLive { ExtenderNative.nativeSendMouseMoveRelative(handle, dx, dy) }
+    override fun sendMouseMoveRelative(dx: Float, dy: Float) = ifLive { ExtenderNative.nativeSendMouseMoveRelative(handle, dx, dy) }
     /** [button]: 0 = left, 1 = right, 2 = middle. */
-    fun sendMouseButton(button: Int, pressed: Boolean) = ifLive { ExtenderNative.nativeSendMouseButton(handle, button, pressed) }
+    override fun sendMouseButton(button: Int, pressed: Boolean) = ifLive { ExtenderNative.nativeSendMouseButton(handle, button, pressed) }
     fun sendTouch(id: Int, phase: Int, x: Float, y: Float) = ifLive { ExtenderNative.nativeSendTouch(handle, id, phase, x, y) }
     fun sendSecondaryClick(x: Float, y: Float) = ifLive { ExtenderNative.nativeSendSecondaryClick(handle, x, y) }
-    fun sendScroll(dx: Float, dy: Float) = ifLive { ExtenderNative.nativeSendScroll(handle, dx, dy) }
+    override fun sendScroll(dx: Float, dy: Float) = ifLive { ExtenderNative.nativeSendScroll(handle, dx, dy) }
     fun sendText(text: String) = ifLive { ExtenderNative.nativeSendText(handle, text) }
     /** Ask the host to pre-scan the deck so it can preview the next slide. */
     fun scanDeck() = ifLive { ExtenderNative.nativeScanDeck(handle) }

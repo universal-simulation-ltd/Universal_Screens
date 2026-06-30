@@ -37,4 +37,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     // QR scanning of the host's connection code.
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // WebSocket client for the "cast to a browser" rendezvous (RoomSession): the
+    // app joins a receiver tab's room over wss:// and sends control frames.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

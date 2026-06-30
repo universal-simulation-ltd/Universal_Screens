@@ -140,6 +140,22 @@ fun parseConnectPayload(text: String): ConnectPayload? {
     return null
 }
 
+/**
+ * Extract a "cast to a browser" pairing code from a connect URL, or null. The
+ * receiver page's QR encodes `…/screens/connect?code=<CODE>&role=sender`; the
+ * legacy `unisimscreens://connect?code=…` scheme is also accepted. A code is
+ * 4–8 letters/digits and routes to the cast flow (no host/Wi-Fi involved).
+ */
+fun parseRoomCode(text: String): String? {
+    val t = text.trim()
+    val isHttps = t.startsWith("https://", ignoreCase = true)
+    if (!isHttps && !t.startsWith("unisimscreens://", ignoreCase = true)) return null
+    val uri = Uri.parse(t)
+    if (isHttps && uri.path?.startsWith("/screens/connect") != true) return null
+    val code = uriParams(uri)["code"]?.uppercase() ?: return null
+    return if (code.matches(Regex("^[A-Z0-9]{4,8}$"))) code else null
+}
+
 /** Merge a URI's query params with any `k=v&k=v` in its fragment (query wins). The
  *  connect URL keeps Wi-Fi creds in the fragment, so we re-parse it as a query. */
 private fun uriParams(uri: Uri): Map<String, String> {
@@ -216,6 +232,9 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
     // True while a connection attempt is in flight (shows the Connecting screen).
     var connecting by remember { mutableStateOf(false) }
+    // Non-null when "casting to a browser": the rendezvous code we're paired on.
+    // Takes over the whole UI (CastFlow) and is independent of the host session.
+    var castCode by remember { mutableStateOf<String?>(null) }
 
     // A deep link (scanned `…/screens/connect` App Link, or the legacy
     // `unisimscreens://` scheme) opens us straight here: parse it, optionally join
@@ -224,6 +243,9 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     LaunchedEffect(deepLink) {
         val link = deepLink ?: return@LaunchedEffect
         onDeepLinkHandled()
+        // A "cast to a browser" code (…/screens/connect?code=…) routes to the
+        // rendezvous flow instead of a host connection.
+        parseRoomCode(link)?.let { castCode = it; return@LaunchedEffect }
         val payload = parseConnectPayload(link) ?: return@LaunchedEffect
         handleConnectPayload(
             context,
@@ -268,6 +290,8 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
 
     val live = session
     when {
+        // "Cast to a browser" takes over the whole UI while active.
+        castCode != null -> CastFlow(code = castCode!!, onExit = { castCode = null })
         live != null -> {
             // In the streaming modes, tapping the video hides the top bar so the
             // picture can fill the screen; tap again to bring it back.
@@ -362,6 +386,7 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                 status = status,
                 onPrepare = { addr, pin -> pending = addr to pin },
                 onConnect = { addr, m, pin -> doConnect(addr, m, pin, true) },
+                onCast = { code -> castCode = code },
             )
         }
     }
@@ -390,6 +415,7 @@ fun ConnectScreen(
     status: String,
     onPrepare: (addr: String, pin: Int) -> Unit,
     onConnect: (addr: String, mode: Mode, pin: Int) -> Unit,
+    onCast: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     var addr by remember { mutableStateOf("127.0.0.1:9000") }
@@ -398,6 +424,9 @@ fun ConnectScreen(
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
+    // "Cast to a browser": manual code entry (the QR/deep-link path skips this).
+    var castDialog by remember { mutableStateOf(false) }
+    var castDraft by remember { mutableStateOf("") }
     // Saved-host rename: the host being renamed (drives the dialog) + the draft.
     var renaming by remember { mutableStateOf<SavedConnection?>(null) }
     var renameDraft by remember { mutableStateOf("") }
@@ -409,6 +438,8 @@ fun ConnectScreen(
     // scheme and the bare `ip:port?pin=NNNN` host QR — see [parseConnectPayload].
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val text = result.contents ?: return@rememberLauncherForActivityResult
+        // A receiver's "cast" code routes to the browser-cast flow.
+        parseRoomCode(text)?.let { onCast(it); return@rememberLauncherForActivityResult }
         val payload = parseConnectPayload(text)
         if (payload != null) {
             addr = payload.addr
@@ -461,6 +492,11 @@ fun ConnectScreen(
             style = MaterialTheme.typography.bodySmall,
         )
 
+        // Cast to a browser: this phone becomes the remote for a browser tab.
+        OutlinedButton(onClick = { castDraft = ""; castDialog = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Cast to a browser screen")
+        }
+
         if (visible.isNotEmpty()) {
             Text("Saved hosts", style = MaterialTheme.typography.titleMedium)
             visible.forEach { c ->
@@ -511,6 +547,35 @@ fun ConnectScreen(
         }
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
+
+        // "Cast to a browser" code entry (the QR / deep-link path skips this).
+        if (castDialog) {
+            AlertDialog(
+                onDismissRequest = { castDialog = false },
+                title = { Text("Cast to a browser") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Open opensource.unisim.co.uk/screens/receive on the screen you want to drive, then enter the code it shows (or scan its QR from this screen).")
+                        OutlinedTextField(
+                            value = castDraft,
+                            onValueChange = { castDraft = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) },
+                            label = { Text("Code") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = castDraft.length in 4..8,
+                        onClick = { castDialog = false; onCast(castDraft) },
+                    ) { Text("Connect") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { castDialog = false }) { Text("Cancel") }
+                },
+            )
+        }
 
         // Rename dialog for a saved host.
         renaming?.let { target ->
@@ -1021,7 +1086,7 @@ fun StreamScreen(
  * scrolls, and a two-finger tap right-clicks. Explicit buttons sit below.
  */
 @Composable
-fun TrackpadScreen(session: ExtenderSession) {
+fun TrackpadScreen(session: InputTarget) {
     val context = LocalContext.current
     val view = LocalView.current
     // Pointer-speed multiplier, persisted app-wide so it survives reconnects. Read
@@ -1153,6 +1218,111 @@ fun TrackpadScreen(session: ExtenderSession) {
                 OutlinedButton(onClick = { setDragLock(true) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Drag") }
             }
             Button(onClick = { click(1) }, enabled = !locked, modifier = Modifier.weight(1f)) { Text("Right click") }
+        }
+    }
+}
+
+/**
+ * "Cast to a browser": this phone joins a receiver tab's rendezvous room by
+ * [code] (as the sender) and drives it. Owns the [RoomSession] lifecycle; reuses
+ * [TrackpadScreen] and adds a lightweight clicker. [onExit] returns home.
+ *
+ * Requires the rendezvous Worker to be deployed (opensource-portal) — until then
+ * it will sit on "Connecting…".
+ */
+@Composable
+fun CastFlow(code: String, onExit: () -> Unit) {
+    var session by remember { mutableStateOf<RoomSession?>(null) }
+    var paired by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Connecting…") }
+    var castMode by remember { mutableStateOf<Mode?>(null) } // TRACKPAD | CLICKER; null = picking
+
+    // Open the room once; tear it down when we leave.
+    DisposableEffect(code) {
+        val s = RoomSession.connect(code, object : RoomSession.Listener {
+            override fun onStatus(text: String) { status = text }
+            override fun onPaired(peerRole: String?) { paired = true; status = "Connected" }
+            override fun onPeerLeft() { paired = false; status = "Receiver left — waiting…" }
+            override fun onClosed(reason: String) { status = reason }
+        })
+        session = s
+        onDispose { s.close() }
+    }
+
+    val s = session
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Casting · $code", style = MaterialTheme.typography.titleMedium)
+            Button(onClick = onExit) { Text("Disconnect") }
+        }
+
+        if (s == null || !paired) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(status, style = MaterialTheme.typography.titleMedium)
+                Text("Code $code — open …/screens/receive on the screen", style = MaterialTheme.typography.bodySmall)
+            }
+        } else if (castMode == null) {
+            CastModePicker(onPick = { m ->
+                castMode = m
+                s.hello(if (m == Mode.CLICKER) "clicker" else "trackpad")
+            })
+        } else if (castMode == Mode.CLICKER) {
+            CastClickerScreen(s)
+        } else {
+            TrackpadScreen(s)
+        }
+    }
+}
+
+/** Cast control choices: only the no-video modes make sense to a browser tab. */
+@Composable
+fun CastModePicker(onPick: (Mode) -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("How do you want to drive it?", style = MaterialTheme.typography.titleLarge)
+        Button(onClick = { onPick(Mode.TRACKPAD) }, modifier = Modifier.fillMaxWidth()) { Text("Trackpad") }
+        Button(onClick = { onPick(Mode.CLICKER) }, modifier = Modifier.fillMaxWidth()) { Text("Clicker") }
+    }
+}
+
+/** A minimal presentation clicker for cast mode — the buttons drive the browser
+ *  receiver's slide deck (no host, so no deck preview / window focus). */
+@Composable
+fun CastClickerScreen(target: InputTarget) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) {
+        Text(
+            "Clicker",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { target.tapKey(HidKeys.PAGE_UP) }, modifier = Modifier.weight(1f).height(72.dp)) { Text("◀  Prev") }
+            Button(onClick = { target.tapKey(HidKeys.PAGE_DOWN) }, modifier = Modifier.weight(1f).height(72.dp)) { Text("Next  ▶") }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { target.tapKey(HidKeys.HOME) }, modifier = Modifier.weight(1f)) { Text("First") }
+            Button(onClick = { target.tapKey(HidKeys.END) }, modifier = Modifier.weight(1f)) { Text("Last") }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { target.tapKey(HidKeys.B) }, modifier = Modifier.weight(1f)) { Text("Blank") }
+            Button(onClick = { target.tapKey(HidKeys.F5) }, modifier = Modifier.weight(1f)) { Text("Start (F5)") }
         }
     }
 }
