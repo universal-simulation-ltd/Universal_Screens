@@ -8,7 +8,10 @@ license.workspace = true
 # so a browser tab can reach an `extender-host`. See docs/M7-browser-client.md.
 
 [dependencies]
-tungstenite = "0.24"
+# native-tls so the dial-the-room client can reach the cloud rendezvous over
+# wss:// (the LAN listener path needs no TLS). macOS uses Security.framework,
+# Windows uses SChannel — no OpenSSL to vendor.
+tungstenite = { version = "0.24", features = ["native-tls"] }
 
 [dev-dependencies]
 # The round-trip test builds real protocol messages to prove the bridge forwards
