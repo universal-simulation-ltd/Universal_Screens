@@ -1,6 +1,6 @@
 # M8 — Browser receiver ("the browser tab is the screen an app connects *to*")
 
-**Status:** M8a (rendezvous) + M8b (receiver page) ✅ — the rest 🚧 planning. This doc is the milestone
+**Status:** M8a (rendezvous) + M8b (receiver page) + M8c (control round-trip) ✅ — the rest 🚧 planning. This doc is the milestone
 plan for the inverse of M7: instead of the browser being a *client* that dials a
 native host, the browser tab becomes a **receiver** the apps connect *into*. The
 rendezvous gate (M8a) is built and verified; see the M8a sub-increment below.
@@ -197,11 +197,25 @@ The DO room is **both** the rendezvous (Problem 1) and the Phase-1 relay
   so the `code`/`role` deep-link branch went into **`connect.html`**, not the Worker.
   Verified against `wrangler dev` (QR API correct, both connect branches serve,
   `/screens/receive` 200). No video yet — that's M8c. **Not deployed.**
-- **M8c — control-only round-trip (relay).** "Use this as a remote-controlled
-  screen": browser joins as host-surface, the Android app joins as a clicker/
-  trackpad client, `Input` frames relay through the DO. Reuses the whole `Input`
-  side of the protocol + the app's existing clicker/trackpad UI. **First end-to-end
-  win, zero WebRTC, zero new capture.**
+- **M8c — control-only round-trip (relay).** ✅ **Done** (both halves, two repos).
+  "Use this as a remote-controlled screen": the browser receiver renders a control
+  surface (slide deck + cursor + clicks + blank) and the sender drives it. **First
+  end-to-end win, zero WebRTC, zero new capture.**
+  - *Wire format note:* we did **not** reuse the binary `postcard` `Input` enum here
+    (that needs the WASM shim in the page + FFI/Rust on the phone — heavy for
+    control-only and cross-repo). Instead a tiny **JSON control protocol** keyed by
+    `t` (`move`/`click`/`btn`/`scroll`/`key`/`hello`), namespaced apart from the
+    room's `type` signals. Full `postcard` reuse can come with the video path
+    (M8d/M8e), where the WASM shim is needed anyway.
+  - *Browser* (`opensource-portal` PR #8): `control.js` (pure `applyControl` reducer
+    + 17 unit tests), `receive.html` control stage, `control-sender.html` (a
+    browser sender — also a real control-from-another-browser tool). Verified via a
+    live relay-through-the-DO round-trip.
+  - *Android* (PR #23): `InputTarget` interface (`ExtenderSession` + new
+    `RoomSession` implement it); `RoomSession` (OkHttp WS → control JSON);
+    `CastFlow`/`CastModePicker`/`CastClickerScreen` **reusing the existing
+    `TrackpadScreen`**; "Cast to a browser" entry + `?code=` deep-link/scan routing.
+    `compileDebugKotlin` green; **needs an on-device pass + the Worker deployed.**
 - **M8d — desktop → browser viewer (relay).** The desktop host learns to **dial the
   room** (outbound `tungstenite` WebSocket) instead of only LAN-listening, then runs
   the *existing* `serve()` over it. Browser renders with the M7 decode pipeline.
