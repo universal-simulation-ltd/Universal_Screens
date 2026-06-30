@@ -1268,6 +1268,7 @@ dependencies = [
  "core-graphics",
  "eframe",
  "extender-protocol",
+ "extender-web-bridge",
  "image",
  "qrcode",
  "screencapturekit",
@@ -1281,6 +1282,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "extender-protocol",
+ "extender-web-bridge",
  "image",
  "openh264",
  "qrcode",

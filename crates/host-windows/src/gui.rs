@@ -114,6 +114,10 @@ struct HostApp {
     /// Whether an inbound firewall rule for the port exists (checked on start);
     /// None until the host first listens.
     firewall_ok: Option<bool>,
+    /// "Cast to a browser": the code typed from a receiver tab, and the status of
+    /// the dial-the-room bridge (shared with its background thread).
+    cast_code: String,
+    cast_status: Arc<Mutex<String>>,
 }
 
 impl HostApp {
@@ -148,6 +152,8 @@ impl HostApp {
             wifi_show_password: false,
             show_pin: false,
             firewall_ok: None,
+            cast_code: String::new(),
+            cast_status: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -397,6 +403,48 @@ impl HostApp {
                         ui.label(format!("{} · {}", platform_display(&conn.platform), conn.peer));
                     });
                 }
+            }
+        });
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new("Cast to a browser screen").default_open(false).show(ui, |ui| {
+            ui.small(
+                "Open opensource.unisim.co.uk/screens/receive on another screen, \
+                 then enter the code it shows here:",
+            );
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.cast_code).hint_text("CODE").desired_width(90.0));
+                let can_cast = self.running && self.cast_code.trim().len() >= 4;
+                if ui.add_enabled(can_cast, egui::Button::new("Cast")).clicked() {
+                    // Bridge our own listener to the rendezvous room on a thread —
+                    // dial_room blocks until the cast ends; status flows back via the Arc.
+                    let code = self.cast_code.trim().to_uppercase();
+                    let port = self
+                        .address
+                        .as_deref()
+                        .and_then(|a| a.rsplit_once(':').map(|(_, p)| p.to_owned()))
+                        .unwrap_or_else(|| "9000".to_owned());
+                    let host_addr = format!("127.0.0.1:{port}");
+                    let cast_status = self.cast_status.clone();
+                    let ctx2 = ctx.clone();
+                    *cast_status.lock().unwrap() = "Connecting to the browser…".to_owned();
+                    thread::spawn(move || {
+                        let res =
+                            extender_web_bridge::dial_room(extender_web_bridge::DEFAULT_ROOM_URL, &code, &host_addr);
+                        *cast_status.lock().unwrap() = match res {
+                            Ok(()) => "Cast ended.".to_owned(),
+                            Err(e) => format!("Cast failed: {e}"),
+                        };
+                        ctx2.request_repaint();
+                    });
+                }
+            });
+            if !self.running {
+                ui.small("Start the host first, then cast.");
+            }
+            let status = self.cast_status.lock().unwrap().clone();
+            if !status.is_empty() {
+                ui.label(status);
             }
         });
     }

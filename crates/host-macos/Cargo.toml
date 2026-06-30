@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 extender-protocol.workspace = true
+# "Cast to a browser": dial the cloud rendezvous + bridge to our own listener.
+extender-web-bridge.workspace = true
 serde = { version = "1", features = ["derive"] }
 # QR rendering + logo compositing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

@@ -21,3 +21,4 @@ license = "MIT"
 [workspace.dependencies]
 extender-protocol = { path = "crates/protocol" }
 extender-core = { path = "crates/core" }
+extender-web-bridge = { path = "crates/web-bridge" }
