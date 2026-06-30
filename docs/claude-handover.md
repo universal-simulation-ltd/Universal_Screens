@@ -4,6 +4,37 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-06-30 (M8 browser-receiver design doc — planning only)
+
+Answered the question *"can the website have a receiver page — open it in a
+browser, it shows a QR / code, and an app connects **to** the browser?"* Yes —
+but it's the **inverse** of M7 and needs one new piece of infra. Wrote
+`docs/M8-browser-receiver.md` (planning, **no code shipped**).
+
+- **The crux:** a browser tab **cannot be a LAN server** (no inbound socket), so
+  "an app connects to the browser" can't be a direct LAN link the way the host's
+  `:9000` listener is. Both peers must **dial out to a cloud rendezvous** and be
+  **matched by the code** the receiver page shows.
+- **Decision (rendezvous):** a **Cloudflare Durable Object** room keyed by the
+  short code, on the existing `opensource-portal` Worker (it already owns
+  `opensource.unisim.co.uk/*` + `/screens/connect`). Reachable by browser, Android
+  (OkHttp), and the Rust host (`tungstenite`, already a `web-bridge` dep).
+  *Fallback:* Supabase Realtime broadcast (precedent — Ergo `mobile-sig:{token}`).
+- **Decision (transport):** hybrid, phased — **DO relay first** (reuses the whole
+  `postcard` protocol + M7 WASM decode unchanged), **WebRTC as the later video/
+  latency upgrade** (mirrors M7's "WebSocket now, WebRTC = M7g"). Control-only
+  modes ride the relay; live video negotiates WebRTC via the same room.
+- **"User chooses the role":** protocol is already direction-agnostic
+  (`ClientHello.capture_mode`), so the receiver shows the app's mode rows after
+  pairing and the choice sets who-is-host. Phasing: **M8c** control-only relay
+  (first win, no WebRTC/capture) → **M8d** desktop→browser viewer (host dials the
+  room, highest reuse) → **M8e** WebRTC media → **M8f** phone self-capture
+  (MediaProjection/ReplayKit — net-new, last).
+- **Next:** review the doc; if green, M8a (DO rendezvous spike) is the gate.
+- Deploy state: doc-only PR on branch `docs/m8-browser-receiver` (Universal_Screens
+  repo). No host/app/worker code touched. *(Note: pre-existing unpushed commits sit
+  in the sibling `Docs_UNI_SIM` repo — untouched this session, not mine to ship.)*
+
 ## Update — 2026-06-28 (Trackpad click-and-drag)
 
 Backlog item *"with the trackpad we need to be able to do a click and drag"*.
