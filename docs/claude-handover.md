@@ -75,12 +75,14 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
     wss + host capture + real-stream decode need an on-hardware pass.**
   - *M8g* (opensource-portal PR #9): "Use this screen as a receiver" hero CTA +
     section on `/screens` → `/screens/receive`.
-- **Deploy state:** the user **deployed the portal Worker and confirmed M8c
-  on-device** (2026-06-30) — the rendezvous is live; cast control works. Since then,
-  M8d (US #25) and M8g (portal #9) merged but are **NOT yet deployed** (portal needs
-  another `wrangler deploy` for the M8g page; M8d's `dial_room` is a host/CLI binary,
-  not the site). *(Pre-existing unpushed commits sit in the sibling `Docs_UNI_SIM`
-  repo — untouched this session, not mine to ship.)*
+- **Deploy state:** the portal Worker is **DEPLOYED + verified live** (2026-07-01,
+  version `f9d36b67`) — `/screens/turn` (M8e), the M8g receiver CTA on `/screens`,
+  and `/screens/{receive,webrtc-spike,control.js}` all confirmed 200/correct on
+  `opensource.unisim.co.uk`. The `RendezvousRoom` DO went out in the user's earlier
+  (2026-06-30) deploy; M8c cast control confirmed on-device then. M8d's `dial_room`
+  is a **host/CLI binary** (not the site) — it ships with a host build, not a
+  `wrangler deploy`. *(Pre-existing unpushed commits sit in the sibling
+  `Docs_UNI_SIM` repo — untouched this session, not mine to ship.)*
 - **M8d host-GUI entry SHIPPED** (PR #28): a "Cast to a browser screen" field in
   both host GUIs (`crates/host-macos` + `crates/host-windows`) spawns `dial_room` on
   a thread, bridging the host's listener to the room. `cargo build -p
