@@ -1,6 +1,6 @@
 # M8e — WebRTC media upgrade (take video off the cloud relay)
 
-**Status:** 🚧 Design only (no code). The latency/cost upgrade flagged in
+**Status:** M8e-a (TURN endpoint) + M8e-b (data-channel spike) ✅ — M8e-c/d/e 🚧 (host/app WebRTC, hardware). The latency/cost upgrade flagged in
 [M8-browser-receiver.md](M8-browser-receiver.md). **Prereq:** M8a (rendezvous DO)
 ✅, M8c (control round-trip + the JSON signal channel) ✅, M8d (desktop→browser
 relay transport) ✅, M7 (WebCodecs decode + WASM shim) ✅.
@@ -80,12 +80,16 @@ quality/latency refinement once the P2P transport is proven.
 
 ## Sub-increments
 
-- **M8e-a — TURN/STUN + creds.** A `GET /screens/turn` Worker route returning
-  time-limited ICE server creds (Cloudflare Calls TURN). *Gate:* a browser fetches
-  valid creds.
-- **M8e-b — browser↔browser data channel over the DO.** Prove the signaling
-  (sdp/ice through the room) + an `RTCDataChannel` carrying control/postcard bytes,
-  two tabs. **No host/app — fully verifiable in-browser** (like M8a/M8c).
+- **M8e-a — TURN/STUN + creds.** ✅ **Done** (`opensource-portal` PR #10).
+  `GET /screens/turn` returns ICE servers — always public STUN, + short-lived
+  Cloudflare Realtime TURN creds when `TURN_KEY_ID`/`TURN_API_TOKEN` secrets are set.
+  STUN path verified via `wrangler dev`; the TURN request shape needs a real key to
+  confirm end-to-end.
+- **M8e-b — browser↔browser data channel over the DO.** ✅ **Done** (same PR).
+  `public/screens/webrtc-spike.html`: two tabs pair over the room, exchange SDP/ICE
+  *through the room* (namespaced `t:sdp`/`t:ice`), open a **P2P `RTCDataChannel`**.
+  Serving + wiring verified via `wrangler dev`; the **actual P2P connection is
+  browser-verified** (two tabs) — `RTCPeerConnection` isn't in Node.
 - **M8e-c — host data-channel sender.** `webrtc-rs` in the host: on `paired`, offer
   via the room, open a data channel, run the existing `serve()` over it. Relay
   fallback on failure. Desktop→browser video, P2P. *Highest-value increment.*

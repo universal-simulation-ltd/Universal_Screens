@@ -96,8 +96,11 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
   - **M8d finish:** decide where the video viewer is served (`apps/web` at `/screens`
     vs bundling the WASM decode into the portal receiver) + an on-hardware
     desktop→browser **video** pass (transport + host-GUI entry are in).
-  - **M8e — WebRTC** (spec ready): start at M8e-b (browser↔browser data channel over
-    the DO) — that part *is* verifiable in-browser; host/app WebRTC need hardware.
+  - **M8e — WebRTC:** M8e-a (`GET /screens/turn` ICE endpoint) + M8e-b
+    (`webrtc-spike.html` browser↔browser data channel over the DO) **SHIPPED**
+    (opensource-portal PR #10; STUN + serving verified, P2P is browser-verified in
+    two tabs). Remaining: **M8e-c** (host `webrtc-rs` offerer + data-channel
+    `serve()` → desktop→browser video P2P) + M8e-d (RTP media track) — need hardware.
   - **M8f — phone self-capture** (spec ready): start at M8f-a/b (Android
     MediaProjection + mobile-ffi frame encoders); browser viewer is free (M8d reuse).
 
