@@ -101,8 +101,13 @@ but it's the **inverse** of M7 and needs one new piece of infra. Wrote
   - **M8e — WebRTC:** M8e-a (`GET /screens/turn` ICE endpoint) + M8e-b
     (`webrtc-spike.html` browser↔browser data channel over the DO) **SHIPPED**
     (opensource-portal PR #10; STUN + serving verified, P2P is browser-verified in
-    two tabs). Remaining: **M8e-c** (host `webrtc-rs` offerer + data-channel
-    `serve()` → desktop→browser video P2P) + M8e-d (RTP media track) — need hardware.
+    two tabs). **`webrtc-spike.html` also got a 2-PC pairing UX** (PR #11, deployed
+    version 922e7998): a 4-digit code minted on load + a scannable QR (vendored
+    generator) encoding the code + the *opposite* role + `auto=1`, so the second PC
+    scans/opens the link and auto-connects. (Browser can't read the Wi-Fi SSID, so
+    no network details in the QR — WebRTC handles same/cross network via STUN/TURN.)
+    Remaining: **M8e-c** (host `webrtc-rs` offerer + data-channel `serve()` →
+    desktop→browser video P2P) + M8e-d (RTP media track) — need hardware.
   - **M8f — phone self-capture** (spec ready): start at M8f-a/b (Android
     MediaProjection + mobile-ffi frame encoders); browser viewer is free (M8d reuse).
 
