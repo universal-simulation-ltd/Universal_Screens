@@ -4,6 +4,32 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-02 (receiver pairing QR — branded with the Universal QR studio style)
+
+The `/screens/receive` pairing QR now matches the **Universal QR studio** look
+instead of a plain black-and-white code, per the user's request ("use the QR
+generator app for the QR style with the unisim logo icon in the middle").
+
+- **Where:** `opensource-portal` repo (the site Worker that owns
+  `opensource.unisim.co.uk/*`), **not** this repo. File:
+  `public/screens/receive.html`.
+- **What:** swapped the vendored `qrcode-generator.js` for the **`qr-code-styling`**
+  engine, mirroring `Universal_QR`'s `src/lib/qr.ts` `DEFAULT_CONFIG`: rounded
+  orange (`#fe8c01`) modules on black, extra-rounded finder squares, dot
+  corner-dots, error-correction `H` + `hideBackgroundDots` (so the centre logo
+  never breaks scanning), and the **UNI·SIM globe mark** centred at 28%. The `.qr`
+  panel became the studio's black rounded frame; `renderQR()` keeps one instance
+  and calls `.update()`, so **New code** re-renders in place (no stacked canvases).
+- **Vendored** `qr-code-styling.js` (standalone UMD browser build, from
+  `Universal_QR/node_modules`) + `unisim-icon.png` into `public/screens/vendor/`.
+  Note the icon is the 1080×1080 / 245 KB PNG; the studio itself inlines a 256×256
+  `UNISIM_MARK` data-URI — swap to that if page weight matters.
+- **Verified** by serving `public/` statically + headless render: styled 256×256
+  canvas draws with the logo centred, no console errors, `.update()` path clean.
+- **Shipped:** merged to `main` as **opensource-portal PR #12** (squash `46d0cb1`).
+  Suite changelog entry `2026.07.02.2` pushed. **Not yet deployed** — needs a
+  `wrangler deploy` from `opensource-portal` to reach the live site.
+
 ## Update — 2026-06-30 (M8 browser receiver — built M8a–M8d + M8g; M8e/M8f specced)
 
 Answered the question *"can the website have a receiver page — open it in a
