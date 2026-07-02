@@ -7,3 +7,6 @@ native/**/.build/
 native/**/DerivedData/
 *.xcuserstate
 **/xcuserdata/
+
+# Internal project notes — not published (matches the other Universal Apps repos)
+CLAUDE.md
