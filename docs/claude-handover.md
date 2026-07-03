@@ -4,6 +4,42 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-03 (iOS cast-to-browser — M8c parity with Android)
+
+The iOS app can now scan/enter a receiver code and drive a browser `/screens/receive`
+tab, closing the gap where only Android supported the M8c "cast to a browser" flow.
+Before this, iOS `parseConnectPayload` required a `host` param and silently rejected
+the receiver's `?code=&role=sender` QR.
+
+- **New files** (`apps/ios/ScreenExtender/`):
+  - `InputTarget.swift` — protocol (`sendMouseMoveRelative`/`sendMouseButton`/
+    `sendScroll`/`tapKey`) mirroring Android's `InputTarget`; `ExtenderSession`
+    conforms for free (already had those signatures).
+  - `RoomSession.swift` — the cast session over `URLSessionWebSocketTask`. Dials
+    `wss://opensource.unisim.co.uk/screens/room?code=…&role=sender`, handles
+    `waiting`/`paired`/`peer-left` on the main queue, pings every 20s, and serialises
+    input to the shared JSON control protocol (`hello`/`move`/`btn`/`scroll`/`key`,
+    per `opensource-portal/public/screens/control.js`). Conforms to `InputTarget`.
+  - `CastFlow.swift` — `CastController` (owns the RoomSession), `CastFlow`
+    (waiting → mode picker → drive), `CastModePicker`, lightweight `CastClickerView`.
+    Trackpad mode **reuses the existing `TrackpadView`**.
+- **Edits:** `TrackpadView` now drives `InputTarget` (shared native-host + cast);
+  `ContentView` gained `parseRoomCode` + a `castCode` branch + deep-link routing;
+  `ConnectView` gained a "Cast to a browser screen" button + manual code-entry alert
+  + room-code routing from the scanner. `project.pbxproj` regenerated (XcodeGen;
+  `sources` globs the folder, so `xcodegen generate` picks up new files).
+- **Verified:** `xcodebuild` simulator build green; app launches + renders the new
+  entry point; `unisimscreens://…&role=sender` deep link routes in. The **exact wire
+  contract** (URL + all four control-frame shapes) was checked against the **live
+  deployed worker** — pairing + verbatim relay confirmed (bools/numbers preserved).
+- **Gap (same as Android M8c shipped with):** an in-app *live* pair wasn't confirmed
+  end-to-end — that needed a Simulator "Open in app?" tap that required computer-use
+  approval unavailable in the autonomous run. Everything up to the wire protocol is
+  verified. **Ships with the next app build (no `wrangler deploy`).** On-device pass
+  pending.
+- **Shipped:** Universal_Screens PR (branch `ios-cast-to-browser`). Suite changelog
+  entry `2026.07.03.1`.
+
 ## Update — 2026-07-02 (receiver pairing QR — branded with the Universal QR studio style)
 
 The `/screens/receive` pairing QR now matches the **Universal QR studio** look

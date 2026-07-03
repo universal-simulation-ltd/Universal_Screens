@@ -6,9 +6,10 @@ import UIKit
 /// two-finger drag scrolls, and a two-finger tap right-clicks. Click-and-drag
 /// works two ways: a "tap-and-a-half" gesture (tap, then tap-hold-move) and the
 /// Drag-lock button, which holds the left button so a one-finger move drags.
-/// Matches Android.
+/// Matches Android. Drives any `InputTarget`, so it is shared by the native-host
+/// session and the "cast to a browser" `RoomSession`.
 struct TrackpadView: View {
-    let session: ExtenderSession
+    let session: InputTarget
     let onDisconnect: () -> Void
     let onSwitchMode: () -> Void
 
@@ -97,7 +98,7 @@ struct TrackpadView: View {
 /// Bridges UIView multi-touch into SwiftUI. Reads `sensitivity` dynamically so
 /// the slider takes effect without restarting gesture recognition.
 private struct TrackpadSurface: UIViewRepresentable {
-    let session: ExtenderSession
+    let session: InputTarget
     let sensitivity: Float
     let dragLock: Bool
 
@@ -116,7 +117,7 @@ private struct TrackpadSurface: UIViewRepresentable {
 }
 
 final class TrackpadUIView: UIView {
-    var session: ExtenderSession?
+    var session: InputTarget?
     var sensitivity: Float = 1.0
     /// Driven by the Drag-lock button: the left button is held outside the pad,
     /// so a one-finger move drags and a stationary lift must not emit a click.

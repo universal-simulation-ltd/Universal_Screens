@@ -58,6 +58,23 @@ func parseConnectPayload(_ text: String) -> ConnectPayload? {
     return nil
 }
 
+/// Extract a "cast to a browser" pairing code from a connect URL, or nil. The
+/// receiver page's QR encodes `…/screens/connect?code=<CODE>&role=sender`; the
+/// legacy `unisimscreens://connect?code=…` scheme is also accepted. A code is
+/// 4–8 letters/digits and routes to the cast flow (no host/Wi-Fi involved).
+/// Mirrors the Android `parseRoomCode`.
+func parseRoomCode(_ text: String) -> String? {
+    let t = text.trimmingCharacters(in: .whitespaces)
+    let isHttps = t.lowercased().hasPrefix("https://")
+    let isCustom = t.lowercased().hasPrefix("unisimscreens://")
+    guard isHttps || isCustom, let comps = URLComponents(string: t) else { return nil }
+    if isHttps, !comps.path.hasPrefix("/screens/connect") { return nil }
+    guard let code = comps.queryItems?
+        .first(where: { $0.name == "code" })?.value?.uppercased() else { return nil }
+    let valid = code.range(of: "^[A-Z0-9]{4,8}$", options: .regularExpression) != nil
+    return valid ? code : nil
+}
+
 // MARK: - Root
 
 struct ContentView: View {
@@ -69,13 +86,18 @@ struct ContentView: View {
     /// Address + PIN gathered from a scan/deep-link, waiting for a mode choice.
     @State private var pending: (addr: String, pin: Int)?
     @State private var connecting = false
+    /// Non-nil when "casting to a browser": the rendezvous code we're paired on.
+    /// Takes over the whole UI (CastFlow), independent of the host session.
+    @State private var castCode: String?
 
     var body: some View {
         content.onOpenURL { url in handleDeepLink(url) }
     }
 
     @ViewBuilder private var content: some View {
-        if let session {
+        if let castCode {
+            CastFlow(code: castCode, onExit: { self.castCode = nil })
+        } else if let session {
             connectedView(session)
         } else if connecting {
             ConnectingScreen(addr: currentAddr)
@@ -92,7 +114,8 @@ struct ContentView: View {
             ConnectView(
                 status: status,
                 onPrepare: { addr, pin in pending = (addr, pin) },
-                onConnect: { addr, m, pin in doConnect(addr, m, pin, true) }
+                onConnect: { addr, m, pin in doConnect(addr, m, pin, true) },
+                onCast: { code in castCode = code }
             )
         }
     }
@@ -116,6 +139,9 @@ struct ContentView: View {
     // MARK: - Deep links
 
     private func handleDeepLink(_ url: URL) {
+        // A "cast to a browser" code (…/screens/connect?code=…) routes to the
+        // rendezvous flow instead of a host connection.
+        if let code = parseRoomCode(url.absoluteString) { castCode = code; return }
         guard let payload = parseConnectPayload(url.absoluteString) else { return }
         // Jump straight to mode picker (same path as an in-app scan).
         pending = (payload.addr, payload.pin)
