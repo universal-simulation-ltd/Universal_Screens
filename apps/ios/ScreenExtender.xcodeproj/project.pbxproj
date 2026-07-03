@@ -17,19 +17,25 @@
 		79072F52C5AB085B7D794250 /* VideoDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD875701149E094733F7FEA /* VideoDecoder.swift */; };
 		8483FBFC5EA0715A9069E4E9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04A28F1E51CAC96CD177E43 /* Theme.swift */; };
 		AA5229D7BA9DEB31BD895DCB /* ClickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5142614823D65AFD5998F5E4 /* ClickerView.swift */; };
+		AD959579904733AD7E9A0C6A /* RoomSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B8BED806807742A5BAE3EFD /* RoomSession.swift */; };
 		B8B6EF6783DDD2BC8421A914 /* ScreenExtenderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */; };
 		BAA41F97706C7C589B52CBDB /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */; };
 		C83EFE7F147BEE1300E7CC54 /* ExtenderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F1AE010ED690FC1609CD92 /* ExtenderSession.swift */; };
 		D38D5EE59E8BD340930C96DB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7411DAA5AF0E8FE23AD2D7E7 /* Assets.xcassets */; };
+		EBD02DABB01FD3E857F1F29C /* CastFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71CD979D0576AA829C527B9C /* CastFlow.swift */; };
+		FCF137FAF8D9E8E607549F8E /* InputTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECF88938CC57F695738E20B /* InputTarget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		17AC50A50AEA18D66558B793 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1B8BED806807742A5BAE3EFD /* RoomSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSession.swift; sourceTree = "<group>"; };
 		2F1963C701C29D05C9482B08 /* ExtenderMobile.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ExtenderMobile.xcframework; path = libs/ExtenderMobile.xcframework; sourceTree = "<group>"; };
 		4CD875701149E094733F7FEA /* VideoDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDecoder.swift; sourceTree = "<group>"; };
+		4ECF88938CC57F695738E20B /* InputTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputTarget.swift; sourceTree = "<group>"; };
 		5142614823D65AFD5998F5E4 /* ClickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClickerView.swift; sourceTree = "<group>"; };
 		60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenExtenderApp.swift; sourceTree = "<group>"; };
 		62F3EBF21BA1262B132748DD /* ScreenExtender.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ScreenExtender.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		71CD979D0576AA829C527B9C /* CastFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CastFlow.swift; sourceTree = "<group>"; };
 		7411DAA5AF0E8FE23AD2D7E7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88BAE13F8414308703A542A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
@@ -74,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				7411DAA5AF0E8FE23AD2D7E7 /* Assets.xcassets */,
+				71CD979D0576AA829C527B9C /* CastFlow.swift */,
 				5142614823D65AFD5998F5E4 /* ClickerView.swift */,
 				B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */,
 				D9694C23DA25CA1175158EB8 /* ConnectView.swift */,
@@ -81,7 +88,9 @@
 				D9F1AE010ED690FC1609CD92 /* ExtenderSession.swift */,
 				D4353D077316F6FF60AD9ACD /* HidKeys.swift */,
 				88BAE13F8414308703A542A5 /* Info.plist */,
+				4ECF88938CC57F695738E20B /* InputTarget.swift */,
 				D592CBC691E2CD55DD3D42F0 /* QRScannerView.swift */,
+				1B8BED806807742A5BAE3EFD /* RoomSession.swift */,
 				60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */,
 				8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */,
 				D04A28F1E51CAC96CD177E43 /* Theme.swift */,
@@ -172,13 +181,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EBD02DABB01FD3E857F1F29C /* CastFlow.swift in Sources */,
 				AA5229D7BA9DEB31BD895DCB /* ClickerView.swift in Sources */,
 				6E5FD101AF8C8C5775A1F310 /* ConnectView.swift in Sources */,
 				BAA41F97706C7C589B52CBDB /* ConnectionStore.swift in Sources */,
 				0D65B0868127697F33DBDD3F /* ContentView.swift in Sources */,
 				C83EFE7F147BEE1300E7CC54 /* ExtenderSession.swift in Sources */,
 				5BFDD788B2516A371DC5965F /* HidKeys.swift in Sources */,
+				FCF137FAF8D9E8E607549F8E /* InputTarget.swift in Sources */,
 				73005F363B4465282C8BA3C7 /* QRScannerView.swift in Sources */,
+				AD959579904733AD7E9A0C6A /* RoomSession.swift in Sources */,
 				B8B6EF6783DDD2BC8421A914 /* ScreenExtenderApp.swift in Sources */,
 				3FA888C8DE891836DFA9D0E0 /* StreamView.swift in Sources */,
 				8483FBFC5EA0715A9069E4E9 /* Theme.swift in Sources */,

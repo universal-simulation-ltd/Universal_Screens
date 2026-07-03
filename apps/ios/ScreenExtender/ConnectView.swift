@@ -9,6 +9,8 @@ struct ConnectView: View {
     let status: String
     let onPrepare: (String, Int) -> Void
     let onConnect: (String, Mode, Int) -> Void
+    /// A "cast to a browser" pairing code (scanned, deep-linked, or typed).
+    var onCast: (String) -> Void = { _ in }
 
     @State private var addr = "127.0.0.1:9000"
     @State private var pin = ""
@@ -17,6 +19,9 @@ struct ConnectView: View {
     @State private var showHidden = false
     @State private var showAdvanced = false
     @State private var showScanner = false
+    // "Cast to a browser": manual code entry (the QR / deep-link path skips this).
+    @State private var showCast = false
+    @State private var castDraft = ""
     // Saved-host rename: the host being renamed (drives the alert) + the draft.
     @State private var renameTarget: SavedConnection?
     @State private var renameDraft = ""
@@ -70,7 +75,10 @@ struct ConnectView: View {
         .sheet(isPresented: $showScanner) {
             QRScannerView { text in
                 showScanner = false
-                if let payload = parseConnectPayload(text) {
+                // A receiver's "cast" code routes to the browser-cast flow.
+                if let code = parseRoomCode(text) {
+                    onCast(code)
+                } else if let payload = parseConnectPayload(text) {
                     addr = payload.addr
                     pin = String(format: "%04d", payload.pin)
                     onPrepare(payload.addr, payload.pin)
@@ -78,6 +86,18 @@ struct ConnectView: View {
                     addr = text
                 }
             }
+        }
+        .alert("Cast to a browser", isPresented: $showCast) {
+            TextField("Code (e.g. 7Q4K)", text: $castDraft)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+            Button("Connect") {
+                let code = castDraft.uppercased().filter { $0.isLetter || $0.isNumber }
+                if (4...8).contains(code.count) { onCast(code) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Open opensource.unisim.co.uk/screens/receive on the screen you want to drive, then enter the code it shows (or scan its QR).")
         }
     }
 
@@ -113,6 +133,17 @@ struct ConnectView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            // Cast to a browser: this phone becomes the remote for a browser tab
+            // showing …/screens/receive. Scanning that page's QR skips this button.
+            Button { castDraft = ""; showCast = true } label: {
+                Label("Cast to a browser screen", systemImage: "rectangle.on.rectangle.angled")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
     }
 
