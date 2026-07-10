@@ -1,6 +1,7 @@
 package com.universalsim.extender
 
 import android.content.Context
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,6 +29,17 @@ object ConnectionStore {
     private const val PREFS = "connections"
     private const val KEY = "saved"
     private const val KEY_SENSITIVITY = "trackpadSensitivity"
+    private const val KEY_DEVICE_NAME = "deviceName"
+
+    /** This device's human-readable name, sent to the host so the extra screen this
+     *  phone adds is labelled (e.g. "James's phone"). Defaults to the hardware model
+     *  until the user overrides it in Advanced. Matches the iOS client. */
+    fun loadDeviceName(context: Context): String =
+        prefs(context).getString(KEY_DEVICE_NAME, null)?.takeIf { it.isNotBlank() } ?: Build.MODEL
+
+    fun saveDeviceName(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_DEVICE_NAME, value.trim()).apply()
+    }
 
     /** Trackpad pointer-speed multiplier, persisted app-wide (not per-host). */
     fun loadSensitivity(context: Context): Float =
@@ -115,10 +127,8 @@ fun deviceEmoji(os: String): String = when (os.lowercase()) {
     else -> "🖥️" // 🖥️
 }
 
-/** Short human label for a stored [Mode] name. */
-fun modeLabel(mode: String): String = when (mode) {
-    Mode.CLICKER.name -> "Clicker"
-    Mode.VIEWER.name -> "Viewer"
-    Mode.FULL_CONTROL.name -> "Control"
-    else -> mode
-}
+/** Short human label for a stored [Mode] name; falls back to the raw text for an
+ *  empty/unknown mode (matches iOS's `modeLabel`). Covers all five modes — the old
+ *  version rendered raw enum names for Trackpad / Second screen. */
+fun modeLabel(mode: String): String =
+    runCatching { Mode.valueOf(mode).label() }.getOrDefault(mode)

@@ -35,9 +35,10 @@ class ExtenderSession private constructor(private var handle: Long) : InputTarge
         const val MODE_MIRROR = 1
         const val MODE_CONTROL_ONLY = 2 // input only, no video (clicker)
 
-        /** Blocking connect; returns null on failure. Call off the main thread. */
-        fun connect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int = 0): ExtenderSession? {
-            val handle = ExtenderNative.nativeConnect(addr, width, height, captureMode, pin)
+        /** Blocking connect; returns null on failure. Call off the main thread.
+         *  [deviceName] labels the screen this phone adds on the host ("" = default). */
+        fun connect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int = 0, deviceName: String = ""): ExtenderSession? {
+            val handle = ExtenderNative.nativeConnect(addr, width, height, captureMode, pin, deviceName)
             return if (handle != 0L) ExtenderSession(handle) else null
         }
     }
