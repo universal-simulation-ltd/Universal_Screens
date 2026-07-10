@@ -68,11 +68,15 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
     height: jint,
     capture_mode: jint,
     pin: jint,
+    device_name: JString<'local>,
 ) -> jlong {
     let Ok(addr) = env.get_string(&addr) else {
         return 0;
     };
     let addr: String = addr.into();
+    // Optional human-readable device name (e.g. "James's phone"); labels the screen
+    // this phone adds on the host. Empty string → host falls back to a platform label.
+    let device_name: String = env.get_string(&device_name).map(Into::into).unwrap_or_default();
     let hello = ClientHello {
         protocol_version: protocol::PROTOCOL_VERSION,
         width: width as u32,
@@ -84,8 +88,7 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
         },
         platform: protocol::ClientPlatform::current(),
         pin: pin as u32,
-        // Android doesn't pass a device name yet — host falls back to a platform label.
-        device_name: String::new(),
+        device_name,
     };
     let (input_tx, input_rx) = mpsc::channel();
     match Session::connect(&addr, &hello, input_rx) {

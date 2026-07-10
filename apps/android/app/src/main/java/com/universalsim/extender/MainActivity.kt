@@ -74,6 +74,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -205,7 +206,7 @@ class MainActivity : ComponentActivity() {
         deepLink.value = intent?.dataString
         setContent {
             val link by deepLink
-            MaterialTheme {
+            UniversalScreensTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AppRoot(deepLink = link, onDeepLinkHandled = { deepLink.value = null })
                 }
@@ -271,10 +272,13 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
             Mode.SECOND_SCREEN -> ExtenderSession.MODE_VIRTUAL
             else -> ExtenderSession.MODE_MIRROR
         }
+        // The screen this phone adds on the host is labelled with this name (parity
+        // with the iOS client); read before the thread so it's off the gesture path.
+        val deviceName = ConnectionStore.loadDeviceName(context)
         thread {
             // Width/height advertise the phone panel; the host mirrors at its own
             // native size, so exact values here are not critical.
-            val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin)
+            val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin, deviceName)
             runOnUi {
                 connecting = false
                 if (s != null) {
@@ -321,23 +325,16 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val modeName = when (mode) {
-                        Mode.CLICKER -> "Clicker"
-                        Mode.VIEWER -> "Mirror"
-                        Mode.FULL_CONTROL -> "Remote control"
-                        Mode.TRACKPAD -> "Trackpad"
-                        Mode.SECOND_SCREEN -> "Second screen"
-                    }
-                    // Tap the mode to go back and pick a different one for this host.
-                    Button(onClick = {
+                    // Tap the mode chip to go back and pick a different one for this host.
+                    ModeChip(mode, onClick = {
                         live.close()
                         session = null
                         pending = currentAddr to currentPin
-                    }) { Text(modeName) }
-                    Button(onClick = {
+                    })
+                    DisconnectButton(onClick = {
                         live.close()
                         session = null
-                    }) { Text("Disconnect") }
+                    })
                 }
             }
 
@@ -392,8 +389,43 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     }
 }
 
-/** A full-screen "Connecting…" placeholder with a spinner, shown while a session
- *  is being established so the user never bounces back to the home page. */
+/** The current-mode chip in the connected header: an orange-tint capsule with the
+ *  mode's emoji + label and a ▾, tapped to go back and re-pick. Mirrors the iOS
+ *  `ConnectedHeader` chip. */
+@Composable
+private fun ModeChip(mode: Mode, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(mode.emoji(), fontSize = 15.sp)
+            Text(mode.label(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("▾", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** A destructive (red) Disconnect button, shared by the connected header and cast. */
+@Composable
+private fun DisconnectButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onError,
+        ),
+    ) { Text("Disconnect") }
+}
+
+/** A full-screen "Connecting…" placeholder with the app logo + a spinner, shown
+ *  while a session is being established so the user never bounces back home. */
 @Composable
 fun ConnectingScreen(addr: String) {
     Column(
@@ -401,11 +433,17 @@ fun ConnectingScreen(addr: String) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Image(
+            painter = painterResource(R.drawable.app_icon),
+            contentDescription = null,
+            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(20.dp)),
+        )
+        Spacer(Modifier.height(20.dp))
         CircularProgressIndicator()
         Spacer(Modifier.height(16.dp))
-        Text("Connecting…", style = MaterialTheme.typography.titleMedium)
+        Text("Connecting…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         if (addr.isNotEmpty()) {
-            Text(addr, style = MaterialTheme.typography.bodySmall)
+            Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -420,6 +458,7 @@ fun ConnectScreen(
     val context = LocalContext.current
     var addr by remember { mutableStateOf("127.0.0.1:9000") }
     var pin by remember { mutableStateOf("") }
+    var deviceName by remember { mutableStateOf(ConnectionStore.loadDeviceName(context)) }
     var saved by remember { mutableStateOf(ConnectionStore.load(context)) }
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
@@ -478,13 +517,19 @@ fun ConnectScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Universal Screens", style = MaterialTheme.typography.headlineMedium)
-
         // The app icon above the primary action — tapping it also opens the scanner.
         Image(
             painter = painterResource(R.drawable.app_icon),
             contentDescription = "Scan to connect",
-            modifier = Modifier.size(140.dp).clickable(onClick = startScan),
+            modifier = Modifier
+                .size(116.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .clickable(onClick = startScan),
+        )
+        Text(
+            "Universal Screens",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
         )
         Button(onClick = startScan, modifier = Modifier.fillMaxWidth()) {
             Text("Scan to connect", style = MaterialTheme.typography.titleMedium)
@@ -500,7 +545,13 @@ fun ConnectScreen(
         }
 
         if (visible.isNotEmpty()) {
-            Text("Saved hosts", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "SAVED HOSTS",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
             visible.forEach { c ->
                 SavedConnectionRow(
                     conn = c,
@@ -526,6 +577,18 @@ fun ConnectScreen(
             Text(if (showAdvanced) "Advanced ▾" else "Advanced ▸")
         }
         if (showAdvanced) {
+            OutlinedTextField(
+                value = deviceName,
+                onValueChange = { deviceName = it; ConnectionStore.saveDeviceName(context, it) },
+                label = { Text("This device's name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Labels the screen this phone adds on the host.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 value = addr,
                 onValueChange = { addr = it },
@@ -619,29 +682,23 @@ fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -
     var rememberChoice by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Universal Screens", style = MaterialTheme.typography.headlineMedium)
-        Text("Host: $addr", style = MaterialTheme.typography.bodyMedium)
-        Text("How do you want to use it?", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "How do you want to use it?",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
 
-        ModeOption("Clicker", "Presentation remote — next/previous, blank, slide previews") {
-            onPick(Mode.CLICKER, rememberChoice)
-        }
-        ModeOption("Mirror", "Watch the host's screen (view only)") {
-            onPick(Mode.VIEWER, rememberChoice)
-        }
-        ModeOption("Remote control", "See the screen and control it (mouse + keys)") {
-            onPick(Mode.FULL_CONTROL, rememberChoice)
-        }
-        ModeOption("Trackpad", "Use the phone as a touchpad — move, tap, scroll") {
-            onPick(Mode.TRACKPAD, rememberChoice)
-        }
-        ModeOption("Second screen", "Use the phone as an extra display (needs a virtual-display driver on the PC)") {
-            onPick(Mode.SECOND_SCREEN, rememberChoice)
+        listOf(Mode.CLICKER, Mode.VIEWER, Mode.FULL_CONTROL, Mode.TRACKPAD, Mode.SECOND_SCREEN).forEach { m ->
+            ModeOption(m) { onPick(m, rememberChoice) }
         }
 
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = rememberChoice, onCheckedChange = { rememberChoice = it })
             Spacer(Modifier.width(8.dp))
@@ -652,23 +709,44 @@ fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -
     }
 }
 
-/** One selectable mode: a full-width button with a title + description. */
+/** One selectable mode: a card row with an orange-tint emoji chip, title + subtitle
+ *  and a chevron — the Android take on the iOS `ModeOption`. */
 @Composable
-private fun ModeOption(
-    title: String,
-    subtitle: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+private fun ModeOption(mode: Mode, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) { Text(mode.emoji(), fontSize = 22.sp) }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(mode.label(), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    mode.subtitle(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-/** One saved host: tap to quick-connect (in its remembered mode); hide or delete. */
+/** One saved host: a card — tap to quick-connect (in its remembered mode); an
+ *  overflow menu holds Rename / Hide / Delete (mirrors the iOS ellipsis menu). */
 @Composable
 private fun SavedConnectionRow(
     conn: SavedConnection,
@@ -677,29 +755,57 @@ private fun SavedConnectionRow(
     onToggleHide: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
+    var menuOpen by remember { mutableStateOf(false) }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Button(onClick = onConnect, modifier = Modifier.weight(1f)) {
-            Text(deviceEmoji(conn.os), fontSize = 22.sp)
-            Spacer(Modifier.width(10.dp))
-            Column(horizontalAlignment = Alignment.Start) {
-                // Friendly name with the host in brackets, e.g. "Office Mac
-                // (Kyjams-iMac)"; else just the hostname (or address).
-                val base = conn.hostname.ifEmpty { conn.addr }
-                val title = if (conn.customName.isBlank()) base else "${conn.customName} ($base)"
-                Text(title)
-                // Show the remembered mode only if there is one; otherwise just the
-                // address (tapping re-asks for the mode).
-                val sub = if (conn.mode.isBlank()) conn.addr else "${conn.addr}  ·  ${modeLabel(conn.mode)}"
-                Text(sub, style = MaterialTheme.typography.bodySmall)
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onConnect)
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) { Text(deviceEmoji(conn.os), fontSize = 22.sp) }
+                Column {
+                    // Friendly name with the host in brackets, e.g. "Office Mac
+                    // (Kyjams-iMac)"; else just the hostname (or address).
+                    val base = conn.hostname.ifEmpty { conn.addr }
+                    val title = if (conn.customName.isBlank()) base else "${conn.customName} ($base)"
+                    Text(title, style = MaterialTheme.typography.bodyLarge)
+                    // Show the remembered mode only if there is one; otherwise just the
+                    // address (tapping re-asks for the mode).
+                    val sub = if (conn.mode.isBlank()) conn.addr else "${conn.addr}  ·  ${modeLabel(conn.mode)}"
+                    Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Box {
+                TextButton(onClick = { menuOpen = true }) { Text("⋯", fontSize = 22.sp) }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                    DropdownMenuItem(
+                        text = { Text(if (conn.hidden) "Unhide" else "Hide") },
+                        onClick = { menuOpen = false; onToggleHide() },
+                    )
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
+                }
             }
         }
-        TextButton(onClick = onRename) { Text("Rename") }
-        TextButton(onClick = onToggleHide) { Text(if (conn.hidden) "Unhide" else "Hide") }
-        TextButton(onClick = onDelete) { Text("Delete") }
     }
 }
 
@@ -1258,8 +1364,13 @@ fun CastFlow(code: String, onExit: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Casting · $code", style = MaterialTheme.typography.titleMedium)
-            Button(onClick = onExit) { Text("Disconnect") }
+            Text(
+                "Casting · $code",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            DisconnectButton(onClick = onExit)
         }
 
         if (s == null || !paired) {
