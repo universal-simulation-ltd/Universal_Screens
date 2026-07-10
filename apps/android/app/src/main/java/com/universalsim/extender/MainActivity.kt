@@ -463,8 +463,8 @@ fun ConnectScreen(
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
-    // "Cast to a browser": manual code entry (the QR/deep-link path skips this).
-    var castDialog by remember { mutableStateOf(false) }
+    // "Cast to a browser": inline manual code entry under Advanced (the QR /
+    // deep-link path skips this and casts straight away).
     var castDraft by remember { mutableStateOf("") }
     // Saved-host rename: the host being renamed (drives the dialog) + the draft.
     var renaming by remember { mutableStateOf<SavedConnection?>(null) }
@@ -534,15 +534,6 @@ fun ConnectScreen(
         Button(onClick = startScan, modifier = Modifier.fillMaxWidth()) {
             Text("Scan to connect", style = MaterialTheme.typography.titleMedium)
         }
-        Text(
-            "Point at the host's Step 2 QR — it joins this PC's Wi-Fi and connects.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-
-        // Cast to a browser: this phone becomes the remote for a browser tab.
-        OutlinedButton(onClick = { castDraft = ""; castDialog = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Cast to a browser screen")
-        }
 
         if (visible.isNotEmpty()) {
             Text(
@@ -609,38 +600,32 @@ fun ConnectScreen(
                 onClick = { onPrepare(addr, pin.toIntOrNull() ?: 0) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Connect") }
+
+            // Cast to a browser: this phone becomes the remote for a browser tab.
+            // Uncommon (people usually just scan the host's QR), so it lives here —
+            // an inline "Web code" box + the button beneath it (no popup).
+            OutlinedTextField(
+                value = castDraft,
+                onValueChange = { castDraft = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) },
+                label = { Text("Web code") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(
+                onClick = { if (castDraft.length in 4..8) onCast(castDraft) },
+                enabled = castDraft.length in 4..8,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Cast to a browser screen")
+            }
+            Text(
+                "Open …/screens/receive on the screen you want to drive, then enter the code it shows here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
-
-        // "Cast to a browser" code entry (the QR / deep-link path skips this).
-        if (castDialog) {
-            AlertDialog(
-                onDismissRequest = { castDialog = false },
-                title = { Text("Cast to a browser") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Open opensource.unisim.co.uk/screens/receive on the screen you want to drive, then enter the code it shows (or scan its QR from this screen).")
-                        OutlinedTextField(
-                            value = castDraft,
-                            onValueChange = { castDraft = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) },
-                            label = { Text("Code") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        enabled = castDraft.length in 4..8,
-                        onClick = { castDialog = false; onCast(castDraft) },
-                    ) { Text("Connect") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { castDialog = false }) { Text("Cancel") }
-                },
-            )
-        }
 
         // Rename dialog for a saved host.
         renaming?.let { target ->
@@ -680,6 +665,7 @@ fun ConnectScreen(
 @Composable
 fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -> Unit) {
     var rememberChoice by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -694,8 +680,19 @@ fun ModePickerScreen(addr: String, onPick: (Mode, Boolean) -> Unit, onBack: () -
         Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
 
-        listOf(Mode.CLICKER, Mode.VIEWER, Mode.FULL_CONTROL, Mode.TRACKPAD, Mode.SECOND_SCREEN).forEach { m ->
+        // Most-likely modes for a phone first; extend/Second screen is unlikely on
+        // a phone, so it (and any other unlikely mode) tucks into "More options".
+        listOf(Mode.CLICKER, Mode.TRACKPAD, Mode.VIEWER, Mode.FULL_CONTROL).forEach { m ->
             ModeOption(m) { onPick(m, rememberChoice) }
+        }
+
+        TextButton(onClick = { showMore = !showMore }) {
+            Text(if (showMore) "More options ▾" else "More options ▸")
+        }
+        if (showMore) {
+            listOf(Mode.SECOND_SCREEN).forEach { m ->
+                ModeOption(m) { onPick(m, rememberChoice) }
+            }
         }
 
         Spacer(Modifier.height(4.dp))
@@ -783,13 +780,17 @@ private fun SavedConnectionRow(
                     contentAlignment = Alignment.Center,
                 ) { Text(deviceEmoji(conn.os), fontSize = 22.sp) }
                 Column {
-                    // Friendly name with the host in brackets, e.g. "Office Mac
-                    // (Kyjams-iMac)"; else just the hostname (or address).
-                    val base = conn.hostname.ifEmpty { conn.addr }
-                    val title = if (conn.customName.isBlank()) base else "${conn.customName} ($base)"
+                    // Top line: the device name — the user's friendly name if set,
+                    // else the host's machine name, else a friendly OS fallback
+                    // (e.g. "Windows device"). Never the IP (that goes below).
+                    val title = when {
+                        conn.customName.isNotBlank() -> conn.customName
+                        conn.hostname.isNotBlank() -> conn.hostname
+                        else -> deviceFallback(conn.os)
+                    }
                     Text(title, style = MaterialTheme.typography.bodyLarge)
-                    // Show the remembered mode only if there is one; otherwise just the
-                    // address (tapping re-asks for the mode).
+                    // Second line: the address (details), plus the remembered mode if
+                    // there is one (tapping re-asks for the mode when there isn't).
                     val sub = if (conn.mode.isBlank()) conn.addr else "${conn.addr}  ·  ${modeLabel(conn.mode)}"
                     Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

@@ -127,6 +127,18 @@ fun deviceEmoji(os: String): String = when (os.lowercase()) {
     else -> "🖥️" // 🖥️
 }
 
+/** A friendly stand-in name for a saved host when neither a custom name nor a
+ *  machine name is known yet — derived from the host OS (e.g. "Windows device").
+ *  Used for the top line of a saved-host row so it never falls back to the IP. */
+fun deviceFallback(os: String): String = when (os.lowercase()) {
+    "windows" -> "Windows device"
+    "macos", "mac" -> "Apple device"
+    "linux" -> "Linux device"
+    "ios" -> "iOS device"
+    "android" -> "Android device"
+    else -> "Saved host"
+}
+
 /** Short human label for a stored [Mode] name; falls back to the raw text for an
  *  empty/unknown mode (matches iOS's `modeLabel`). Covers all five modes — the old
  *  version rendered raw enum names for Trackpad / Second screen. */

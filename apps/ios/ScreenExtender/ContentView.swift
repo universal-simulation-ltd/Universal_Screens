@@ -191,8 +191,12 @@ struct ModePickerScreen: View {
     let onBack: () -> Void
 
     @State private var rememberChoice = false
+    @State private var showMore = false
 
-    private let modes: [Mode] = [.clicker, .viewer, .control, .trackpad, .secondScreen]
+    // Most-likely modes for a phone first; extend/Second screen is unlikely on a
+    // phone acting as the receiver, so it tucks into a collapsed "More options".
+    private let primaryModes: [Mode] = [.clicker, .trackpad, .viewer, .control]
+    private let moreModes: [Mode] = [.secondScreen]
 
     var body: some View {
         GeometryReader { geo in
@@ -208,8 +212,27 @@ struct ModePickerScreen: View {
                     }
 
                     VStack(spacing: 10) {
-                        ForEach(modes, id: \.self) { mode in
+                        ForEach(primaryModes, id: \.self) { mode in
                             ModeOption(mode) { onPick(mode, rememberChoice) }
+                        }
+
+                        Button {
+                            withAnimation { showMore.toggle() }
+                        } label: {
+                            HStack {
+                                Text("More options")
+                                Image(systemName: showMore ? "chevron.down" : "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        if showMore {
+                            ForEach(moreModes, id: \.self) { mode in
+                                ModeOption(mode) { onPick(mode, rememberChoice) }
+                            }
                         }
                     }
 
