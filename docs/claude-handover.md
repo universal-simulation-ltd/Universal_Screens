@@ -4,6 +4,40 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-10 (mobile connect-screen UX — reorder modes, hide cast, device-name saved rows)
+
+Three related UX fixes on the phone clients (Android Compose + iOS SwiftUI, at
+parity). No native/Rust/SDK change. Files: `apps/android/.../MainActivity.kt`
++ `ConnectionStore.kt`; `apps/ios/ScreenExtender/{ConnectView,ContentView,ConnectionStore}.swift`.
+
+- **Mode picker reordered** (`ModePickerScreen`). A phone acting as the receiver is
+  unlikely to be a *Second screen*, so the picker now leads with the likely modes —
+  **Clicker · Trackpad · Mirror · Remote control** — and tucks **Second screen**
+  behind a collapsed **"More options"** row (Android) / **"More options"** disclosure
+  (iOS). Any future unlikely mode joins that group.
+- **Cast-to-browser moved off the main screen.** The "Cast to a browser screen"
+  button + the "Point at the host's…" helper copy are gone from the primary connect
+  screen (people just scan the host QR). The cast affordance now lives under
+  **Advanced** as an **inline "Web code" text box + button beneath it** (no popup —
+  the old `AlertDialog` / `.alert` was removed). The button stays disabled until a
+  4–8 char code is typed. The scan / deep-link cast path is unchanged.
+- **Saved-host first line = the device name, never the IP.** Rows used to show the
+  IP on both lines when no hostname was known. Top line is now the custom name →
+  else the host machine name → else a friendly OS fallback (`deviceFallback(os)`:
+  "Windows device" / "Apple device" / "Linux device" / "iOS device" / "Android
+  device" / "Saved host"). The IP (plus remembered mode) sits on the second line.
+- **Verified (Android):** `gradlew assembleDebug` BUILD SUCCESSFUL; installed +
+  driven on the **Medium_Phone_API_36.1 emulator** (the physical device `9d084305`
+  was not attached this session — `adb devices` empty — so the emulator stood in).
+  Screenshots confirmed: clean main screen (no cast button/helper), mode picker with
+  the 4 primary modes + collapsed "More options", the Advanced "Web code" box above
+  the cast button, and two saved rows ("Kyjams-iMac" / "Windows device" fallback,
+  IPs only on line 2). **iOS is reviewed-not-compiled** (no Mac/Xcode here) — the
+  Swift mirrors the Android changes 1:1.
+  - Re-check on the device: `adb -s 9d084305 install -r
+    apps/android/app/build/outputs/apk/debug/app-debug.apk` then launch
+    `com.universalsim.extender/.MainActivity`.
+
 ## Update — 2026-07-03 (iOS cast-to-browser — M8c parity with Android)
 
 The iOS app can now scan/enter a receiver code and drive a browser `/screens/receive`

@@ -124,3 +124,17 @@ func deviceEmoji(_ os: String) -> String {
     default: return "🖥️"
     }
 }
+
+/// A friendly stand-in name for a saved host when neither a custom name nor a
+/// machine name is known yet — derived from the host OS (e.g. "Windows device").
+/// Used for the top line of a saved-host row so it never falls back to the IP.
+func deviceFallback(_ os: String) -> String {
+    switch os.lowercased() {
+    case "windows":      return "Windows device"
+    case "macos", "mac": return "Apple device"
+    case "linux":        return "Linux device"
+    case "ios":          return "iOS device"
+    case "android":      return "Android device"
+    default:             return "Saved host"
+    }
+}

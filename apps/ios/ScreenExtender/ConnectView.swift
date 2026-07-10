@@ -19,8 +19,8 @@ struct ConnectView: View {
     @State private var showHidden = false
     @State private var showAdvanced = false
     @State private var showScanner = false
-    // "Cast to a browser": manual code entry (the QR / deep-link path skips this).
-    @State private var showCast = false
+    // "Cast to a browser": inline manual code entry under Advanced (the QR /
+    // deep-link path skips this and casts straight away).
     @State private var castDraft = ""
     // Saved-host rename: the host being renamed (drives the alert) + the draft.
     @State private var renameTarget: SavedConnection?
@@ -87,18 +87,6 @@ struct ConnectView: View {
                 }
             }
         }
-        .alert("Cast to a browser", isPresented: $showCast) {
-            TextField("Code (e.g. 7Q4K)", text: $castDraft)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-            Button("Connect") {
-                let code = castDraft.uppercased().filter { $0.isLetter || $0.isNumber }
-                if (4...8).contains(code.count) { onCast(code) }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Open opensource.unisim.co.uk/screens/receive on the screen you want to drive, then enter the code it shows (or scan its QR).")
-        }
     }
 
     // MARK: - Hero
@@ -128,22 +116,6 @@ struct ConnectView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-
-            Text("Point at the host's QR code — it joins this PC's Wi-Fi and connects.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            // Cast to a browser: this phone becomes the remote for a browser tab
-            // showing …/screens/receive. Scanning that page's QR skips this button.
-            Button { castDraft = ""; showCast = true } label: {
-                Label("Cast to a browser screen", systemImage: "rectangle.on.rectangle.angled")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
         }
     }
 
@@ -161,12 +133,14 @@ struct ConnectView: View {
         }
     }
 
-    /// Row title: the user's friendly name with the host in brackets, e.g.
-    /// "Office Mac (Kyjams-iMac)"; else just the hostname (or address).
+    /// Row title (top line): the device name — the user's friendly name if set,
+    /// else the host's machine name, else a friendly OS fallback (e.g. "Windows
+    /// device"). Never the IP; that goes on the second line.
     private func savedTitle(_ host: SavedConnection) -> String {
-        let base = host.hostname.isEmpty ? host.addr : host.hostname
         let name = host.customName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? base : "\(name) (\(base))"
+        if !name.isEmpty { return name }
+        if !host.hostname.isEmpty { return host.hostname }
+        return deviceFallback(host.os)
     }
 
     private func savedRow(_ host: SavedConnection) -> some View {
@@ -267,6 +241,33 @@ struct ConnectView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(addr.isEmpty)
+
+                    // Cast to a browser: this phone becomes the remote for a browser
+                    // tab showing …/screens/receive. Uncommon (people usually just
+                    // scan the host's QR), so it lives here under Advanced — an
+                    // inline "Web code" box + the button beneath it (no popup).
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Web code", text: $castDraft)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: castDraft) { _, v in
+                                castDraft = String(v.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(8))
+                            }
+                        Button {
+                            if (4...8).contains(castDraft.count) { onCast(castDraft) }
+                        } label: {
+                            Label("Cast to a browser screen", systemImage: "rectangle.on.rectangle.angled")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(!(4...8).contains(castDraft.count))
+                        Text("Open …/screens/receive on the screen you want to drive, then enter the code it shows here.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(14)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
