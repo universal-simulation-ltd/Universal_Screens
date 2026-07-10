@@ -128,11 +128,11 @@ struct ContentView: View {
         case .trackpad:
             TrackpadView(session: live, onDisconnect: disconnect, onSwitchMode: repick)
         case .viewer:
-            StreamView(session: live, addr: currentAddr, forwardInput: false, onDisconnect: disconnect)
+            StreamView(session: live, addr: currentAddr, mode: .viewer, forwardInput: false, onDisconnect: disconnect, onSwitchMode: repick)
         case .control:
-            StreamView(session: live, addr: currentAddr, forwardInput: true, onDisconnect: disconnect)
+            StreamView(session: live, addr: currentAddr, mode: .control, forwardInput: true, onDisconnect: disconnect, onSwitchMode: repick)
         case .secondScreen:
-            StreamView(session: live, addr: currentAddr, forwardInput: false, onDisconnect: disconnect)
+            StreamView(session: live, addr: currentAddr, mode: .secondScreen, forwardInput: false, onDisconnect: disconnect, onSwitchMode: repick)
         }
     }
 
