@@ -171,6 +171,72 @@ pub fn advertise_mdns(instance_name: &str, port: u16) -> Result<MdnsAd, mdns_sd:
     Ok(MdnsAd { daemon, fullname })
 }
 
+/// Browse DNS-SD for other Universal Screens hosts (`_usscreens._tcp`) on a
+/// background thread, keeping `peers` current: a resolved service is added (or
+/// refreshed), a removed one is dropped. `on_change` fires whenever the visible
+/// peer set changes. Runs until `stop` is set.
+///
+/// This is the browsing counterpart of [`advertise_mdns`], used where the
+/// custom UDP beacon can't be heard — e.g. the web bridge, which typically runs
+/// on the same machine as a GUI host that already owns the beacon port.
+/// (Multiple mDNS daemons coexist on one machine; the beacon socket doesn't.)
+pub fn start_mdns_browser<F>(peers: Arc<Mutex<Vec<DiscoveredPeer>>>, stop: Arc<AtomicBool>, on_change: F)
+where
+    F: Fn() + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let Ok(daemon) = mdns_sd::ServiceDaemon::new() else { return };
+        let Ok(rx) = daemon.browse(MDNS_SERVICE_TYPE) else { return };
+        while !stop.load(Ordering::Relaxed) {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
+                    // Prefer an IPv4 address; fall back to any.
+                    let addr = info
+                        .get_addresses()
+                        .iter()
+                        .find(|a| a.is_ipv4())
+                        .or_else(|| info.get_addresses().iter().next())
+                        .map(std::string::ToString::to_string);
+                    let Some(addr) = addr else { continue };
+                    // Instance name = the label before the service type.
+                    let name = info
+                        .get_fullname()
+                        .strip_suffix(&format!(".{MDNS_SERVICE_TYPE}"))
+                        .unwrap_or(info.get_fullname())
+                        .to_owned();
+                    let port = info.get_port();
+                    let mut list = peers.lock().unwrap();
+                    if let Some(existing) = list.iter_mut().find(|p| p.addr == addr && p.port == port) {
+                        existing.last_seen = Instant::now();
+                        existing.name = name;
+                    } else {
+                        list.push(DiscoveredPeer { name, addr, port, last_seen: Instant::now() });
+                        drop(list);
+                        on_change();
+                    }
+                }
+                Ok(mdns_sd::ServiceEvent::ServiceRemoved(_ty, fullname)) => {
+                    let name = fullname
+                        .strip_suffix(&format!(".{MDNS_SERVICE_TYPE}"))
+                        .unwrap_or(&fullname)
+                        .to_owned();
+                    let mut list = peers.lock().unwrap();
+                    let before = list.len();
+                    list.retain(|p| p.name != name);
+                    if list.len() != before {
+                        drop(list);
+                        on_change();
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {} // recv timeout — loop to re-check `stop`
+            }
+        }
+        let _ = daemon.stop_browse(MDNS_SERVICE_TYPE);
+        let _ = daemon.shutdown();
+    });
+}
+
 fn parse_beacon(data: &[u8]) -> Option<(u16, String)> {
     let s = std::str::from_utf8(data).ok()?;
     let mut parts = s.splitn(3, '\t');
@@ -238,5 +304,33 @@ mod tests {
         let _ = browser.shutdown();
         ad.shutdown();
         assert!(found, "advertised service was not resolved within 10s");
+    }
+
+    /// The crate's own browser thread (used by the web bridge) sees an
+    /// advertisement and fills the shared peer list.
+    #[test]
+    fn mdns_browser_sees_advertisement() {
+        let ad = advertise_mdns("USScreens-Browse-Test", 9098).expect("advertise");
+        let peers = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        start_mdns_browser(peers.clone(), stop.clone(), || {});
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut found = false;
+        while Instant::now() < deadline {
+            {
+                let list = peers.lock().unwrap();
+                if list.iter().any(|p| p.name == "USScreens-Browse-Test" && p.port == 9098) {
+                    found = true;
+                }
+            }
+            if found {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        stop.store(true, Ordering::Relaxed);
+        ad.shutdown();
+        assert!(found, "browser did not list the advertised host within 10s");
     }
 }

@@ -57,6 +57,62 @@ function renderModes() {
 
 const DEVICE_GLYPH = { windows: "🪟", macos: "🍎", linux: "🐧", android: "🤖", ios: "📱" };
 
+// ---- Nearby (bridge-discovered hosts, orbit graphic) ------------------------
+// The bridge browses DNS-SD on our behalf (a tab can't multicast) and serves
+// the current list on GET /peers. Poll it while the connect view is up; render
+// each host as a pill orbiting "this device", portal-style. Clicking a pill
+// opens Remote control through the bridge's ?host= retarget.
+
+const NEARBY_POLL_MS = 3000;
+let nearbyTimer = null;
+let lastNearbyJson = "";
+
+async function pollNearby() {
+  if (document.body.classList.contains("in-session")) return;
+  const bridge = $("addr").value.trim();
+  if (!bridge) return;
+  let peers = [];
+  try {
+    const res = await fetch(`http://${bridge}/peers`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) peers = await res.json();
+  } catch {
+    // Bridge not running / unreachable — treat as "nothing nearby".
+  }
+  const json = JSON.stringify(peers);
+  if (json === lastNearbyJson) return; // don't restart the orbit animation
+  lastNearbyJson = json;
+  renderNearby(peers);
+}
+
+function renderNearby(peers) {
+  $("nearby-section").hidden = peers.length === 0;
+  const box = $("orbit-peers");
+  box.innerHTML = "";
+  const period = 48; // seconds per revolution — slow enough to read and click
+  peers.forEach((p, i) => {
+    const arm = document.createElement("div");
+    arm.className = "orbit-arm";
+    const pill = document.createElement("button");
+    pill.className = "orbit-peer";
+    pill.innerHTML = `<span class="pname"></span><span class="paddr"></span>`;
+    pill.querySelector(".pname").textContent = p.name || "Host";
+    pill.querySelector(".paddr").textContent = `${p.addr}:${p.port}`;
+    // Spread the pills evenly: an N° offset is a -(N/360 × period)s delay, on
+    // both the arm (rotation) and the pill (counter-rotation).
+    const delay = `-${((i / peers.length) * period).toFixed(2)}s`;
+    arm.style.animationDelay = delay;
+    pill.style.animationDelay = delay;
+    pill.addEventListener("click", () => connect($("addr").value.trim(), MODES[0], `${p.addr}:${p.port}`));
+    arm.appendChild(pill);
+    box.appendChild(arm);
+  });
+}
+
+function startNearbyPolling() {
+  pollNearby();
+  nearbyTimer ??= setInterval(pollNearby, NEARBY_POLL_MS);
+}
+
 function renderSaved() {
   const list = saved.load();
   $("saved-section").hidden = list.length === 0;
@@ -86,14 +142,14 @@ function renderSaved() {
 
 // ---- session ---------------------------------------------------------------
 
-async function connect(addr, mode) {
+async function connect(addr, mode, targetHost = null) {
   if (!addr) { status("Enter a bridge host:port first.", "err"); return; }
   await ready();
   activeMode = mode;
-  activeAddr = addr;
+  activeAddr = targetHost ?? addr;
 
   document.body.classList.add("in-session");
-  $("host-label").textContent = `Connecting to ${addr}…`;
+  $("host-label").textContent = `Connecting to ${targetHost ?? addr}…`;
   $("btn-lock").hidden = !(mode.video && mode.input);
   $("video-hint").style.display = mode.video ? "none" : "flex";
   $("video-hint").textContent = mode.video ? "" : "Clicker mode — no video. Use your keyboard (arrows / Page Up·Down, F5, Esc).";
@@ -102,11 +158,14 @@ async function connect(addr, mode) {
   const canvas = $("screen");
   renderer = new CanvasRenderer(canvas);
   decoder = new H264Decoder((frame) => renderer.draw(frame), (e) => log(`decoder error: ${e}`, "err"));
-  transport = new Transport(addr);
+  transport = new Transport(addr, targetHost);
   input = new InputController(transport, renderer, canvas);
 
   transport.onOpen = () => {
-    saved.touch(addr, Date.now());
+    // A Nearby target isn't saved: saved rows reconnect by treating their addr
+    // as the bridge address, which a retargeted ip:port is not. Nearby hosts
+    // reappear live from discovery instead.
+    if (!targetHost) saved.touch(addr, Date.now());
     const dpr = window.devicePixelRatio || 1;
     transport.sendHello({
       width: Math.round(window.screen.width * dpr),
@@ -114,7 +173,7 @@ async function connect(addr, mode) {
       captureMode: mode.capture,
       pin: Number($("pin").value) || 0,
     });
-    $("host-label").textContent = addr;
+    $("host-label").textContent = targetHost ?? addr;
     input.setMode({ enabled: mode.input, pointerInput: mode.video && mode.input });
     input.attach();
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
@@ -218,6 +277,9 @@ export async function runDecodePipelineSelfTest() {
 export function boot() {
   renderModes();
   renderSaved();
+  startNearbyPolling();
+  // A changed bridge address means a different /peers source — refresh now.
+  $("addr").addEventListener("change", () => { lastNearbyJson = ""; pollNearby(); });
 
   $("saved-toggle").addEventListener("click", () => {
     const t = $("saved-toggle"), l = $("saved-list");
