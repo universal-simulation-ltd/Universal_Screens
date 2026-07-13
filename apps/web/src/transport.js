@@ -4,9 +4,13 @@
 import { protocol } from "./wasm.js";
 
 export class Transport {
-  /// `addr` is the bridge `host:port` (it speaks `ws://`).
-  constructor(addr) {
+  /// `addr` is the bridge `host:port` (it speaks `ws://`). `targetHost`, when
+  /// set, asks the bridge to proxy to that discovered host (`ip:port`) instead
+  /// of its default — the "Nearby" click path. The bridge refuses targets it
+  /// hasn't itself discovered.
+  constructor(addr, targetHost = null) {
     this.addr = addr;
+    this.targetHost = targetHost;
     this.ws = null;
     this.onMessage = null; // (DecodedMessage) => void
     this.onOpen = null;
@@ -15,7 +19,8 @@ export class Transport {
   }
 
   connect() {
-    this.ws = new WebSocket(`ws://${this.addr}/`);
+    const query = this.targetHost ? `?host=${encodeURIComponent(this.targetHost)}` : "";
+    this.ws = new WebSocket(`ws://${this.addr}/${query}`);
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => this.onOpen?.();
     this.ws.onclose = () => this.onClose?.();

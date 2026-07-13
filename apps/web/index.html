@@ -30,9 +30,10 @@
   #connect-view { width: 100%; max-width: 460px; padding: 2rem 1.25rem 3rem; }
   .brand { text-align: center; margin-bottom: 1.75rem; }
   .brand svg { width: 64px; height: 64px; }
-  /* SVG presentation attributes can't read CSS var()s — paint via CSS instead. */
-  .brand .r-back { fill: none; stroke: var(--muted); stroke-width: 3; }
-  .brand .r-front { fill: var(--accent); }
+  /* SVG presentation attributes can't read CSS var()s — paint via CSS instead.
+     (Shared by the brand header and the Nearby orbit's centre node.) */
+  .brand .r-back, .orbit-centre .r-back { fill: none; stroke: var(--muted); stroke-width: 3; }
+  .brand .r-front, .orbit-centre .r-front { fill: var(--accent); }
   .brand h1 { font-size: 1.6rem; font-weight: 800; margin: .6rem 0 .15rem; letter-spacing: -.01em; }
   .brand p { margin: 0; color: var(--muted); font-size: .92rem; }
 
@@ -63,6 +64,83 @@
   .row-btn .ren:hover { color: var(--accent); background: #0001; }
   .row-btn .del { margin-left: 0; flex: none; border: none; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: .2rem .4rem; border-radius: .4rem; }
   .row-btn .del:hover { color: #d22; background: #0001; }
+
+  /* ---- Nearby orbit (portal-style: this device centre, hosts orbiting) ---- */
+  #nearby-section { margin-top: .5rem; }
+  .orbit-box {
+    position: relative;
+    width: 100%;
+    height: 250px;
+    overflow: hidden;
+  }
+  .orbit-ring {
+    position: absolute; left: 50%; top: 50%;
+    width: 168px; height: 168px;
+    transform: translate(-50%, -50%);
+    border: 1.5px dashed color-mix(in srgb, var(--muted) 35%, transparent);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .orbit-centre {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 72px; height: 72px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--card), color-mix(in srgb, var(--accent) 18%, var(--card)) 75%);
+    border: 1px solid var(--line);
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent),
+                0 0 0 14px color-mix(in srgb, var(--accent) 6%, transparent);
+    /* Above the orbiting pills, so they pass behind this device (portal-style). */
+    z-index: 5;
+    text-align: center;
+  }
+  .orbit-centre svg { width: 34px; height: 34px; }
+  .orbit-centre .you { position: absolute; bottom: -1.45rem; width: max-content; font-size: .72rem; color: var(--muted); }
+  .orbit-halo {
+    position: absolute; left: 50%; top: 50%;
+    width: 120px; height: 120px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%);
+    pointer-events: none; z-index: 2;
+    animation: orbit-halo 3.8s ease-in-out infinite;
+  }
+  @keyframes orbit-halo {
+    0%, 100% { opacity: .55; transform: translate(-50%, -50%) scale(1); }
+    50%      { opacity: 1;   transform: translate(-50%, -50%) scale(1.08); }
+  }
+  /* An invisible arm rotates about the centre; the pill at its tip counter-
+     rotates so it stays upright — same trick as the portal's solar system. */
+  .orbit-arm {
+    position: absolute; left: 50%; top: 50%;
+    width: 0; height: 0;
+    animation: orbit-spin var(--orbit-period, 48s) linear infinite;
+    z-index: 4;
+  }
+  .orbit-peer {
+    --r: 84px;
+    position: absolute; left: var(--r); top: 0;
+    transform: translate(-50%, -50%);
+    display: flex; flex-direction: column; align-items: center; gap: .1rem;
+    padding: .45rem .7rem;
+    font: inherit; color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--line); border-radius: .75rem;
+    box-shadow: 0 2px 6px -1px rgba(15,23,42,.10);
+    cursor: pointer; white-space: nowrap;
+    animation: orbit-counter var(--orbit-period, 48s) linear infinite;
+  }
+  .orbit-peer:hover { border-color: var(--accent); }
+  .orbit-peer .pname { font-weight: 600; font-size: .82rem; }
+  .orbit-peer .paddr { font-size: .7rem; color: var(--muted); }
+  /* Hovering anywhere over the orbit pauses it so a moving pill is clickable. */
+  .orbit-box:hover .orbit-arm, .orbit-box:hover .orbit-peer { animation-play-state: paused; }
+  @keyframes orbit-spin    { from { transform: rotate(0deg); }  to { transform: rotate(360deg); } }
+  @keyframes orbit-counter { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(-360deg); } }
+  #nearby-hint { text-align: center; font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .orbit-arm, .orbit-peer, .orbit-halo { animation: none; }
+  }
 
   #saved-toggle { background: none; border: none; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; padding: .2rem; display: flex; align-items: center; gap: .4rem; }
   #saved-toggle .chev { transition: transform .15s; color: var(--muted); }
@@ -119,6 +197,26 @@
       </svg>
       <h1>Universal Screens</h1>
       <p>Mirror, remote control &amp; presentation clicker</p>
+    </div>
+
+    <!-- Nearby hosts, discovered by the bridge over DNS-SD (a browser tab can't
+         multicast). Rendered as the portal-style orbit: this device in the
+         centre, each serving host circling it — click one to connect. -->
+    <div id="nearby-section" hidden>
+      <div class="section-label">Nearby</div>
+      <div class="orbit-box">
+        <div class="orbit-ring"></div>
+        <div class="orbit-halo"></div>
+        <div class="orbit-centre">
+          <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect class="r-back" x="6" y="14" width="38" height="28" rx="5"/>
+            <rect class="r-front" x="20" y="24" width="38" height="28" rx="5"/>
+          </svg>
+          <span class="you">This device</span>
+        </div>
+        <div id="orbit-peers"></div>
+      </div>
+      <div id="nearby-hint">Tap a host to remote-control it (enter its PIN below first).</div>
     </div>
 
     <div id="saved-section" hidden>

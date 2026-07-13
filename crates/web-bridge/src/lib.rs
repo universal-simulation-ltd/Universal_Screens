@@ -21,10 +21,13 @@
 
 use std::io::{self, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use extender_discovery::DiscoveredPeer;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
@@ -69,16 +72,34 @@ pub fn write_frame_body<W: Write>(w: &mut W, body: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Accept WebSocket connections forever and proxy each to a fresh TCP connection
-/// to `host_addr`. One client at a time mirrors the host's own sequential accept
-/// loop; that's all the spike needs.
+/// Accept connections forever. Each incoming socket is routed by its request
+/// line:
+///
+/// - `GET /peers` — answered directly with a JSON array of the Universal
+///   Screens hosts the bridge currently sees via DNS-SD (a browser tab cannot
+///   multicast, so the bridge browses on its behalf). CORS-open: the page may
+///   be served from another origin (e.g. the portal).
+/// - anything else — treated as a WebSocket upgrade and proxied to a host. The
+///   URL may carry `?host=ip:port` to pick a *discovered* host instead of the
+///   default `host_addr` (unlisted targets are refused, so a page can't use the
+///   bridge to reach arbitrary sockets).
+///
+/// One client at a time mirrors the host's own sequential accept loop; that's
+/// all the spike needs.
 ///
 /// # Errors
 /// Returns an error only if binding the listener fails. Per-connection errors are
 /// logged and the loop continues.
 pub fn serve(ws_addr: &str, host_addr: &str) -> io::Result<()> {
     let listener = TcpListener::bind(ws_addr)?;
+    // Browse DNS-SD for serving hosts so /peers has an answer. The bridge often
+    // runs on the same machine as a GUI host, which already owns the custom
+    // beacon port — mDNS daemons coexist, the beacon listener socket doesn't.
+    let peers = Arc::new(Mutex::new(Vec::<DiscoveredPeer>::new()));
+    let browse_stop = Arc::new(AtomicBool::new(false));
+    extender_discovery::start_mdns_browser(peers.clone(), browse_stop.clone(), || {});
     println!("extender-web-bridge: WebSocket on ws://{ws_addr}  ->  host {host_addr}");
+    println!("peer list on http://{ws_addr}/peers  (append ?host=ip:port to the WS URL to pick one)");
     println!("waiting for a browser to connect...");
     for incoming in listener.incoming() {
         let stream = match incoming {
@@ -89,14 +110,161 @@ pub fn serve(ws_addr: &str, host_addr: &str) -> io::Result<()> {
             }
         };
         let peer = stream.peer_addr().map_or_else(|_| "?".into(), |a| a.to_string());
+        if let Ok(line) = peek_request_line(&stream) {
+            if line.starts_with("GET /peers") {
+                let body = peers_json(&peers.lock().unwrap());
+                if let Err(e) = respond_json(stream, &body) {
+                    eprintln!("/peers response to {peer} failed: {e}");
+                }
+                continue;
+            }
+        }
         println!("browser connected: {peer}");
-        match proxy_connection(stream, host_addr) {
+        match proxy_browser(stream, host_addr, &peers) {
             Ok(()) => println!("browser {peer} disconnected"),
             Err(e) => eprintln!("session with {peer} ended: {e}"),
         }
         println!("waiting for a browser to connect...");
     }
     Ok(())
+}
+
+/// Peek (without consuming) up to the first CRLF so the accept loop can route
+/// the socket — a plain HTTP `GET /peers` vs a WebSocket upgrade — before any
+/// handshake code takes over the stream.
+fn peek_request_line(stream: &TcpStream) -> io::Result<String> {
+    stream.set_read_timeout(Some(Duration::from_millis(300)))?;
+    let mut buf = [0u8; 512];
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let n = match stream.peek(&mut buf) {
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => 0,
+            Err(e) => {
+                let _ = stream.set_read_timeout(None);
+                return Err(e);
+            }
+        };
+        let text = String::from_utf8_lossy(&buf[..n]);
+        if let Some(line) = text.split("\r\n").next() {
+            if text.contains("\r\n") {
+                let _ = stream.set_read_timeout(None);
+                return Ok(line.to_owned());
+            }
+        }
+        if n == buf.len() || Instant::now() > deadline {
+            let _ = stream.set_read_timeout(None);
+            // No CRLF in the first 512 bytes / 2s — let the WS handshake decide.
+            return Ok(text.split("\r\n").next().unwrap_or("").to_owned());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Serialise the discovered hosts as a JSON array (hand-rolled — the bridge has
+/// no JSON dependency, and the shape is three flat fields).
+fn peers_json(peers: &[DiscoveredPeer]) -> String {
+    let items: Vec<String> = peers
+        .iter()
+        .map(|p| {
+            format!(
+                r#"{{"name":"{}","addr":"{}","port":{}}}"#,
+                json_escape(&p.name),
+                json_escape(&p.addr),
+                p.port
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+/// Minimal JSON string escaping: backslash, quote, and control characters.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Drain the (peeked) HTTP request, then write a one-shot JSON response and
+/// close. Draining first matters: closing a socket with unread data can send a
+/// TCP RST that makes the browser drop the response we just wrote.
+fn respond_json(mut stream: TcpStream, body: &str) -> io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+    let mut buf = [0u8; 1024];
+    let mut seen = Vec::new();
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                seen.extend_from_slice(&buf[..n]);
+                if seen.windows(4).any(|w| w == b"\r\n\r\n") || seen.len() > 8192 {
+                    break;
+                }
+            }
+            Err(_) => break, // timeout — request end not seen; respond anyway
+        }
+    }
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes())?;
+    stream.flush()?;
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    Ok(())
+}
+
+/// Accept the WebSocket upgrade, honouring an optional `?host=ip:port` query
+/// that retargets the proxy at one of the *discovered* hosts. An address that
+/// is neither the default nor currently discovered is refused (policy: the
+/// browser may only pick from what the bridge itself can see).
+fn proxy_browser(
+    ws_stream: TcpStream,
+    default_host: &str,
+    peers: &Arc<Mutex<Vec<DiscoveredPeer>>>,
+) -> io::Result<()> {
+    let mut requested: Option<String> = None;
+    let mut ws = tungstenite::accept_hdr(ws_stream, |req: &tungstenite::handshake::server::Request, resp| {
+        requested = query_param(req.uri().query().unwrap_or(""), "host");
+        Ok(resp)
+    })
+    .map_err(|e| io::Error::other(format!("websocket handshake failed: {e}")))?;
+
+    let target = match requested {
+        None => default_host.to_owned(),
+        Some(req) => {
+            let allowed = req == default_host
+                || peers.lock().unwrap().iter().any(|p| format!("{}:{}", p.addr, p.port) == req);
+            if !allowed {
+                let _ = ws.close(Some(tungstenite::protocol::CloseFrame {
+                    code: tungstenite::protocol::frame::coding::CloseCode::Policy,
+                    reason: "unknown host (not discovered)".into(),
+                }));
+                let _ = ws.flush();
+                return Err(io::Error::other(format!("refused undiscovered target {req}")));
+            }
+            req
+        }
+    };
+    proxy_established(ws, &target)
+}
+
+/// The value of `key` in a raw `k=v&k=v` query string (no percent-decoding —
+/// the host address alphabet doesn't need it).
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v.to_owned())
 }
 
 /// Proxy a single browser: complete the WS handshake on `ws_stream`, open a TCP
@@ -111,8 +279,18 @@ pub fn serve(ws_addr: &str, host_addr: &str) -> io::Result<()> {
 /// # Errors
 /// Returns an error if the handshake, the host connection, or a forward fails.
 pub fn proxy_connection(ws_stream: TcpStream, host_addr: &str) -> io::Result<()> {
-    let mut ws = tungstenite::accept(ws_stream)
+    let ws = tungstenite::accept(ws_stream)
         .map_err(|e| io::Error::other(format!("websocket handshake failed: {e}")))?;
+    proxy_established(ws, host_addr)
+}
+
+/// The data phase of [`proxy_connection`], starting from an already-accepted
+/// WebSocket (so callers that need the handshake headers — e.g. the `?host=`
+/// retarget in [`serve`] — can accept it themselves).
+///
+/// # Errors
+/// Returns an error if the host connection or a forward fails.
+pub fn proxy_established(mut ws: WebSocket<TcpStream>, host_addr: &str) -> io::Result<()> {
     // Data phase is nonblocking so a quiet upstream doesn't stall downstream
     // delivery; `WouldBlock` from `ws.read()` is the documented resume signal.
     ws.get_ref().set_nonblocking(true)?;
@@ -332,6 +510,37 @@ mod tests {
         // Length says 5 bytes but only 2 follow.
         let buf = vec![5, 0, 0, 0, 0xAA, 0xBB];
         assert!(read_frame_body(&mut Cursor::new(buf)).is_err());
+    }
+
+    #[test]
+    fn peers_json_serialises_and_escapes() {
+        assert_eq!(peers_json(&[]), "[]");
+        let peers = vec![
+            DiscoveredPeer {
+                name: "My \"PC\"".into(),
+                addr: "192.168.1.5".into(),
+                port: 9000,
+                last_seen: Instant::now(),
+            },
+            DiscoveredPeer {
+                name: "Back\\slash".into(),
+                addr: "10.0.0.2".into(),
+                port: 9001,
+                last_seen: Instant::now(),
+            },
+        ];
+        assert_eq!(
+            peers_json(&peers),
+            r#"[{"name":"My \"PC\"","addr":"192.168.1.5","port":9000},{"name":"Back\\slash","addr":"10.0.0.2","port":9001}]"#
+        );
+    }
+
+    #[test]
+    fn query_param_finds_the_host() {
+        assert_eq!(query_param("host=1.2.3.4:9000", "host"), Some("1.2.3.4:9000".into()));
+        assert_eq!(query_param("a=b&host=x:1&c=d", "host"), Some("x:1".into()));
+        assert_eq!(query_param("", "host"), None);
+        assert_eq!(query_param("hostile=1", "host"), None);
     }
 
     #[test]
