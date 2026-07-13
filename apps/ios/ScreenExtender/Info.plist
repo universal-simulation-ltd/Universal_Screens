@@ -33,6 +33,7 @@
 	<string>1</string>
 	<key>NSBonjourServices</key>
 	<array>
+		<string>_usscreens._tcp</string>
 		<string>_extender._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>

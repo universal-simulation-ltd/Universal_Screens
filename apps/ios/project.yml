@@ -38,6 +38,9 @@ targets:
         NSLocalNetworkUsageDescription: "Universal Screens needs local network access to connect to a presentation host on the same Wi-Fi."
         NSCameraUsageDescription: "Universal Screens uses the camera to scan the host's QR connect code."
         NSBonjourServices:
+          # The type the desktop hosts advertise while serving (see the shared
+          # extender-discovery crate) - browsed by ConnectView's NearbyBrowser.
+          - _usscreens._tcp
           - _extender._tcp
         # Custom scheme for the combined connect payload (matches the Android
         # client's `unisimscreens://` intent filter). A scanned QR / deep link is
