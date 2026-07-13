@@ -388,26 +388,18 @@ impl HostApp {
         }
 
         // Nearby — other Universal Screens hosts discovered on the LAN via UDP
-        // multicast. Primary use case: Mac → Mac / Mac → PC (no camera to scan a QR).
+        // multicast. Primary use case: Mac → Mac / Mac → PC (no camera to scan a
+        // QR). Drawn as the portal-style orbit: this Mac in the centre, each
+        // peer a node circling it — click a node to connect.
         let nearby = self.discovered_peers.lock().unwrap().clone();
         if !nearby.is_empty() {
             ui.add_space(6.0);
             ui.separator();
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Nearby").strong());
-            for peer in &nearby {
-                ui.horizontal(|ui| {
-                    device_icon(ui, DeviceKind::Other, 16.0);
-                    ui.label(format!("{} · {}:{}", peer.name, peer.addr, peer.port));
-                    if ui.small_button("Connect").clicked() {
-                        let url = connect_url(
-                            &format!("{}:{}", peer.addr, peer.port),
-                            0,
-                            None,
-                        );
-                        let _ = std::process::Command::new("open").arg(&url).spawn();
-                    }
-                });
+            if let Some(peer) = nearby_orbit(ui, &nearby, "This Mac") {
+                let url = connect_url(&format!("{}:{}", peer.addr, peer.port), 0, None);
+                let _ = std::process::Command::new("open").arg(url).spawn();
             }
         }
 
@@ -1131,6 +1123,123 @@ impl DeviceKind {
             "ios" => Self::Ios,
             _ => Self::Other,
         }
+    }
+}
+
+/// Draw the "Nearby" hosts as an orbit: this Mac at the centre with a soft glow
+/// + dashed ring, each discovered peer a node circling it (portal-style). The
+/// nodes rotate slowly; hovering the area pauses them so a node is easy to
+/// click. `centre_label` names the local machine ("This PC" / "This Mac").
+/// Returns the peer whose node was clicked this frame, if any. Mirrors the
+/// Windows host's `nearby_orbit`.
+fn nearby_orbit(
+    ui: &mut egui::Ui,
+    peers: &[crate::discovery::DiscoveredPeer],
+    centre_label: &str,
+) -> Option<crate::discovery::DiscoveredPeer> {
+    let width = ui.available_width();
+    let height = 210.0_f32;
+    let (rect, _resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let centre = rect.center();
+    let radius = (height * 0.34).min(width * 0.3);
+
+    let dark = ui.visuals().dark_mode;
+    let ink = if dark { egui::Color32::from_gray(220) } else { egui::Color32::from_gray(40) };
+    let muted = if dark { egui::Color32::from_gray(130) } else { egui::Color32::from_gray(140) };
+    let card = ui.visuals().extreme_bg_color;
+
+    // Dashed orbit ring.
+    let ring_segments = 44;
+    for i in 0..ring_segments {
+        if i % 2 != 0 {
+            continue; // gaps make the dashes
+        }
+        let a0 = std::f32::consts::TAU * (i as f32) / (ring_segments as f32);
+        let a1 = std::f32::consts::TAU * (i as f32 + 1.0) / (ring_segments as f32);
+        painter.line_segment(
+            [
+                centre + radius * egui::vec2(a0.cos(), a0.sin()),
+                centre + radius * egui::vec2(a1.cos(), a1.sin()),
+            ],
+            egui::Stroke::new(1.2, muted.gamma_multiply(0.5)),
+        );
+    }
+
+    // Pulsing glow behind the centre.
+    let t = ui.input(|i| i.time) as f32;
+    let pulse = 0.5 + 0.5 * (t * 1.6).sin();
+    let glow = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), (26.0 + 20.0 * pulse) as u8);
+    painter.circle_filled(centre, 34.0 + 5.0 * pulse, glow);
+
+    // Centre node: this machine.
+    painter.circle_filled(centre, 26.0, card);
+    painter.circle_stroke(centre, 26.0, egui::Stroke::new(1.5, BRAND));
+    painter.text(centre - egui::vec2(0.0, 4.0), egui::Align2::CENTER_CENTER, "🖥", egui::FontId::proportional(20.0), ink);
+    painter.text(centre + egui::vec2(0.0, 15.0), egui::Align2::CENTER_CENTER, centre_label, egui::FontId::proportional(9.0), muted);
+
+    // Orbiting peer nodes. A slow global rotation, evenly spread; pause on hover
+    // so a moving node stays clickable.
+    let hovered_area = ui.rect_contains_pointer(rect);
+    let spin = if hovered_area { 0.0 } else { t * 0.35 }; // radians
+    let mut clicked = None;
+    let node_r = 22.0;
+
+    for (i, peer) in peers.iter().enumerate() {
+        let angle = spin + std::f32::consts::TAU * (i as f32) / (peers.len() as f32) - std::f32::consts::FRAC_PI_2;
+        let pos = centre + radius * egui::vec2(angle.cos(), angle.sin());
+        let node_rect = egui::Rect::from_center_size(pos, egui::vec2(node_r * 2.0, node_r * 2.0));
+        let id = ui.id().with(("orbit_peer", i));
+        let resp = ui.interact(node_rect, id, egui::Sense::click());
+        let hot = resp.hovered();
+        if hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+
+        painter.circle_filled(pos, node_r, card);
+        painter.circle_stroke(pos, node_r, egui::Stroke::new(if hot { 2.0 } else { 1.2 }, if hot { BRAND } else { muted }));
+        painter.text(pos - egui::vec2(0.0, 3.0), egui::Align2::CENTER_CENTER, "📡", egui::FontId::proportional(16.0), ink);
+
+        // Label pill under the node — the name, plus the address on hover.
+        let name = truncate_label(&peer.name, 16);
+        painter.text(
+            pos + egui::vec2(0.0, node_r + 9.0),
+            egui::Align2::CENTER_CENTER,
+            &name,
+            egui::FontId::proportional(11.0),
+            ink,
+        );
+        if hot {
+            painter.text(
+                pos + egui::vec2(0.0, node_r + 22.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{}:{}  ·  click to connect", peer.addr, peer.port),
+                egui::FontId::proportional(9.5),
+                muted,
+            );
+            resp.clone().on_hover_text(format!("Connect to {} ({}:{})", peer.name, peer.addr, peer.port));
+        }
+        if resp.clicked() {
+            clicked = Some(peer.clone());
+        }
+    }
+
+    // Keep the animation going while nothing else is repainting.
+    if !hovered_area {
+        ui.ctx().request_repaint();
+    }
+    clicked
+}
+
+/// Truncate a label to `max` chars with an ellipsis, so a long machine name
+/// doesn't overrun an orbit node.
+fn truncate_label(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_owned()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }
 
