@@ -471,6 +471,19 @@ fun ConnectScreen(
     var renameDraft by remember { mutableStateOf("") }
     fun reload() { saved = ConnectionStore.load(context) }
 
+    // Nearby hosts, browsed over DNS-SD while this screen is visible. Tapping
+    // one asks for the host's PIN (it's on the host under More details — the QR
+    // normally carries it, but there's no QR in this flow), then goes to the
+    // usual mode picker.
+    var nearby by remember { mutableStateOf<List<NearbyHost>>(emptyList()) }
+    var nearbyTarget by remember { mutableStateOf<NearbyHost?>(null) }
+    var nearbyPin by remember { mutableStateOf("") }
+    DisposableEffect(Unit) {
+        val discovery = NearbyDiscovery(context) { nearby = it }
+        discovery.start()
+        onDispose { discovery.stop() }
+    }
+
     // Scan the host's Step-2 QR. It now encodes an https `…/screens/connect` URL
     // (a plain phone camera lands on a help page; the app deep-links straight in),
     // but the parser also still accepts the legacy `unisimscreens://connect?…`
@@ -533,6 +546,19 @@ fun ConnectScreen(
         )
         Button(onClick = startScan, modifier = Modifier.fillMaxWidth()) {
             Text("Scan to connect", style = MaterialTheme.typography.titleMedium)
+        }
+
+        if (nearby.isNotEmpty()) {
+            Text(
+                "NEARBY",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            nearby.forEach { h ->
+                NearbyHostRow(host = h, onConnect = { nearbyPin = ""; nearbyTarget = h })
+            }
         }
 
         if (visible.isNotEmpty()) {
@@ -653,6 +679,83 @@ fun ConnectScreen(
                 dismissButton = {
                     TextButton(onClick = { renaming = null }) { Text("Cancel") }
                 },
+            )
+        }
+
+        // PIN prompt for a Nearby host (no QR in this flow, so the PIN — shown
+        // on the host under "More details" — is typed instead).
+        nearbyTarget?.let { target ->
+            AlertDialog(
+                onDismissRequest = { nearbyTarget = null },
+                title = { Text("Connect to ${target.name}") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Enter the 4-digit PIN shown on the host (under “More details”).")
+                        OutlinedTextField(
+                            value = nearbyPin,
+                            onValueChange = { nearbyPin = it.filter { c -> c.isDigit() }.take(4) },
+                            label = { Text("PIN") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = nearbyPin.length == 4,
+                        onClick = {
+                            val enteredPin = nearbyPin.toIntOrNull() ?: 0
+                            nearbyTarget = null
+                            onPrepare(target.addr, enteredPin)
+                        },
+                    ) { Text("Connect") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { nearbyTarget = null }) { Text("Cancel") }
+                },
+            )
+        }
+    }
+}
+
+/** One Nearby host: same card look as a saved row, but discovery-fed — no
+ *  overflow menu (nothing to rename/forget; it vanishes when the host stops). */
+@Composable
+private fun NearbyHostRow(host: NearbyHost, onConnect: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .clickable(onClick = onConnect)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) { Text("📡", fontSize = 22.sp) }
+            Column(Modifier.weight(1f)) {
+                Text(host.name, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    host.addr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                "Connect",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
