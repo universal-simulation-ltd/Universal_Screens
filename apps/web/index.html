@@ -231,6 +231,16 @@
     </div>
     <div id="modes"></div>
 
+    <!-- Remote access across networks: the host publishes a code (its "Remote
+         access" panel dials the cloud rendezvous); enter it here to view/control
+         it from anywhere. Relayed through the cloud, so slower than LAN. -->
+    <div class="section-label">Remote (across networks)</div>
+    <div class="fields-row">
+      <div class="field"><label for="room-code">Host code</label><input id="room-code" placeholder="ABCD12" autocomplete="off" autocapitalize="characters" /></div>
+      <button type="button" id="room-connect" class="row-btn" style="margin:0; width:auto; align-self:end; padding:.6rem 1rem;">Connect</button>
+    </div>
+    <p style="font-size:.78rem; color:var(--muted); margin:.1rem .25rem 0;">Relayed through the cloud — expect more lag than a local connection.</p>
+
     <div id="connect-status"></div>
     <div class="footer">
       <button id="selftest" class="link-btn">Run decode self-test</button>

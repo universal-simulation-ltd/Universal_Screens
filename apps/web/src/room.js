@@ -65,6 +65,16 @@ export class RoomTransport {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(bytes);
   }
 
+  /**
+   * Send the first upstream message (once paired). Mirrors `Transport.sendHello`
+   * so the client treats a LAN bridge and a room the same way; `encode` is the
+   * WASM `protocol` object (injected — this file stays WASM-free for tests).
+   * `captureMode` is the u8 code; platform is fixed to 0 (browser).
+   */
+  sendHello(encode, { width, height, captureMode, pin }) {
+    this.send(encode.encode_hello(encode.protocol_version(), width, height, captureMode, 0, pin));
+  }
+
   get connected() {
     return this.ws?.readyState === WebSocket.OPEN;
   }

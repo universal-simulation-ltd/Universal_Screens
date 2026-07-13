@@ -119,6 +119,12 @@ struct HostApp {
     /// the dial-the-room bridge (shared with its background thread).
     cast_code: String,
     cast_status: Arc<Mutex<String>>,
+    /// "Remote access": a room code this host publishes for someone on another
+    /// network to reach it (the inverse of Cast — we mint the code and dial the
+    /// rendezvous as sender). Minted lazily; status shared with the dial thread.
+    remote_code: String,
+    remote_status: Arc<Mutex<String>>,
+    remote_active: bool,
     /// LAN peers discovered via UDP multicast beacon (PC → PC / PC → Mac).
     discovered_peers: Arc<Mutex<Vec<crate::discovery::DiscoveredPeer>>>,
     /// Stop flag for the always-on listener thread (set only when the app exits).
@@ -182,6 +188,9 @@ impl HostApp {
             firewall_ok: None,
             cast_code: String::new(),
             cast_status: Arc::new(Mutex::new(String::new())),
+            remote_code: String::new(),
+            remote_status: Arc::new(Mutex::new(String::new())),
+            remote_active: false,
             discovered_peers,
             listener_stop,
             own_ip,
@@ -561,6 +570,65 @@ impl HostApp {
                 ui.small("Start the host first, then cast.");
             }
             let status = self.cast_status.lock().unwrap().clone();
+            if !status.is_empty() {
+                ui.label(status);
+            }
+        });
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new("Remote access (other networks)").default_open(false).show(ui, |ui| {
+            ui.small(
+                "Let someone on a different network reach this PC. Share the code below; \
+                 they open opensource.unisim.co.uk/screens and enter it under \
+                 “Remote (across networks)”.",
+            );
+            ui.add_space(4.0);
+            ui.colored_label(BRAND, "⚠ Relayed through the cloud — slower than a local connection.");
+            ui.add_space(4.0);
+
+            if self.remote_active {
+                ui.horizontal(|ui| {
+                    ui.label("Your code:");
+                    ui.label(egui::RichText::new(&self.remote_code).heading().strong());
+                    if ui.small_button("Copy").clicked() {
+                        ui.ctx().copy_text(self.remote_code.clone());
+                    }
+                });
+            } else {
+                let can_start = self.running;
+                if ui.add_enabled(can_start, egui::Button::new("Enable remote access")).clicked() {
+                    // Mint a code and dial the rendezvous as sender on a thread —
+                    // dial_room blocks until the remote leaves; status via the Arc.
+                    let code = gen_room_code();
+                    self.remote_code = code.clone();
+                    self.remote_active = true;
+                    let port = self
+                        .address
+                        .as_deref()
+                        .and_then(|a| a.rsplit_once(':').map(|(_, p)| p.to_owned()))
+                        .unwrap_or_else(|| "9000".to_owned());
+                    let host_addr = format!("127.0.0.1:{port}");
+                    let remote_status = self.remote_status.clone();
+                    let ctx2 = ctx.clone();
+                    *remote_status.lock().unwrap() = "Waiting for the remote to connect…".to_owned();
+                    thread::spawn(move || {
+                        let res = extender_web_bridge::dial_room(
+                            extender_web_bridge::DEFAULT_ROOM_URL,
+                            &code,
+                            &host_addr,
+                        );
+                        *remote_status.lock().unwrap() = match res {
+                            Ok(()) => "Remote session ended.".to_owned(),
+                            Err(e) => format!("Remote access failed: {e}"),
+                        };
+                        ctx2.request_repaint();
+                    });
+                }
+                if !self.running {
+                    ui.small("Start the host first, then enable remote access.");
+                }
+            }
+            let status = self.remote_status.lock().unwrap().clone();
             if !status.is_empty() {
                 ui.label(status);
             }
@@ -956,6 +1024,18 @@ mod tests {
     }
 
     #[test]
+    fn gen_room_code_is_six_unambiguous_chars() {
+        const ALPHABET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        for _ in 0..200 {
+            let code = gen_room_code();
+            assert_eq!(code.chars().count(), 6, "code {code} not 6 chars");
+            for c in code.chars() {
+                assert!(ALPHABET.contains(c), "code {code} has ambiguous/invalid char {c}");
+            }
+        }
+    }
+
+    #[test]
     fn truncate_label_keeps_short_ellipsizes_long() {
         assert_eq!(truncate_label("DESKTOP-1", 16), "DESKTOP-1");
         assert_eq!(truncate_label("exactly-sixteen!", 16), "exactly-sixteen!");
@@ -1149,6 +1229,27 @@ fn gen_pin() -> u32 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
     1000 + (nanos % 9000)
+}
+
+/// A short room code for cross-network remote access. Six chars from an
+/// ambiguity-free alphabet (no 0/O, 1/I) so it's easy to read out over a call.
+/// Seeded from the clock — collisions are harmless (the rendezvous just pairs
+/// whoever shares a code), so no RNG dependency is pulled in.
+fn gen_room_code() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars, no 0/O/1/I
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0u64, |d| d.as_nanos() as u64)
+        ^ (std::process::id() as u64).rotate_left(17);
+    let mut code = String::with_capacity(6);
+    for _ in 0..6 {
+        // xorshift step — plenty for a non-secret, human-readable pairing code.
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        code.push(ALPHABET[(seed % 32) as usize] as char);
+    }
+    code
 }
 
 /// This machine's name (`COMPUTERNAME`), or a fallback.

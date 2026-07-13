@@ -4,10 +4,16 @@
 // with InputController forwarding mouse/keyboard/touch/gestures.
 import { ready, protocol } from "./wasm.js";
 import { Transport } from "./transport.js";
+import { RoomTransport } from "./room.js";
 import { H264Decoder } from "./decoder.js";
 import { CanvasRenderer } from "./renderer.js";
 import { InputController } from "./input.js";
 import * as saved from "./saved.js";
+
+// The cloud rendezvous that relays a host ↔ this browser across networks (M8).
+// Same origin the host dials (`crates/web-bridge` DEFAULT_ROOM_URL) and the
+// receiver page uses.
+const ROOM_BASE = "wss://opensource.unisim.co.uk";
 
 const $ = (id) => document.getElementById(id);
 
@@ -166,22 +172,68 @@ async function connect(addr, mode, targetHost = null) {
     // as the bridge address, which a retargeted ip:port is not. Nearby hosts
     // reappear live from discovery instead.
     if (!targetHost) saved.touch(addr, Date.now());
-    const dpr = window.devicePixelRatio || 1;
-    transport.sendHello({
-      width: Math.round(window.screen.width * dpr),
-      height: Math.round(window.screen.height * dpr),
-      captureMode: mode.capture,
-      pin: Number($("pin").value) || 0,
-    });
+    sendHelloAndAttach(mode);
     $("host-label").textContent = targetHost ?? addr;
-    input.setMode({ enabled: mode.input, pointerInput: mode.video && mode.input });
-    input.attach();
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
   };
   transport.onClose = () => { log("host disconnected", "dim"); disconnect(); };
   transport.onError = (e) => log(`error: ${e?.message ?? e} (is the bridge running?)`, "err");
   transport.onMessage = onMessage;
   transport.connect();
+}
+
+// Connect to a host across networks via the cloud rendezvous (M8). The remote
+// host publishes a room code (its "Remote access" panel dials the same room as
+// sender); the browser joins that code as receiver. The decode / render / input
+// pipeline downstream is identical to the LAN path.
+async function connectRoom(code, mode) {
+  const room = code.trim().toUpperCase();
+  if (!room) { status("Enter the code shown on the host first.", "err"); return; }
+  await ready();
+  activeMode = mode;
+  activeAddr = `remote:${room}`;
+
+  document.body.classList.add("in-session");
+  $("host-label").textContent = `Remote ${room} — connecting…`;
+  $("btn-lock").hidden = !(mode.video && mode.input);
+  $("video-hint").style.display = mode.video ? "none" : "flex";
+  $("video-hint").textContent = mode.video ? "" : "Clicker mode — no video. Use your keyboard (arrows / Page Up·Down, F5, Esc).";
+  $("log").innerHTML = "";
+
+  const canvas = $("screen");
+  renderer = new CanvasRenderer(canvas);
+  decoder = new H264Decoder((frame) => renderer.draw(frame), (e) => log(`decoder error: ${e}`, "err"));
+  transport = new RoomTransport(ROOM_BASE, room, (bytes) => protocol.decode_message(bytes));
+  input = new InputController(transport, renderer, canvas);
+
+  transport.onWaiting = () => { $("host-label").textContent = `Remote ${room} — waiting for the host…`; log("in the room — waiting for the host to come online", "dim"); };
+  transport.onPaired = () => {
+    sendHelloAndAttach(mode);
+    $("host-label").textContent = `Remote ${room}`;
+    log(`paired over the cloud relay — ${mode.label} (may be slower than LAN)`, "ok");
+  };
+  transport.onPeerLeft = () => { log("host left the room", "dim"); disconnect(); };
+  transport.onClose = () => { log("relay closed", "dim"); disconnect(); };
+  transport.onError = (e) => log(`relay error: ${e?.message ?? e}`, "err");
+  transport.onMessage = onMessage;
+  transport.connect();
+}
+
+// Send the ClientHello and start forwarding input — shared by the LAN and the
+// cross-network room path (both expose the same `sendHello`/`send` surface).
+function sendHelloAndAttach(mode) {
+  const dpr = window.devicePixelRatio || 1;
+  transport.sendHello(
+    protocol,
+    {
+      width: Math.round(window.screen.width * dpr),
+      height: Math.round(window.screen.height * dpr),
+      captureMode: mode.capture,
+      pin: Number($("pin").value) || 0,
+    },
+  );
+  input.setMode({ enabled: mode.input, pointerInput: mode.video && mode.input });
+  input.attach();
 }
 
 function onMessage(m) {
@@ -287,6 +339,15 @@ export function boot() {
     l.hidden = !open;
     t.classList.toggle("open", open);
   });
+  // Remote (across networks): connect by the host's room code, in Remote control.
+  const roomConnect = () => connectRoom($("room-code").value, MODES[0]);
+  $("room-connect").addEventListener("click", roomConnect);
+  $("room-code").addEventListener("keydown", (e) => { if (e.key === "Enter") roomConnect(); });
+  // A shared link (?remote=CODE or #remote=CODE) prefills the code.
+  const remoteParam = new URLSearchParams(location.search).get("remote")
+    ?? new URLSearchParams(location.hash.slice(1)).get("remote");
+  if (remoteParam) $("room-code").value = remoteParam.toUpperCase();
+
   $("btn-disconnect").addEventListener("click", disconnect);
   $("btn-fullscreen").addEventListener("click", () => {
     if (document.fullscreenElement) document.exitFullscreen?.();
