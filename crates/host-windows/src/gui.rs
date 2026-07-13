@@ -127,6 +127,9 @@ struct HostApp {
     own_ip: Arc<Mutex<Option<String>>>,
     /// Stop flag for the beacon sender (set in stop(), started fresh in start()).
     beacon_stop: Arc<AtomicBool>,
+    /// DNS-SD advertisement (`_usscreens._tcp`) so phones can browse for this
+    /// host — registered while serving, withdrawn in stop()/on_exit().
+    mdns_ad: Option<crate::discovery::MdnsAd>,
     /// The connection QR the user tapped to enlarge for easier scanning (None =
     /// not enlarged). `qr_zoom_armed` guards against the very click that opened
     /// the overlay also closing it on the same frame.
@@ -183,6 +186,7 @@ impl HostApp {
             listener_stop,
             own_ip,
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
+            mdns_ad: None,
             qr_zoom: None,
             qr_zoom_armed: false,
         }
@@ -313,11 +317,17 @@ impl HostApp {
         let beacon_stop = Arc::new(AtomicBool::new(false));
         self.beacon_stop = beacon_stop.clone();
         crate::discovery::start_beacon(host_name(), port, beacon_stop);
+        // And advertise over DNS-SD so the phone apps' host browsers (Android
+        // NSD / iOS Bonjour) list this PC under their own "Nearby".
+        self.mdns_ad = crate::discovery::advertise_mdns(&host_name(), port).ok();
     }
 
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         self.beacon_stop.store(true, Ordering::Relaxed);
+        if let Some(ad) = self.mdns_ad.take() {
+            ad.shutdown();
+        }
         *self.own_ip.lock().unwrap() = None;
         self.running = false;
         self.address = None;
@@ -762,6 +772,11 @@ impl eframe::App for HostApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.listener_stop.store(true, Ordering::Relaxed);
         self.beacon_stop.store(true, Ordering::Relaxed);
+        // Withdraw the DNS-SD advertisement so browsers drop us straight away
+        // instead of waiting out the record TTL.
+        if let Some(ad) = self.mdns_ad.take() {
+            ad.shutdown();
+        }
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
