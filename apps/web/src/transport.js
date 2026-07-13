@@ -34,10 +34,12 @@ export class Transport {
     };
   }
 
-  /// Send the first upstream message. `captureMode` is the u8 code
-  /// (0 extend / 1 mirror / 2 control-only); platform is fixed to 0 (browser).
-  sendHello({ width, height, captureMode, pin }) {
-    this.send(protocol.encode_hello(protocol.protocol_version(), width, height, captureMode, 0, pin));
+  /// Send the first upstream message. `encode` is the WASM `protocol` object
+  /// (kept as a parameter so this shares a signature with `RoomTransport`).
+  /// `captureMode` is the u8 code (0 extend / 1 mirror / 2 control-only);
+  /// platform is fixed to 0 (browser).
+  sendHello(encode, { width, height, captureMode, pin }) {
+    this.send(encode.encode_hello(encode.protocol_version(), width, height, captureMode, 0, pin));
   }
 
   /// Forward raw encoded `Input` bytes (from a `protocol.encode_*` call).
