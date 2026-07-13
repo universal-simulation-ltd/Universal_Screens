@@ -1,5 +1,99 @@
+import Network
 import SwiftUI
 import UIKit
+
+// MARK: - Nearby (Bonjour host browsing)
+
+/// A serving desktop host discovered over Bonjour. `addr` is `ip:port`, ready
+/// for the connect flow.
+struct NearbyHost: Identifiable, Equatable {
+    let id: String // Bonjour service (instance) name
+    let name: String
+    let addr: String
+}
+
+/// Browses for serving desktop hosts. They advertise `_usscreens._tcp` over
+/// DNS-SD while serving (the shared `extender-discovery` crate) — Bonjour
+/// browsing needs no special entitlement, unlike joining a raw multicast group
+/// (which is why iOS discovery is DNS-SD, not the hosts' custom UDP beacon).
+///
+/// `NWBrowser` finds the service instances; each is resolved to `ip:port` with
+/// `NetService` — SRV/A queries over mDNS only, so the host's single-client
+/// accept loop is never touched by a probe connection. (`NetService` is
+/// deprecated in favour of `NWConnection`, but `NWConnection` *connects* to
+/// resolve; the query-only path is exactly what we want here.) The service
+/// type is declared in Info.plist under `NSBonjourServices`.
+final class NearbyBrowser: NSObject, ObservableObject, NetServiceDelegate {
+    @Published var hosts: [NearbyHost] = []
+
+    private var browser: NWBrowser?
+    private var resolving: [String: NetService] = [:] // service name → in-flight
+
+    func start() {
+        guard browser == nil else { return }
+        let b = NWBrowser(for: .bonjour(type: "_usscreens._tcp", domain: nil), using: .tcp)
+        b.browseResultsChangedHandler = { [weak self] results, _ in
+            DispatchQueue.main.async { self?.sync(results) }
+        }
+        b.start(queue: .main)
+        browser = b
+    }
+
+    func stop() {
+        browser?.cancel()
+        browser = nil
+        for svc in resolving.values { svc.stop() }
+        resolving.removeAll()
+        hosts.removeAll()
+    }
+
+    /// Reconcile the browse results: resolve new services, drop vanished ones
+    /// (a host that stops serving withdraws its advertisement).
+    private func sync(_ results: Set<NWBrowser.Result>) {
+        var present = Set<String>()
+        for result in results {
+            guard case let .service(name, type, domain, _) = result.endpoint else { continue }
+            present.insert(name)
+            if hosts.contains(where: { $0.id == name }) || resolving[name] != nil { continue }
+            let svc = NetService(domain: domain, type: type, name: name)
+            svc.delegate = self
+            resolving[name] = svc
+            svc.resolve(withTimeout: 5)
+        }
+        hosts.removeAll { !present.contains($0.id) }
+        for (name, svc) in resolving where !present.contains(name) {
+            svc.stop()
+            resolving[name] = nil
+        }
+    }
+
+    func netServiceDidResolveAddress(_ sender: NetService) {
+        resolving[sender.name] = nil
+        guard sender.port > 0, let addresses = sender.addresses else { return }
+        // Prefer an IPv4 address (the desktop hosts serve on their v4 LAN IP).
+        for data in addresses {
+            let ip: String? = data.withUnsafeBytes { raw -> String? in
+                guard let base = raw.baseAddress,
+                      base.assumingMemoryBound(to: sockaddr.self).pointee.sa_family == sa_family_t(AF_INET)
+                else { return nil }
+                var sin = base.assumingMemoryBound(to: sockaddr_in.self).pointee
+                var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                inet_ntop(AF_INET, &sin.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN))
+                return String(cString: buf)
+            }
+            if let ip {
+                let host = NearbyHost(id: sender.name, name: sender.name, addr: "\(ip):\(sender.port)")
+                hosts.removeAll { $0.id == sender.name }
+                hosts.append(host)
+                return
+            }
+        }
+    }
+
+    func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+        resolving[sender.name] = nil
+    }
+}
 
 /// Home screen: scan to connect, or pick a saved host. A centred hero (logo +
 /// primary action) mirrors the Android client, with saved hosts as cards below.
@@ -25,6 +119,12 @@ struct ConnectView: View {
     // Saved-host rename: the host being renamed (drives the alert) + the draft.
     @State private var renameTarget: SavedConnection?
     @State private var renameDraft = ""
+    // Nearby hosts, browsed over Bonjour while this screen is visible. Tapping
+    // one asks for the host's PIN (the QR normally carries it; there's no QR in
+    // this flow), then goes to the usual mode picker.
+    @StateObject private var nearby = NearbyBrowser()
+    @State private var nearbyTarget: NearbyHost?
+    @State private var nearbyPin = ""
 
     private var visible: [SavedConnection] {
         saved.filter { showHidden || !$0.hidden }.sorted { $0.lastConnected > $1.lastConnected }
@@ -35,6 +135,7 @@ struct ConnectView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     hero
+                    if !nearby.hosts.isEmpty { nearbyHosts }
                     if !visible.isEmpty { savedHosts }
                     if saved.contains(where: \.hidden) {
                         Button(showHidden ? "Hide hidden hosts" : "Show hidden hosts") {
@@ -55,7 +156,29 @@ struct ConnectView: View {
             }
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .onAppear { saved = ConnectionStore.load() }
+        .onAppear {
+            saved = ConnectionStore.load()
+            nearby.start()
+        }
+        .onDisappear { nearby.stop() }
+        // PIN prompt for a Nearby host (no QR in this flow, so the PIN — shown
+        // on the host under "More details" — is typed instead).
+        .alert("Connect to \(nearbyTarget?.name ?? "host")", isPresented: Binding(
+            get: { nearbyTarget != nil },
+            set: { if !$0 { nearbyTarget = nil } }
+        )) {
+            TextField("PIN", text: $nearbyPin)
+                .keyboardType(.numberPad)
+            Button("Connect") {
+                if let t = nearbyTarget {
+                    onPrepare(t.addr, Int(nearbyPin.filter(\.isNumber).prefix(4)) ?? 0)
+                }
+                nearbyTarget = nil
+            }
+            Button("Cancel", role: .cancel) { nearbyTarget = nil }
+        } message: {
+            Text("Enter the 4-digit PIN shown on the host (under “More details”).")
+        }
         .alert("Rename host", isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
@@ -117,6 +240,51 @@ struct ConnectView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
+    }
+
+    // MARK: - Nearby hosts
+
+    private var nearbyHosts: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("NEARBY")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+            VStack(spacing: 10) {
+                ForEach(nearby.hosts) { host in nearbyRow(host) }
+            }
+        }
+    }
+
+    /// One Nearby host: same card look as a saved row, but discovery-fed — no
+    /// overflow menu (nothing to rename/forget; it vanishes when the host stops).
+    private func nearbyRow(_ host: NearbyHost) -> some View {
+        Button {
+            nearbyPin = ""
+            nearbyTarget = host
+        } label: {
+            HStack(spacing: 14) {
+                Text("📡")
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .background(Color.brandOrange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(host.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(host.addr)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Text("Connect")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.brandOrange)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Saved hosts
