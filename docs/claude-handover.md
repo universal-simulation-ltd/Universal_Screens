@@ -4,6 +4,38 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-13 (desktop hosts: click the connection QR to enlarge it for scanning)
+
+Small UX win on both GUI host apps (**Windows** `host-windows/src/gui.rs` + **macOS**
+`host-macos/src/gui.rs`). The connection QR shown in the "Scan to connect" panel is
+now **clickable** — tapping it pops the QR up as large as the window allows, centred
+over a dimmed backdrop, so a phone can scan it from further back. A click anywhere
+(or Escape) closes it.
+
+- **New state** on `HostApp`: `qr_zoom: Option<egui::TextureId>` (the enlarged QR, or
+  `None`) + `qr_zoom_armed: bool`. The `armed` flag skips the frame that *opened* the
+  overlay, so the same click that opened it isn't also read as the closing click.
+- **Windows** — the QR is drawn via a free `qr_clickable(ui, tex, size) -> bool`
+  helper (a free fn, not a method, because the two combined/Wi-Fi QR sites render
+  while `self.wifi` is borrowed — a `&mut self` method there is a borrow-conflict).
+  Clicks are recorded into a `zoom_clicked` local and applied to `self.qr_zoom` after
+  that borrow ends. All three QR render sites (combined+Wi-Fi, Wi-Fi-join, combined
+  no-Wi-Fi) are clickable.
+- **macOS** — the single QR site isn't inside the `wifi` borrow, so it uses a
+  `qr_image(&mut self, …)` method directly. One render site.
+- **The overlay** (`show_qr_overlay`, called last in `update()` so it's above all
+  panels) is an `Area` at `Order::Foreground`, anchored centre. **Landmine fixed:** a
+  *separate* Foreground backdrop layer can sort *above* the Area (the QR ended up
+  behind the dim). Fix: dim the whole window by painting on the **Area's own layer**
+  (`ui.ctx().layer_painter(ui.layer_id())`) *before* the card, so same-layer draw
+  order puts the QR on top.
+- **Verify:** `cargo build -p extender-host-windows` green (only the pre-existing
+  `scaled` warning in `stream.rs`); ran the host and confirmed click-to-enlarge +
+  correct layering + click/Esc to dismiss. **macOS not compiled here** (no macOS
+  toolchain — `cargo check` bails on `core_graphics`/`screencapturekit` etc., not on
+  `gui.rs`); it mirrors the Windows path and needs a `cargo build -p
+  extender-host-macos` on a Mac to confirm.
+
 ## Update — 2026-07-13 (LAN discovery: shared crate + Windows host parity with macOS)
 
 Started the backlog's "discovery mode across all apps" item by making the LAN

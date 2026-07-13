@@ -81,6 +81,11 @@ struct HostApp {
     /// the dial-the-room bridge (shared with its background thread).
     cast_code: String,
     cast_status: Arc<Mutex<String>>,
+    /// The connection QR the user tapped to enlarge for easier scanning (None =
+    /// not enlarged). `qr_zoom_armed` guards against the very click that opened
+    /// the overlay also closing it on the same frame.
+    qr_zoom: Option<egui::TextureId>,
+    qr_zoom_armed: bool,
 }
 
 impl HostApp {
@@ -131,6 +136,83 @@ impl HostApp {
             renaming_peer: None,
             cast_code: String::new(),
             cast_status: Arc::new(Mutex::new(String::new())),
+            qr_zoom: None,
+            qr_zoom_armed: false,
+        }
+    }
+
+    /// Render the connection QR at `size`, clickable to pop it up full-window for
+    /// easier scanning (the phone can be held further back). TextureId is `Copy`,
+    /// so callers pass the id and avoid borrowing `self.combined_qr` across this
+    /// `&mut self` call.
+    fn qr_image(&mut self, ui: &mut egui::Ui, tex: egui::TextureId, size: f32) {
+        let resp = ui
+            .add(
+                egui::Image::from_texture(egui::load::SizedTexture::new(
+                    tex,
+                    egui::vec2(size, size),
+                ))
+                .rounding(14.0),
+            )
+            .interact(egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Click to enlarge for scanning");
+        if resp.clicked() {
+            self.qr_zoom = Some(tex);
+            self.qr_zoom_armed = false;
+        }
+    }
+
+    /// The enlarged-QR overlay: a dimmed backdrop with the tapped QR blown up as
+    /// large as the window allows, centred, so it's easy to scan from a distance.
+    /// A click anywhere (or Escape) closes it.
+    fn show_qr_overlay(&mut self, ctx: &egui::Context) {
+        let Some(tex) = self.qr_zoom else { return };
+        let screen = ctx.screen_rect();
+        // As big as fits (leaving a margin), clamped so it never gets silly.
+        let side = (screen.width().min(screen.height()) - 72.0).clamp(220.0, 560.0);
+        egui::Area::new(egui::Id::new("qr_zoom_area"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                // Dim the whole window on *this* layer first, so the card below is
+                // drawn on top of it (same-layer z-order follows draw order — a
+                // separate backdrop layer can sort above the Area instead).
+                ui.ctx()
+                    .layer_painter(ui.layer_id())
+                    .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(210));
+
+                egui::Frame::none()
+                    .fill(egui::Color32::WHITE)
+                    .rounding(18.0)
+                    .inner_margin(egui::Margin::same(16.0))
+                    .show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add(
+                                egui::Image::from_texture(egui::load::SizedTexture::new(
+                                    tex,
+                                    egui::vec2(side, side),
+                                ))
+                                .rounding(12.0),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("Tap anywhere to close")
+                                    .color(egui::Color32::from_gray(110))
+                                    .size(13.0),
+                            );
+                        });
+                    });
+            });
+
+        if !self.qr_zoom_armed {
+            // Skip the frame that opened it, so the opening click isn't also read
+            // as the closing click.
+            self.qr_zoom_armed = true;
+            return;
+        }
+        if ctx.input(|i| i.pointer.any_click() || i.key_pressed(egui::Key::Escape)) {
+            self.qr_zoom = None;
         }
     }
 
@@ -252,14 +334,8 @@ impl HostApp {
                     }
                 }
             }
-            if let Some(qr) = &self.combined_qr {
-                ui.add(
-                    egui::Image::from_texture(egui::load::SizedTexture::new(
-                        qr.id(),
-                        egui::vec2(200.0, 200.0),
-                    ))
-                    .rounding(14.0),
-                );
+            if let Some(id) = self.combined_qr.as_ref().map(egui::TextureHandle::id) {
+                self.qr_image(ui, id, 200.0);
             }
         } else if !self.running {
             if ui
@@ -826,6 +902,9 @@ impl eframe::App for HostApp {
                 self.show_virtual_displays(ui);
             });
         });
+
+        // Draw the enlarged-QR overlay last so it sits above the whole window.
+        self.show_qr_overlay(ctx);
     }
 }
 
