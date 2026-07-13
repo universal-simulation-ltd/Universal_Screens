@@ -4,6 +4,49 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-13 (discovery finished: mobile + web browsing, orbit graphic, cross-network Remote access)
+
+Closed out the rest of the backlog's "discovery mode across all apps" item — the
+mobile/web host-browsing, the orbit graphic, and the separate cross-network item —
+in six merged PRs (#41–#46; all squash-merged, branches deleted, `main` clean).
+
+- **#41 — hosts advertise DNS-SD (`_usscreens._tcp`).** The custom UDP beacon can't
+  reach phones (iOS can't join a raw multicast group without a restricted Apple
+  entitlement), so a serving host now *also* registers a standard mDNS service via
+  `mdns-sd`. `crates/discovery`: `advertise_mdns(name, port) -> MdnsAd` (withdraws on
+  `shutdown()`), `MDNS_SERVICE_TYPE`; live advertise→browse test. Both hosts register
+  in `start()`, withdraw in `stop()`/`on_exit()` (macOS host gained the `on_exit` it
+  was missing).
+- **#42 — web client Nearby via the bridge.** A tab can't multicast, so
+  `crates/web-bridge` browses DNS-SD (`start_mdns_browser`) and serves `GET /peers`
+  (JSON, CORS-open); the WS upgrade honours `?host=ip:port` to retarget the proxy at a
+  *discovered* host (undiscovered → refused). `apps/web` renders a portal-style
+  **Nearby orbit** (this device centred, hosts orbiting), polling `/peers`. New
+  `peers_endpoint` integration test runs the whole chain.
+- **#43 — Android NSD.** `NearbyDiscovery.kt` (`NsdManager` browse + serial resolve
+  queue) → a NEARBY section on the connect screen; tap → PIN prompt → mode picker.
+  `assembleDebug` green.
+- **#44 — iOS Bonjour.** `NearbyBrowser` in `ConnectView.swift` (`NWBrowser` +
+  `NetService` resolve, query-only); same NEARBY section + PIN prompt; `_usscreens._tcp`
+  added to `NSBonjourServices`. **Reviewed-not-compiled** (no Mac here).
+- **#45 — orbit graphic on both desktop hosts.** The plain Nearby list became
+  `nearby_orbit` (egui `Painter`): this machine centred (glyph + pulsing glow + dashed
+  ring), each peer a node circling it, pausing on hover so it's clickable. **Ran the
+  Windows host + screenshotted** with seeded peers to confirm. macOS mirror identical,
+  reviewed-not-compiled.
+- **#46 — cross-network Remote access.** Packages the M8 rendezvous as a first-class
+  feature. Host "Remote access" panel: *Enable* mints a 6-char code (`gen_room_code`)
+  and dials the room as **sender** (`dial_room`); web client "Remote (across networks)"
+  joins by code as **receiver** (`RoomTransport`) to view/control, with a slower-than-LAN
+  warning. Inverse of "cast to a browser". Web section eyeballed via headless Chrome.
+
+**Verify:** `cargo test -p extender-discovery -p extender-web-bridge` green (incl. the
+live mDNS + `/peers` end-to-end tests); `extender-host-windows` 24 tests; Android
+`assembleDebug` green. **Left (all hardware-gated):** recompile the macOS host on a
+Mac; two-machine LAN test; a phone browsing a real host; a real two-network Remote
+session. Suite changelog `2026.07.13.7`. Doc: `docs/M9-lan-discovery.md` rewritten to
+cover all three transports.
+
 ## Update — 2026-07-13 (desktop hosts: click the connection QR to enlarge it for scanning)
 
 Small UX win on both GUI host apps (**Windows** `host-windows/src/gui.rs` + **macOS**
