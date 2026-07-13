@@ -4,8 +4,10 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
-# Platform-agnostic LAN peer discovery (UDP multicast beacon + listener). No UI,
-# no platform APIs — pure std — so every host (Windows, macOS, …) shares one
-# implementation and one wire format. Each host wraps it with a thin adapter that
-# turns the `on_change` callback into a UI repaint. See docs/M9-lan-discovery.md.
+# Platform-agnostic LAN peer discovery. No UI, no platform APIs, so every host
+# (Windows, macOS, …) shares one implementation and one wire format. Two halves:
+#  • the custom UDP multicast beacon + listener (host ↔ host "Nearby"), pure std;
+#  • a standard DNS-SD/mDNS advertisement (mdns-sd) so the phone apps can browse
+#    for hosts via Android NSD / iOS Bonjour. See docs/M9-lan-discovery.md.
 [dependencies]
+mdns-sd = "0.20.1"

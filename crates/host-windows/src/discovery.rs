@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-pub use extender_discovery::{start_beacon, DiscoveredPeer};
+pub use extender_discovery::{advertise_mdns, start_beacon, DiscoveredPeer, MdnsAd};
 
 /// Start the shared LAN listener, repainting the egui frame whenever the peer
 /// set changes.

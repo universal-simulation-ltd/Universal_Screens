@@ -67,6 +67,9 @@ struct HostApp {
     own_ip: Arc<Mutex<Option<String>>>,
     /// Stop flag for the beacon sender (set in stop(), started fresh in start()).
     beacon_stop: Arc<AtomicBool>,
+    /// DNS-SD advertisement (`_usscreens._tcp`) so phones can browse for this
+    /// host — registered while serving, withdrawn in stop()/on_exit().
+    mdns_ad: Option<crate::discovery::MdnsAd>,
     /// Virtual displays created for second-screen sessions — listed in the GUI so
     /// the user can rename / remove them. Shared with the serve loop.
     vdisplays: Arc<Mutex<crate::host::VDisplays>>,
@@ -130,6 +133,7 @@ impl HostApp {
             listener_stop,
             own_ip,
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
+            mdns_ad: None,
             vdisplays: Arc::new(Mutex::new(crate::host::VDisplays::default())),
             rename_draft: String::new(),
             renaming_id: None,
@@ -296,11 +300,17 @@ impl HostApp {
         let beacon_stop = Arc::new(AtomicBool::new(false));
         self.beacon_stop = beacon_stop.clone();
         crate::discovery::start_beacon(crate::host_name(), port, beacon_stop);
+        // And advertise over DNS-SD so the phone apps' host browsers (Android
+        // NSD / iOS Bonjour) list this Mac under their own "Nearby".
+        self.mdns_ad = crate::discovery::advertise_mdns(&crate::host_name(), port).ok();
     }
 
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         self.beacon_stop.store(true, Ordering::Relaxed);
+        if let Some(ad) = self.mdns_ad.take() {
+            ad.shutdown();
+        }
         *self.own_ip.lock().unwrap() = None;
         self.running = false;
         self.address = None;
@@ -777,6 +787,17 @@ impl eframe::App for HostApp {
 
     fn persist_egui_memory(&self) -> bool {
         false
+    }
+
+    // Stop the background discovery threads and withdraw the DNS-SD
+    // advertisement on a clean exit, so browsers drop us straight away instead
+    // of waiting out the record TTL. (Mirrors the Windows host.)
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.listener_stop.store(true, Ordering::Relaxed);
+        self.beacon_stop.store(true, Ordering::Relaxed);
+        if let Some(ad) = self.mdns_ad.take() {
+            ad.shutdown();
+        }
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
