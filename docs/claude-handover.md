@@ -4,6 +4,44 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-07-13 (LAN discovery: shared crate + Windows host parity with macOS)
+
+Started the backlog's "discovery mode across all apps" item by making the LAN
+peer-discovery that already existed **only in the macOS host** a shared,
+cross-platform foundation and wiring it into the **Windows host**.
+
+- **New crate `crates/discovery` (`extender-discovery`).** The UDP multicast
+  beacon + listener + wire format (`USSCREENS\t{port}\t{name}` on `224.0.0.251:9001`,
+  2s beacon, 6s TTL) lifted out of `host-macos/src/discovery.rs` into a pure-`std`,
+  UI-agnostic crate. It reports peer-set changes through an `on_change: Fn()`
+  callback instead of poking egui, so any host can wrap it. Beacon/parse unit tests
+  moved with it (3 tests, green).
+- **macOS host** — `host-macos/src/discovery.rs` is now a thin egui adapter that
+  delegates to `extender-discovery`, bridging `on_change` → `ctx.request_repaint()`.
+  `gui.rs` is byte-identical (same `crate::discovery::{DiscoveredPeer, start_listener,
+  start_beacon}` API). **Not recompiled here (no macOS toolchain)** — needs a
+  `cargo build -p extender-host-macos` on a Mac to confirm, but it's a mechanical
+  delegation mirroring the Windows adapter, which does compile.
+- **Windows host** — added the same adapter (`host-windows/src/discovery.rs`,
+  `mod discovery;`) and wired it into `gui.rs` exactly like macOS: an always-on
+  listener started in `new()`, the beacon started/stopped alongside serving in
+  `start()`/`stop()`, an `on_exit` that stops both threads, and a **"Nearby"**
+  section (device icon · `name · ip:port` · **Connect**) rendered above *More
+  details*. Connect opens the deep-link `connect_url` via `ctx.open_url`.
+  `cargo build -p extender-host-windows` green (only the pre-existing `scaled`
+  warning in `stream.rs`); host + discovery tests pass (22 + 3).
+
+**Left / next (rest of the backlog item):**
+- **Recompile + verify the macOS host** on a Mac, then verify discovery end-to-end
+  with a Windows host + macOS host on the same LAN (two-machine test).
+- **Mobile + web discovery UI** — the phones/web client don't yet browse for hosts
+  (Android could use NSD/`_usscreens._udp`, iOS Bonjour/`NWBrowser`, web can't do raw
+  multicast so it'd need the host to expose a list). Plus the "orbit graphic"
+  (current device centre, peers orbiting, like the portal) is still to design.
+- **Cross-network ("remote across two networks")** — separate item; needs the cloud
+  rendezvous/relay (the existing "cast to a browser" dial-the-room bridge is the
+  natural basis).
+
 ## Update — 2026-07-10 (mobile connect-screen UX — reorder modes, hide cast, device-name saved rows)
 
 Three related UX fixes on the phone clients (Android Compose + iOS SwiftUI, at

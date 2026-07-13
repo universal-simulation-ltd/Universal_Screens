@@ -10,6 +10,9 @@ path = "src/main.rs"
 
 [dependencies]
 extender-protocol.workspace = true
+# Shared LAN peer discovery (UDP multicast beacon/listener) — same crate the
+# Windows host uses, wrapped by a thin egui adapter in src/discovery.rs.
+extender-discovery.workspace = true
 # "Cast to a browser": dial the cloud rendezvous + bridge to our own listener.
 extender-web-bridge.workspace = true
 serde = { version = "1", features = ["derive"] }

@@ -1244,6 +1244,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "extender-discovery"
+version = "0.1.0"
+
+[[package]]
 name = "extender-host"
 version = "0.1.0"
 dependencies = [
@@ -1267,6 +1271,7 @@ dependencies = [
  "cc",
  "core-graphics",
  "eframe",
+ "extender-discovery",
  "extender-protocol",
  "extender-web-bridge",
  "image",
@@ -1281,6 +1286,7 @@ name = "extender-host-windows"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "extender-discovery",
  "extender-protocol",
  "extender-web-bridge",
  "image",

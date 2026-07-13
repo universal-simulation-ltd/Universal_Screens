@@ -35,6 +35,7 @@ const OPENSOURCE_URL: &str = "https://opensource.unisim.co.uk/screens";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Short "what's new", newest first, shown under the UNI·SIM mark.
 const CHANGELOG: &[&str] = &[
+    "• LAN discovery — nearby hosts appear automatically",
     "• Universal navbar: apps, actions & profile menus",
     "• Pairing PIN embedded in the connection QR",
     "• Title bar & light bar follow the app theme",
@@ -118,6 +119,14 @@ struct HostApp {
     /// the dial-the-room bridge (shared with its background thread).
     cast_code: String,
     cast_status: Arc<Mutex<String>>,
+    /// LAN peers discovered via UDP multicast beacon (PC → PC / PC → Mac).
+    discovered_peers: Arc<Mutex<Vec<crate::discovery::DiscoveredPeer>>>,
+    /// Stop flag for the always-on listener thread (set only when the app exits).
+    listener_stop: Arc<AtomicBool>,
+    /// Our own LAN IP, shared with the listener so it can filter out our beacon.
+    own_ip: Arc<Mutex<Option<String>>>,
+    /// Stop flag for the beacon sender (set in stop(), started fresh in start()).
+    beacon_stop: Arc<AtomicBool>,
 }
 
 impl HostApp {
@@ -130,6 +139,17 @@ impl HostApp {
         if pin == 0 {
             pin = gen_pin();
         }
+        // Always-on LAN listener: nearby hosts appear even before this PC starts
+        // serving, so a PC → PC / PC → Mac connection needs no QR scan.
+        let discovered_peers = Arc::new(Mutex::new(Vec::new()));
+        let listener_stop = Arc::new(AtomicBool::new(false));
+        let own_ip: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        crate::discovery::start_listener(
+            discovered_peers.clone(),
+            listener_stop.clone(),
+            cc.egui_ctx.clone(),
+            own_ip.clone(),
+        );
         Self {
             pin,
             show_pc_info: false,
@@ -154,6 +174,10 @@ impl HostApp {
             firewall_ok: None,
             cast_code: String::new(),
             cast_status: Arc::new(Mutex::new(String::new())),
+            discovered_peers,
+            listener_stop,
+            own_ip,
+            beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
         }
     }
 
@@ -221,10 +245,20 @@ impl HostApp {
         self.combined_qr = None;
         self.firewall_ok = Some(crate::firewall::rule_present(port));
         self.running = true;
+
+        // Tell the listener our own IP so it can ignore our own beacons, then
+        // start broadcasting so other hosts on the LAN can find this PC.
+        *self.own_ip.lock().unwrap() = Some(ip.clone());
+        self.beacon_stop.store(true, Ordering::Relaxed);
+        let beacon_stop = Arc::new(AtomicBool::new(false));
+        self.beacon_stop = beacon_stop.clone();
+        crate::discovery::start_beacon(host_name(), port, beacon_stop);
     }
 
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        self.beacon_stop.store(true, Ordering::Relaxed);
+        *self.own_ip.lock().unwrap() = None;
         self.running = false;
         self.address = None;
         self.combined_qr = None;
@@ -334,6 +368,26 @@ impl HostApp {
                 ui.small("In the app, tap Scan and point it here — make sure your phone is already on the same network.");
             } else {
                 ui.small("This PC isn't on Wi-Fi — put your phone on the same network, then use the address in More details.");
+            }
+        }
+
+        // Nearby — other Universal Screens hosts discovered on the LAN via UDP
+        // multicast. Primary use case: PC → PC / PC → Mac (no camera to scan a QR).
+        let nearby = self.discovered_peers.lock().unwrap().clone();
+        if !nearby.is_empty() {
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Nearby").strong());
+            for peer in &nearby {
+                ui.horizontal(|ui| {
+                    device_icon(ui, DeviceKind::Other, 16.0);
+                    ui.label(format!("{} · {}:{}", peer.name, peer.addr, peer.port));
+                    if ui.small_button("Connect").clicked() {
+                        let url = connect_url(&format!("{}:{}", peer.addr, peer.port), 0, None);
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                    }
+                });
             }
         }
 
@@ -643,6 +697,13 @@ impl eframe::App for HostApp {
     // pastel visuals); we still persist our own values via `save`.
     fn persist_egui_memory(&self) -> bool {
         false
+    }
+
+    // Stop the background LAN discovery threads on a clean exit (the beacon is
+    // already stopped when serving stops; the listener runs for the whole app).
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.listener_stop.store(true, Ordering::Relaxed);
+        self.beacon_stop.store(true, Ordering::Relaxed);
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
