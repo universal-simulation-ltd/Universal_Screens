@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/protocol",
     "crates/core",
+    "crates/discovery",
     "crates/host",
     "crates/host-windows",
     "crates/host-macos",
@@ -21,4 +22,5 @@ license = "MIT"
 [workspace.dependencies]
 extender-protocol = { path = "crates/protocol" }
 extender-core = { path = "crates/core" }
+extender-discovery = { path = "crates/discovery" }
 extender-web-bridge = { path = "crates/web-bridge" }

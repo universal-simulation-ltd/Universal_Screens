@@ -6,6 +6,7 @@
 //! Run: cargo run -p extender-host-windows [-- BIND_ADDR]   (default 0.0.0.0:9000)
 //! Windows-only (uses Win32 `SendInput`); will not compile on other platforms.
 
+mod discovery;
 mod firewall;
 mod gui;
 mod qr;

@@ -1,0 +1,11 @@
+[package]
+name = "extender-discovery"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# Platform-agnostic LAN peer discovery (UDP multicast beacon + listener). No UI,
+# no platform APIs — pure std — so every host (Windows, macOS, …) shares one
+# implementation and one wire format. Each host wraps it with a thin adapter that
+# turns the `on_change` callback into a UI repaint. See docs/M9-lan-discovery.md.
+[dependencies]
