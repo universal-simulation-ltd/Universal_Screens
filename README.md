@@ -90,6 +90,24 @@ macOS host streams to the desktop client for the same modes (the original path).
 
 ## Security
 
-Connections are **PIN-gated but unencrypted** (plaintext over the LAN). Use on
-trusted networks; the in-app/host security note spells out what is and isn't
-protected. The PIN is a gate, not encryption.
+Native connections are **PIN-gated and transport-encrypted**. Right after the TCP
+connect, the client and host run a **Noise** handshake
+(`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s`, via the `snow` crate) keyed by the
+pairing PIN, and every `postcard` frame after it — the `ClientHello`, injected
+keystrokes/text, and the mirror video — travels inside that tunnel. See
+[`crates/transport`](crates/transport/src/lib.rs) and
+[docs/M10-transport-encryption.md](docs/M10-transport-encryption.md).
+
+- **Confidentiality + forward secrecy:** the ephemeral-ephemeral DH means a passive
+  eavesdropper on the LAN learns nothing, even if the PIN later leaks.
+- **PIN-bound MITM resistance:** the PIN is the Noise pre-shared key, so an on-path
+  attacker can't complete (or silently relay) the handshake without it. The PIN is
+  now *encryption*, not just a gate. The existing plaintext-`ClientHello` PIN check
+  is kept unchanged inside the tunnel.
+
+The host auto-detects the peer: an encrypting native client is required to speak
+Noise, while the loopback WebSocket **browser bridge** (`crates/web-bridge`, which
+can't speak Noise on a browser's behalf) is still accepted as plaintext and logged.
+The **browser client** leg is therefore not yet end-to-end encrypted (it relies on
+`wss://` to the cloud rendezvous); requiring encryption from every non-loopback peer
+is a follow-up once every client has shipped this build.

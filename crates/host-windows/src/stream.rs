@@ -6,12 +6,12 @@
 //! the existing desktop/mobile clients decode it unchanged.
 
 use std::io::{BufWriter, Write};
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use extender_protocol::{self as protocol, Codec, Message};
+use extender_transport::Conn;
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, Profile,
     RateControlMode, UsageType,
@@ -36,7 +36,7 @@ const BITRATE_BPS: u32 = 12_000_000;
 /// client disconnects. `extend` streams a secondary/virtual monitor (the phone as
 /// an extra display) instead of mirroring the primary. Best-effort: logs/returns
 /// on any error.
-pub(crate) fn run(stream: TcpStream, stop: &AtomicBool, extend: bool) {
+pub(crate) fn run(stream: Conn, stop: &AtomicBool, extend: bool) {
     if let Err(e) = run_inner(stream, stop, extend) {
         eprintln!("screen stream ended: {e}");
     }
@@ -68,7 +68,7 @@ fn capture(region: Option<(i32, i32, i32, i32)>) -> Option<(u32, u32, Vec<u8>)> 
 }
 
 fn run_inner(
-    stream: TcpStream,
+    stream: Conn,
     stop: &AtomicBool,
     extend: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {

@@ -7,6 +7,9 @@ license.workspace = true
 [dependencies]
 extender-core.workspace = true
 extender-protocol.workspace = true
+# Transport encryption: run the Noise responder handshake for an encrypting native
+# client, keyed by the PIN (this dev host doesn't pair, so PIN 0). Cross-platform.
+extender-transport.workspace = true
 pollster = "0.4.0"
 wgpu = "29.0.3"
 winit = "0.30.13"

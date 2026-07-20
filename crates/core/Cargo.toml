@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 extender-protocol.workspace = true
+# Transport encryption: wrap the TCP stream in a Noise tunnel keyed by the pairing
+# PIN before the ClientHello handshake. The `postcard` framing runs on top unchanged.
+extender-transport.workspace = true
