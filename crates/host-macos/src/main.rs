@@ -11,13 +11,14 @@ mod qr;
 mod wifi;
 
 use std::io;
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use extender_protocol::{self as protocol, CaptureMode, ClientHello, ClientPlatform, Message};
+use extender_transport::{self as transport, Conn};
 
 const MAX_DIMENSION: u32 = 16384;
 
@@ -71,14 +72,31 @@ pub(crate) fn serve_loop(
 
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((mut stream, peer_addr)) => {
+            Ok((stream, peer_addr)) => {
                 let _ = stream.set_nonblocking(false);
                 let peer = peer_addr.to_string();
+                // Transport encryption first: an encrypting native client opens with
+                // the Noise preamble (run the responder handshake, keyed by the PIN);
+                // a legacy/loopback plaintext peer (e.g. the WebSocket bridge) is
+                // passed through untouched. Then the hello handshake runs inside it.
+                let mut conn = match transport::accept(stream, expected_pin) {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        on_event(HostEvent::Error(format!("handshake with {peer} failed: {e}")));
+                        on_event(HostEvent::Waiting);
+                        continue;
+                    }
+                };
+                if !conn.is_encrypted() {
+                    eprintln!(
+                        "warning: client {peer} connected without transport encryption (plaintext)"
+                    );
+                }
                 if let Some((platform, mode, w, h, name)) =
-                    read_hello(&mut stream, &peer, expected_pin)
+                    read_hello(&mut conn, &peer, expected_pin)
                 {
                     // Identify this host so the client can label/icon the connection.
-                    if let Ok(mut writer) = stream.try_clone() {
+                    if let Ok(mut writer) = conn.try_clone() {
                         let _ = protocol::write_framed(
                             &mut writer,
                             &Message::HostInfo {
@@ -89,8 +107,8 @@ pub(crate) fn serve_loop(
                     }
                     on_event(HostEvent::Connected { peer: peer.clone(), platform });
                     let result = match mode {
-                        CaptureMode::ControlOnly => host::serve_control_only(stream),
-                        _ => host::serve_session(stream, mode, w, h, &name, vdisplays),
+                        CaptureMode::ControlOnly => host::serve_control_only(conn),
+                        _ => host::serve_session(conn, mode, w, h, &name, vdisplays),
                     };
                     if let Err(e) = result {
                         on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
@@ -108,7 +126,7 @@ pub(crate) fn serve_loop(
 }
 
 fn read_hello(
-    stream: &mut TcpStream,
+    stream: &mut Conn,
     peer: &str,
     expected_pin: u32,
 ) -> Option<(ClientPlatform, CaptureMode, u32, u32, String)> {

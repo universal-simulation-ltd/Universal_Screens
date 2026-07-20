@@ -1,0 +1,19 @@
+[package]
+name = "extender-transport"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# Transport encryption for the LAN protocol: a Noise (snow) handshake wrapping the
+# plaintext TCP stream, keyed by the pairing PIN. Native clients always encrypt;
+# the host auto-detects an encrypted vs a legacy/loopback plaintext peer. The
+# `postcard` framing (crates/protocol) runs unchanged on top of the encrypted
+# byte stream. See docs/M10-transport-encryption.md.
+
+[dependencies]
+# Noise Protocol Framework. Default (pure-Rust) resolver so the same crate builds
+# on every target the clients run on — Windows, macOS, Android (NDK), iOS, and
+# (unused here) wasm — with no C/ring dependency to cross-compile.
+snow = { version = "0.9", default-features = false, features = ["default-resolver"] }
+# PIN -> 32-byte pre-shared key derivation (SHA-256). Pure Rust, all targets.
+sha2 = "0.10"

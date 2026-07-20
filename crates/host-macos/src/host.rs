@@ -4,7 +4,6 @@
 
 use std::ffi::{c_char, CString};
 use std::io::{BufWriter, Write};
-use std::net::TcpStream;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
@@ -23,6 +22,7 @@ use core_graphics::geometry::CGPoint;
 use extender_protocol::{
     self as protocol, Button, CaptureMode, Codec as WireCodec, Gesture, Input, Message, TouchPhase,
 };
+use extender_transport::Conn;
 use screencapturekit::prelude::*;
 use screencapturekit::stream::delegate_trait::StreamCallbacks;
 use videotoolbox::prelude::*;
@@ -100,7 +100,7 @@ pub(crate) fn set_friendly_name(state: &Arc<Mutex<VDisplays>>, name: Option<Stri
 /// reuses) a virtual display, mirror captures the primary, control-only streams
 /// no video. The virtual display slot is kept alive in `display` across calls.
 pub(crate) fn serve_session(
-    stream: TcpStream,
+    stream: Conn,
     mode: CaptureMode,
     target_w: u32,
     target_h: u32,
@@ -125,7 +125,7 @@ pub(crate) fn serve_session(
 
 /// Control-only: inject the client's input into the real desktop, stream no video.
 pub(crate) fn serve_control_only(
-    stream: TcpStream,
+    stream: Conn,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
     let (_, _, bounds) = primary_display()?;
@@ -137,7 +137,7 @@ pub(crate) fn serve_control_only(
 /// ScreenCaptureKit session and VideoToolbox encoder per client guarantees the
 /// stream always opens on a keyframe.
 fn serve_video(
-    stream: TcpStream,
+    stream: Conn,
     target_id: u32,
     capture: (u32, u32),
     bounds: Bounds,
@@ -222,7 +222,7 @@ fn serve_video(
 }
 
 /// Read input events from the client and inject them until the client disconnects.
-fn receive_and_inject(mut stream: TcpStream, bounds: Bounds) {
+fn receive_and_inject(mut stream: Conn, bounds: Bounds) {
     let mut cursor = (bounds.0, bounds.1);
     // Track whether the left button is held so moves can be posted as drags —
     // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
@@ -421,7 +421,7 @@ fn wait_for_display(id: u32) -> Option<Bounds> {
 }
 
 fn stream_to_client(
-    stream: TcpStream,
+    stream: Conn,
     rx: &std::sync::mpsc::Receiver<EncodedFrame>,
     width: u32,
     height: u32,

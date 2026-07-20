@@ -10,6 +10,10 @@ path = "src/main.rs"
 
 [dependencies]
 extender-protocol.workspace = true
+# Transport encryption: auto-detect an encrypted native client vs a legacy/loopback
+# plaintext peer per connection, running the Noise responder handshake keyed by the
+# host's pairing PIN. Same crate the Windows host uses.
+extender-transport.workspace = true
 # Shared LAN peer discovery (UDP multicast beacon/listener) — same crate the
 # Windows host uses, wrapped by a thin egui adapter in src/discovery.rs.
 extender-discovery.workspace = true

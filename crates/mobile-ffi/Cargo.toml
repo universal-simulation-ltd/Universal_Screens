@@ -11,3 +11,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 extender-core.workspace = true
+
+[dev-dependencies]
+# The end-to-end FFI tests run a fake host, which must complete the same Noise
+# responder handshake the real host does (the client encrypts by default now).
+extender-transport.workspace = true

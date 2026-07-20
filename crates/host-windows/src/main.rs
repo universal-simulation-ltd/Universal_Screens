@@ -17,7 +17,7 @@ mod winlist;
 
 use std::io;
 use std::mem::size_of;
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
@@ -27,6 +27,7 @@ use std::time::Duration;
 use extender_protocol::{
     self as protocol, Button, CaptureMode, ClientHello, ClientPlatform, Input, Message,
 };
+use extender_transport::{self as transport, Conn};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_HWHEEL,
@@ -106,17 +107,31 @@ pub(crate) fn serve_loop(
     on_event(HostEvent::Waiting);
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((mut stream, peer_addr)) => {
+            Ok((stream, peer_addr)) => {
                 let _ = stream.set_nonblocking(false); // blocking reads for the session
                 let peer = peer_addr.to_string();
-                // Handshake first: its hello carries the device platform. (The host
-                // always serves input-only regardless of the requested mode.)
-                if let Some((platform, mode)) = read_hello(&mut stream, &peer, expected_pin) {
-                    on_event(HostEvent::Connected { peer: peer.clone(), platform });
-                    if let Err(e) = serve(stream, mode) {
-                        on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
+                // Transport encryption first: an encrypting native client opens with
+                // the Noise preamble (run the responder handshake, keyed by the PIN);
+                // a legacy/loopback plaintext peer (e.g. the WebSocket bridge) is
+                // passed through untouched. Then the hello handshake runs inside it.
+                match transport::accept(stream, expected_pin) {
+                    Ok(mut conn) => {
+                        if !conn.is_encrypted() {
+                            eprintln!(
+                                "warning: client {peer} connected without transport encryption (plaintext)"
+                            );
+                        }
+                        if let Some((platform, mode)) = read_hello(&mut conn, &peer, expected_pin) {
+                            on_event(HostEvent::Connected { peer: peer.clone(), platform });
+                            if let Err(e) = serve(conn, mode) {
+                                on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
+                            }
+                            on_event(HostEvent::Disconnected(peer));
+                        }
                     }
-                    on_event(HostEvent::Disconnected(peer));
+                    Err(e) => {
+                        on_event(HostEvent::Error(format!("handshake with {peer} failed: {e}")));
+                    }
                 }
                 on_event(HostEvent::Waiting);
             }
@@ -134,7 +149,7 @@ pub(crate) fn serve_loop(
 /// client. The advertised size is irrelevant here — without capture there's no
 /// display geometry to size.
 fn read_hello(
-    stream: &mut TcpStream,
+    stream: &mut Conn,
     peer: &str,
     expected_pin: u32,
 ) -> Option<(ClientPlatform, CaptureMode)> {
@@ -182,7 +197,7 @@ enum SnapReq {
 /// [`CaptureMode`]: `ControlOnly` is the clicker (input + slide previews), while
 /// `MirrorPrimary`/`VirtualDisplay` mirror the screen (H.264) while still
 /// injecting input (for remote control). Returns when the client disconnects.
-fn serve(stream: TcpStream, mode: CaptureMode) -> Result<(), Box<dyn std::error::Error>> {
+fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle — low latency for input
 
     // A second handle on the socket carries everything downstream; the worker
@@ -202,7 +217,7 @@ fn serve(stream: TcpStream, mode: CaptureMode) -> Result<(), Box<dyn std::error:
 
 /// Clicker: inject input, and drive slide previews / deck scan / window picker on
 /// a dedicated thread.
-fn serve_clicker(stream: TcpStream, writer: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+fn serve_clicker(stream: Conn, writer: Conn) -> Result<(), Box<dyn std::error::Error>> {
     let (snap_tx, snap_rx) = mpsc::channel::<SnapReq>();
     let snap_thread = thread::spawn(move || snapshot_loop(writer, &snap_rx));
 
@@ -246,8 +261,8 @@ fn serve_clicker(stream: TcpStream, writer: TcpStream) -> Result<(), Box<dyn std
 /// while the input loop injects mouse/keys. `extend` streams a secondary/virtual
 /// monitor instead of the primary.
 fn serve_mirror(
-    stream: TcpStream,
-    writer: TcpStream,
+    stream: Conn,
+    writer: Conn,
     extend: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stop = Arc::new(AtomicBool::new(false));
@@ -269,7 +284,7 @@ fn serve_mirror(
 /// pre-scan cache. A `Scan` request (re)builds that cache by paging through the
 /// document. Owns the page index and the cache. Exits when the client disconnects
 /// (a socket write fails) or the input loop drops the sender.
-fn snapshot_loop(mut writer: TcpStream, rx: &Receiver<SnapReq>) {
+fn snapshot_loop(mut writer: Conn, rx: &Receiver<SnapReq>) {
     let mut cache: Vec<(u32, u32, Vec<u8>)> = Vec::new();
     let mut idx: i32 = 0;
 
@@ -309,7 +324,7 @@ fn snapshot_loop(mut writer: TcpStream, rx: &Receiver<SnapReq>) {
 /// Apply one snapshot-thread request: window list/focus act immediately, while
 /// Key/Scan set flags so the loop coalesces a burst into a single capture.
 fn handle_req(
-    writer: &mut TcpStream,
+    writer: &mut Conn,
     cache: &[(u32, u32, Vec<u8>)],
     idx: &mut i32,
     scan: &mut bool,
@@ -337,7 +352,7 @@ fn handle_req(
 }
 
 /// Send the host's open windows so the client can offer a focus picker.
-fn send_window_list(writer: &mut TcpStream) -> io::Result<()> {
+fn send_window_list(writer: &mut Conn) -> io::Result<()> {
     let windows = winlist::list_windows();
     println!("sent window list ({} windows)", windows.len());
     protocol::write_framed(writer, &Message::WindowList { windows })
@@ -365,7 +380,7 @@ fn apply_index(idx: &mut i32, code: u32, pages: usize) {
 /// client clears those tiles). Only a socket write error returns `Err` (the client
 /// is gone); a capture failure is logged and skipped.
 fn send_previews(
-    writer: &mut TcpStream,
+    writer: &mut Conn,
     cache: &[(u32, u32, Vec<u8>)],
     idx: i32,
 ) -> io::Result<()> {
@@ -397,7 +412,7 @@ fn send_previews(
 /// then return to the start. Resets `idx` to 0 and sends the first page's preview.
 /// The user must keep the document focused for the duration.
 fn scan_deck(
-    writer: &mut TcpStream,
+    writer: &mut Conn,
     cache: &mut Vec<(u32, u32, Vec<u8>)>,
     idx: &mut i32,
 ) -> io::Result<()> {

@@ -6,7 +6,7 @@
 //! Requires Screen Recording permission (System Settings > Privacy & Security).
 
 use std::io::{BufWriter, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::ptr;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -26,6 +26,7 @@ use extender_protocol::{
     self as protocol, Button, CaptureMode, ClientHello, Codec as WireCodec, Gesture, Input, Message,
     TouchPhase,
 };
+use extender_transport::{self as transport, Conn};
 use screencapturekit::prelude::*;
 use videotoolbox::prelude::*;
 
@@ -76,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut display: Option<Display> = None;
 
     for incoming in listener.incoming() {
-        let mut stream = match incoming {
+        let stream = match incoming {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("accept failed: {e}");
@@ -88,9 +89,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_or_else(|_| "?".to_string(), |a| a.to_string());
         println!("client connected: {peer}");
 
+        // Transport encryption first: an encrypting native client opens with the
+        // Noise preamble (run the responder handshake — this dev host doesn't pair,
+        // so PIN 0); a legacy/loopback plaintext peer is passed through untouched.
+        let mut conn = match transport::accept(stream, 0) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("handshake with {peer} failed: {e}");
+                println!("waiting for a client to connect...");
+                continue;
+            }
+        };
+        if !conn.is_encrypted() {
+            eprintln!("warning: client {peer} connected without transport encryption (plaintext)");
+        }
+
         // Handshake: the client's first upstream message carries its panel
         // resolution and the capture mode it wants.
-        let (mode, target_w, target_h) = match read_hello(&mut stream, &peer, forced) {
+        let (mode, target_w, target_h) = match read_hello(&mut conn, &peer, forced) {
             Some(hello) => hello,
             None => {
                 println!("waiting for a client to connect...");
@@ -118,8 +134,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Control-only (M6c): inject input but stream no video. Everything else
         // captures + encodes + streams the chosen display.
         let outcome = match mode {
-            CaptureMode::ControlOnly => serve_control_only(stream, bounds),
-            _ => serve(stream, id, size, bounds),
+            CaptureMode::ControlOnly => serve_control_only(conn, bounds),
+            _ => serve(conn, id, size, bounds),
         };
         match outcome {
             Ok(()) => println!("client {peer} disconnected"),
@@ -137,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Returns `None` (and logs) on a missing/garbled hello or an implausible size,
 /// so the caller skips this client.
 fn read_hello(
-    stream: &mut TcpStream,
+    stream: &mut Conn,
     peer: &str,
     forced: Option<(u32, u32)>,
 ) -> Option<(CaptureMode, u32, u32)> {
@@ -248,7 +264,7 @@ fn wait_for_display(id: u32) -> Option<Bounds> {
 /// real desktop and stream **no** video. `bounds` is the primary display's global
 /// geometry, used to map normalized pointer coordinates. Returns when the client
 /// disconnects.
-fn serve_control_only(stream: TcpStream, bounds: Bounds) -> Result<(), Box<dyn std::error::Error>> {
+fn serve_control_only(stream: Conn, bounds: Bounds) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle — low latency for input
     println!("control-only: injecting input, streaming no video");
     receive_and_inject(stream, bounds);
@@ -259,7 +275,7 @@ fn serve_control_only(stream: TcpStream, bounds: Bounds) -> Result<(), Box<dyn s
 /// it disconnects. A fresh capture session and encoder per client guarantees the
 /// stream opens on a keyframe.
 fn serve(
-    stream: TcpStream,
+    stream: Conn,
     target_id: u32,
     capture: (u32, u32),
     bounds: Bounds,
@@ -344,7 +360,7 @@ fn serve(
 /// Read input events from the client and inject them into the OS until the
 /// client disconnects. Pointer coordinates map from normalized frame space to
 /// the captured display's pixels.
-fn receive_and_inject(mut stream: TcpStream, bounds: Bounds) {
+fn receive_and_inject(mut stream: Conn, bounds: Bounds) {
     let mut cursor = (bounds.0, bounds.1);
     // Track whether the left button is held so moves can be posted as drags —
     // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
@@ -509,7 +525,7 @@ fn hid_to_macos(usage: u32) -> Option<u16> {
 /// Drain encoded frames and write them to the client. Returns `Ok` on a clean
 /// client disconnect (any socket write error means the client went away).
 fn stream_to_client(
-    stream: TcpStream,
+    stream: Conn,
     rx: &Receiver<EncodedFrame>,
     width: u32,
     height: u32,

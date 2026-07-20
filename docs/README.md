@@ -16,8 +16,10 @@ Its cloud touchpoints live in the `opensource-portal` Worker: the `/screens`
 marketing/download page, and a **browser receiver** at `/screens/receive` — a
 rendezvous Durable Object (+ `/screens/turn` for WebRTC ICE) that lets an app
 or another browser pair by code, with a WebRTC peer-to-peer data channel
-proven. Connections on the LAN are PIN-gated but unencrypted (see the root
-`README.md` Security note).
+proven. Native LAN connections are PIN-gated **and** transport-encrypted with a
+Noise tunnel keyed by the PIN (see the root `README.md` Security note and
+`M10-transport-encryption.md`); the browser-bridge leg is the remaining plaintext
+path.
 
 ## What's here
 
@@ -28,6 +30,7 @@ proven. Connections on the LAN are PIN-gated but unencrypted (see the root
 | `SECOND-SCREEN.md` | Windows "Second screen" (extend) setup — the one-time virtual-display driver install. |
 | `M2-…` – `M6-…` | Milestone design docs for the core pipeline: input round-trip (M2), virtual display (M3), HiDPI deferral notes (M4), mobile clients / remote control (M5), presentation clicker (M6). |
 | `M7-…` – `M9-…` | Milestone docs for the browser era: browser client (M7), Windows second screen plan (M7), browser receiver + rendezvous (M8), WebRTC media (M8e), phone self-capture design (M8f), LAN discovery (M9). |
+| `M10-transport-encryption.md` | Noise (snow) transport encryption over the LAN TCP protocol, keyed by the pairing PIN — the `extender-transport` crate. |
 | `claude-handover.md` | Dated session-handover log for AI-assisted development — newest entry first. |
 
 ## Suite context

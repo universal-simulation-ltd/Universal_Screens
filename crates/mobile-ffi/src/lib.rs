@@ -537,8 +537,12 @@ mod tests {
         let addr = listener.local_addr().unwrap().to_string();
 
         let host = thread::spawn(move || {
-            let (mut sock, _) = listener.accept().unwrap();
-            let mut r = BufReader::new(sock.try_clone().unwrap());
+            let (sock, _) = listener.accept().unwrap();
+            // The client encrypts by default, so the fake host runs the Noise
+            // responder handshake (PIN 0) before any framing, like the real host.
+            let conn = extender_transport::accept(sock, 0).unwrap();
+            let mut sock = conn.try_clone().unwrap();
+            let mut r = BufReader::new(conn);
             let _hello: ClientHello = protocol::read_framed(&mut r).unwrap();
             protocol::write_framed(
                 &mut sock,
@@ -614,7 +618,8 @@ mod tests {
 
         let host = thread::spawn(move || {
             let (sock, _) = listener.accept().unwrap();
-            let mut r = BufReader::new(sock);
+            let conn = extender_transport::accept(sock, 0).unwrap();
+            let mut r = BufReader::new(conn);
             let _hello: ClientHello = protocol::read_framed(&mut r).unwrap();
             let key: Input = protocol::read_framed(&mut r).unwrap();
             key
@@ -640,8 +645,10 @@ mod tests {
         let addr = listener.local_addr().unwrap().to_string();
 
         let host = thread::spawn(move || {
-            let (mut sock, _) = listener.accept().unwrap();
-            let mut r = BufReader::new(sock.try_clone().unwrap());
+            let (sock, _) = listener.accept().unwrap();
+            let conn = extender_transport::accept(sock, 0).unwrap();
+            let mut sock = conn.try_clone().unwrap();
+            let mut r = BufReader::new(conn);
             let _hello: ClientHello = protocol::read_framed(&mut r).unwrap();
             protocol::write_framed(&mut sock, &Message::HostInfo { os: "windows".into(), name: "PC".into() }).unwrap();
             protocol::write_framed(&mut sock, &Message::WindowList { windows: vec![(42, "slides.pdf".into())] }).unwrap();

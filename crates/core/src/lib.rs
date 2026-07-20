@@ -15,6 +15,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 pub use extender_protocol::{self as protocol, ClientHello, Codec, Input, Message};
+use extender_transport::{self as transport, Conn};
 
 /// An event from the host's downstream stream. Frames are carried *encoded*
 /// (AVCC: length-prefixed NAL units) — the caller decodes them, so the codec
@@ -84,7 +85,7 @@ pub struct Session {
     events: Receiver<StreamEvent>,
     /// A spare handle on the socket, used only to force the reader's blocking
     /// read to return when the session is dropped.
-    shutdown: TcpStream,
+    shutdown: Conn,
 }
 
 impl Session {
@@ -100,22 +101,29 @@ impl Session {
         hello: &ClientHello,
         input_rx: Receiver<Input>,
     ) -> io::Result<Session> {
-        let mut stream = TcpStream::connect(addr)?;
+        let stream = TcpStream::connect(addr)?;
         let _ = stream.set_nodelay(true); // disable Nagle — low latency for video + input
+
+        // Encrypt the transport *before* any framing: a Noise tunnel keyed by the
+        // pairing PIN (`hello.pin`). The `ClientHello` and everything after it then
+        // travel inside the tunnel, so the LAN sees only ciphertext. A PIN mismatch
+        // fails the handshake here (surfacing as a `connect` error), on top of the
+        // host's own plaintext-hello PIN check inside the tunnel.
+        let mut conn = transport::connect(stream, hello.pin)?;
 
         // Handshake first, on the caller's thread, so a failure surfaces as an
         // error from `connect` rather than dying silently in a background thread.
-        protocol::write_framed(&mut stream, hello)?;
+        protocol::write_framed(&mut conn, hello)?;
 
         // A second handle on the same socket carries input upstream; a third lets
         // `Drop` unblock the reader.
-        let input_stream = stream.try_clone()?;
-        let shutdown = stream.try_clone()?;
+        let input_stream = conn.try_clone()?;
+        let shutdown = conn.try_clone()?;
         thread::spawn(move || write_input(input_stream, input_rx));
 
         let (event_tx, events) = mpsc::channel();
         thread::spawn(move || {
-            let mut reader = BufReader::new(stream);
+            let mut reader = BufReader::new(conn);
             // Stop on EOF, a decode/socket error, or once the consumer has dropped
             // the events receiver (`send` then fails).
             while let Ok(msg) = protocol::read_framed::<_, Message>(&mut reader) {
@@ -156,7 +164,7 @@ impl Drop for Session {
 
 /// Drain the input channel onto the socket until the channel closes (caller done)
 /// or a write fails (host gone).
-fn write_input(mut stream: TcpStream, input_rx: Receiver<Input>) {
+fn write_input(mut stream: Conn, input_rx: Receiver<Input>) {
     while let Ok(input) = input_rx.recv() {
         if protocol::write_framed(&mut stream, &input).is_err() {
             break;
@@ -182,8 +190,12 @@ mod tests {
 
         // Fake host on its own thread; returns the input it received.
         let host = thread::spawn(move || {
-            let (mut sock, _) = listener.accept().unwrap();
-            let mut r = BufReader::new(sock.try_clone().unwrap());
+            let (sock, _) = listener.accept().unwrap();
+            // Mirror the real host: run the Noise responder handshake (PIN 0, to
+            // match the client's hello below) before any framing.
+            let conn = extender_transport::accept(sock, 0).unwrap();
+            let mut sock = conn.try_clone().unwrap();
+            let mut r = BufReader::new(conn);
             // Read + check the hello.
             let hello: ClientHello = protocol::read_framed(&mut r).unwrap();
             assert_eq!((hello.width, hello.height), (1920, 1080));
