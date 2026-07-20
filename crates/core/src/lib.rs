@@ -10,12 +10,27 @@
 //! it with the platform decoder and a touch UI (see `docs/M5-mobile-remote-control.md`).
 
 use std::io::{self, BufReader};
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::time::Duration;
 
 pub use extender_protocol::{self as protocol, ClientHello, Codec, Input, Message};
 use extender_transport::{self as transport, Conn};
+
+/// How long to wait for the TCP connection to the host to be established before
+/// giving up. Without a cap the OS default applies (tens of seconds, sometimes
+/// longer), so an unreachable host would leave a client parked on "Connecting…"
+/// with no error for an uncomfortably long time.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long to allow the encrypted handshake (Noise + the [`ClientHello`]) to
+/// complete once the socket is open. Bounds the case where a peer accepts the TCP
+/// connection but never speaks the protocol (wrong port, or a firewall that drops
+/// packets after the accept), which would otherwise block on the handshake read
+/// indefinitely. Cleared once the session is live so the frame reader can block
+/// normally.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An event from the host's downstream stream. Frames are carried *encoded*
 /// (AVCC: length-prefixed NAL units) — the caller decodes them, so the codec
@@ -101,8 +116,27 @@ impl Session {
         hello: &ClientHello,
         input_rx: Receiver<Input>,
     ) -> io::Result<Session> {
-        let stream = TcpStream::connect(addr)?;
+        Session::connect_inner(addr, hello, input_rx, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT)
+    }
+
+    /// [`connect`](Session::connect) with the two deadlines injectable, so tests can
+    /// drive it with short timeouts. See the public method for the full contract.
+    fn connect_inner(
+        addr: &str,
+        hello: &ClientHello,
+        input_rx: Receiver<Input>,
+        connect_timeout: Duration,
+        handshake_timeout: Duration,
+    ) -> io::Result<Session> {
+        let stream = tcp_connect_within(addr, connect_timeout)?;
         let _ = stream.set_nodelay(true); // disable Nagle — low latency for video + input
+
+        // Bound the handshake below so a peer that accepts the TCP connection but
+        // never speaks the protocol can't wedge the connect forever — it surfaces
+        // as an error instead of a silent hang. These deadlines are cleared once
+        // the session is live so the frame reader can park waiting on the socket.
+        stream.set_read_timeout(Some(handshake_timeout))?;
+        stream.set_write_timeout(Some(handshake_timeout))?;
 
         // Encrypt the transport *before* any framing: a Noise tunnel keyed by the
         // pairing PIN (`hello.pin`). The `ClientHello` and everything after it then
@@ -114,6 +148,12 @@ impl Session {
         // Handshake first, on the caller's thread, so a failure surfaces as an
         // error from `connect` rather than dying silently in a background thread.
         protocol::write_framed(&mut conn, hello)?;
+
+        // Session is live: drop the handshake deadlines so the downstream reader
+        // parks on the socket waiting for the next frame (which may be seconds out)
+        // rather than tripping the timeout during a quiet stretch.
+        conn.set_read_timeout(None)?;
+        conn.set_write_timeout(None)?;
 
         // A second handle on the same socket carries input upstream; a third lets
         // `Drop` unblock the reader.
@@ -162,6 +202,23 @@ impl Drop for Session {
     }
 }
 
+/// Connect to `addr` with a bounded wait, trying each resolved socket address in
+/// turn. Mirrors [`TcpStream::connect`] (which also tries every resolved address)
+/// but caps each attempt with [`TcpStream::connect_timeout`], so an unreachable
+/// host fails within `timeout` instead of after the (much longer) OS default.
+fn tcp_connect_within(addr: &str, timeout: Duration) -> io::Result<TcpStream> {
+    let mut last_err: Option<io::Error> = None;
+    for socket_addr in addr.to_socket_addrs()? {
+        match TcpStream::connect_timeout(&socket_addr, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, format!("could not resolve host {addr:?}"))
+    }))
+}
+
 /// Drain the input channel onto the socket until the channel closes (caller done)
 /// or a write fails (host gone).
 fn write_input(mut stream: Conn, input_rx: Receiver<Input>) {
@@ -178,6 +235,7 @@ mod tests {
     use std::io::BufReader;
     use std::net::TcpListener;
     use std::sync::mpsc;
+    use std::time::Instant;
 
     /// End-to-end loopback over a real socket: a fake host accepts a connection,
     /// reads the hello, sends StreamStart + two frames, and reads one input back.
@@ -268,5 +326,47 @@ mod tests {
         // With the host gone, the stream ends — next_event reports None.
         assert_eq!(session.next_event(), None);
         drop(input_tx);
+    }
+
+    /// A peer that accepts the TCP connection but never runs the handshake must not
+    /// wedge `connect` forever: the handshake timeout turns it into a prompt error
+    /// (this is what makes a "Cancel" affordance unnecessary in the worst case, and
+    /// lets an abandoned connect attempt terminate on its own).
+    #[test]
+    fn connect_times_out_on_a_silent_peer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        // Accept the connection, then sit silent for a while holding it open.
+        let host = thread::spawn(move || {
+            let (_sock, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_secs(2));
+        });
+
+        let (_input_tx, input_rx) = mpsc::channel();
+        let hello = ClientHello {
+            protocol_version: protocol::PROTOCOL_VERSION,
+            width: 1920,
+            height: 1080,
+            capture_mode: protocol::CaptureMode::default(),
+            platform: protocol::ClientPlatform::current(),
+            pin: 0,
+            device_name: String::new(),
+        };
+
+        let start = Instant::now();
+        let result = Session::connect_inner(
+            &addr,
+            &hello,
+            input_rx,
+            Duration::from_secs(5),
+            Duration::from_millis(300),
+        );
+        assert!(result.is_err(), "a silent peer must fail the handshake, not hang");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "connect should fail promptly via the handshake timeout, took {:?}",
+            start.elapsed(),
+        );
+        host.join().unwrap();
     }
 }
