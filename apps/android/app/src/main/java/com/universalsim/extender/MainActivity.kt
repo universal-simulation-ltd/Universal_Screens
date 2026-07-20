@@ -233,6 +233,11 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
     // True while a connection attempt is in flight (shows the Connecting screen).
     var connecting by remember { mutableStateOf(false) }
+    // Bumped whenever a connect attempt starts, is cancelled, or is superseded. A
+    // background connect stamps the value it began with and, when it returns, drops
+    // its result if the value has since moved on — so tapping Cancel (or starting a
+    // newer attempt) abandons a still-in-flight connect and closes any late session.
+    var attempt by remember { mutableStateOf(0) }
     // Non-null when "casting to a browser": the rendezvous code we're paired on.
     // Takes over the whole UI (CastFlow) and is independent of the host session.
     var castCode by remember { mutableStateOf<String?>(null) }
@@ -265,6 +270,8 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
         currentPin = pin
         connecting = true
         status = ""
+        attempt += 1
+        val myAttempt = attempt
         // Clicker/Trackpad need no video; Second screen extends (virtual display);
         // the rest mirror the primary.
         val capture = when (chosenMode) {
@@ -280,6 +287,13 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
             // native size, so exact values here are not critical.
             val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin, deviceName)
             runOnUi {
+                // Cancelled or superseded while connecting → drop this session so a
+                // late-arriving connection never hijacks the UI (and its socket is
+                // closed rather than leaked).
+                if (myAttempt != attempt) {
+                    s?.close()
+                    return@runOnUi
+                }
                 connecting = false
                 if (s != null) {
                     // Remember the host for quick reconnect; store the mode only if
@@ -364,8 +378,18 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                 }
             }
         }
-        // Connecting: a dedicated spinner screen (don't flash the home page).
-        connecting -> ConnectingScreen(currentAddr)
+        // Connecting: a dedicated spinner screen (don't flash the home page), with
+        // a Cancel to back out if it's taking too long.
+        connecting -> ConnectingScreen(
+            addr = currentAddr,
+            onCancel = {
+                // Abandon the in-flight attempt (its result is discarded when it
+                // returns) and drop back to the connect screen.
+                attempt += 1
+                connecting = false
+                status = ""
+            },
+        )
         // After address + PIN are gathered (scan or manual), pick what to do.
         pending != null -> {
             val (pAddr, pPin) = pending!!
@@ -425,9 +449,11 @@ private fun DisconnectButton(onClick: () -> Unit) {
 }
 
 /** A full-screen "Connecting…" placeholder with the app logo + a spinner, shown
- *  while a session is being established so the user never bounces back home. */
+ *  while a session is being established so the user never bounces back home. The
+ *  Cancel button lets them back out if the connection is taking too long (e.g. the
+ *  host is off the network) instead of waiting out the connect timeout. */
 @Composable
-fun ConnectingScreen(addr: String) {
+fun ConnectingScreen(addr: String, onCancel: () -> Unit = {}) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -445,6 +471,8 @@ fun ConnectingScreen(addr: String) {
         if (addr.isNotEmpty()) {
             Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Spacer(Modifier.height(28.dp))
+        OutlinedButton(onClick = onCancel) { Text("Cancel") }
     }
 }
 

@@ -86,6 +86,11 @@ struct ContentView: View {
     /// Address + PIN gathered from a scan/deep-link, waiting for a mode choice.
     @State private var pending: (addr: String, pin: Int)?
     @State private var connecting = false
+    /// Bumped whenever a connect attempt starts, is cancelled, or is superseded. A
+    /// background connect stamps the value it began with and, when it returns, drops
+    /// its result if the value has since moved on — so tapping Cancel (or starting a
+    /// newer attempt) abandons a still-in-flight connect and closes any late session.
+    @State private var attempt = 0
     /// Non-nil when "casting to a browser": the rendezvous code we're paired on.
     /// Takes over the whole UI (CastFlow), independent of the host session.
     @State private var castCode: String?
@@ -100,7 +105,13 @@ struct ContentView: View {
         } else if let session {
             connectedView(session)
         } else if connecting {
-            ConnectingScreen(addr: currentAddr)
+            ConnectingScreen(addr: currentAddr, onCancel: {
+                // Abandon the in-flight attempt (its result is discarded when it
+                // returns) and drop back to the connect screen.
+                attempt += 1
+                connecting = false
+                status = ""
+            })
         } else if let (pAddr, pPin) = pending {
             ModePickerScreen(
                 addr: pAddr,
@@ -155,6 +166,8 @@ struct ContentView: View {
         currentPin = pin
         connecting = true
         status = ""
+        attempt += 1
+        let myAttempt = attempt
         let capture: ExtenderSession.CaptureMode = switch chosen {
         case .clicker, .trackpad: .controlOnly
         case .secondScreen: .virtualDisplay
@@ -165,6 +178,13 @@ struct ContentView: View {
             let s = ExtenderSession.connect(addr: addr, mode: capture, pin: UInt32(pin),
                                             deviceName: deviceName)
             DispatchQueue.main.async {
+                // Cancelled or superseded while connecting → drop this session so a
+                // late-arriving connection never hijacks the UI (and its socket is
+                // closed rather than leaked).
+                guard myAttempt == attempt else {
+                    s?.close()
+                    return
+                }
                 connecting = false
                 if s != nil {
                     ConnectionStore.remember(addr: addr,
@@ -289,6 +309,11 @@ private struct ModeOption: View {
 
 struct ConnectingScreen: View {
     let addr: String
+    /// Backs out of a connection that's taking too long (e.g. the host is off the
+    /// network), instead of waiting out the connect timeout. Defaults to a no-op
+    /// so previews / other callers can omit it.
+    var onCancel: () -> Void = {}
+
     var body: some View {
         VStack(spacing: 18) {
             Image("AppLogo")
@@ -298,6 +323,9 @@ struct ConnectingScreen: View {
             ProgressView()
             Text("Connecting…").font(.title3.weight(.semibold))
             if !addr.isEmpty { Text(addr).font(.caption).foregroundStyle(.secondary) }
+            Button("Cancel", action: onCancel)
+                .buttonStyle(.bordered)
+                .padding(.top, 10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground).ignoresSafeArea())

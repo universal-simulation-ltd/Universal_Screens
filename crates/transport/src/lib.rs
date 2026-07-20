@@ -49,6 +49,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -260,6 +261,26 @@ impl Conn {
     /// Returns an error if the underlying call fails.
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         self.tcp().set_nodelay(nodelay)
+    }
+
+    /// Set the read timeout on the underlying socket, as
+    /// [`TcpStream::set_read_timeout`]. Used to bound a blocking read (e.g. the
+    /// handshake) so a peer that goes silent can't wedge it forever; pass `None`
+    /// to clear it and return to indefinite blocking.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying call fails.
+    pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.tcp().set_read_timeout(dur)
+    }
+
+    /// Set the write timeout on the underlying socket, as
+    /// [`TcpStream::set_write_timeout`]. `None` clears it.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying call fails.
+    pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.tcp().set_write_timeout(dur)
     }
 
     /// Whether this connection is transport-encrypted.
