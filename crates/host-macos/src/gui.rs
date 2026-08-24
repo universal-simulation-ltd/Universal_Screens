@@ -21,14 +21,42 @@ use crate::{serve_loop, HostEvent};
 const BASE_PORT: u16 = 9000;
 const BRAND: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x55, 0x04);
 const RECENT_MAX: usize = 8;
+const OPENSOURCE_ROOT: &str = "https://opensource.unisim.co.uk";
+const CHANGELOG_URL: &str = "https://changelog.unisim.co.uk";
 const OPENSOURCE_URL: &str = "https://opensource.unisim.co.uk/screens";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The other apps in this one's own catalogue group ("Geeky") on
+/// opensource.unisim.co.uk, as (name, path, blurb) so the menu reads like the web
+/// suite switcher — name plus its one-line description — rather than bare links.
+///
+/// ⚠️ These replaced two hardcoded "(soon)" placeholders, one of which advertised
+/// "Universal QR (soon)" while Universal QR had been live for months. Every path
+/// here was checked for a 200 before it went in: an app menu that offers things
+/// you cannot get is the same fault the download page was just cleaned of.
+const SIBLING_APPS: &[(&str, &str, &str)] = &[
+    ("Universal DIY", "diy", "Cut lists for simple butt-joint boxes"),
+    (
+        "Universal USB Detector",
+        "usb",
+        "Identify any USB device — version, speed & power",
+    ),
+    ("Universal Beam", "beam", "Send text straight between your devices"),
+];
+
+/// Recent user-visible changes, newest first — the `screens` entries from the
+/// suite changelog at changelog.unisim.co.uk, trimmed to a line each.
+///
+/// ⚠️ A SNAPSHOT, and deliberately so: the host is a desktop binary with no
+/// network fetch on the changelog path, so this cannot track the live feed the
+/// way the SDK's ChangelogMenu does in the web apps. "See all" links out to the
+/// real thing. It previously listed *features* ("Universal navbar with Actions &
+/// Profile menus"), which is not what a "what's new" menu is for.
 const CHANGELOG: &[&str] = &[
-    "• One-step connect — any camera scans to connect",
-    "• LAN discovery — nearby hosts appear automatically",
-    "• macOS GUI host — same wizard as Windows",
-    "• 4-digit pairing PIN in every connect QR",
-    "• Universal navbar with Actions & Profile menus",
+    "• Windows installer — per-user, no admin prompt",
+    "• Encrypted connections over the LAN (Noise protocol)",
+    "• Nearby hosts appear automatically — tap, enter PIN, connect",
+    "• Click the connect QR to blow it up across the window",
+    "• Cast to a browser screen — no install on the receiver",
 ];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -627,12 +655,17 @@ impl HostApp {
             ui.menu_button(
                 egui::RichText::new("Universal Screens").strong().size(15.0),
                 |ui| {
-                    ui.label(egui::RichText::new("Geek Apps").strong());
+                    ui.label(egui::RichText::new("Geeky").strong());
                     ui.label(egui::RichText::new("UNI·SIM open-source").weak().small());
                     ui.separator();
                     let _ = ui.selectable_label(true, "Universal Screens — this app");
-                    ui.add_enabled(false, egui::Button::new("Universal QR  (soon)"));
-                    ui.add_enabled(false, egui::Button::new("More apps  (soon)"));
+                    for (name, path, blurb) in SIBLING_APPS {
+                        ui.hyperlink_to(
+                            egui::RichText::new(*name).strong(),
+                            format!("{OPENSOURCE_ROOT}/{path}"),
+                        );
+                        ui.label(egui::RichText::new(*blurb).weak().small());
+                    }
                     ui.separator();
                     ui.hyperlink_to("Browse the suite ↗", OPENSOURCE_URL);
                 },
@@ -713,6 +746,12 @@ impl HostApp {
                         for line in CHANGELOG {
                             ui.label(*line);
                         }
+                        ui.separator();
+                        // The list above is a build-time snapshot; this is the
+                        // live feed the web apps' ChangelogMenu reads. Without
+                        // it the menu silently goes stale between releases and
+                        // nothing on screen admits that.
+                        ui.hyperlink_to("See all changes ↗", CHANGELOG_URL);
                     },
                 );
 
