@@ -28,7 +28,15 @@ jobs:
     # the runner's own architecture doesn't decide what ships -- but the ad-hoc
     # signature has to be applied by macOS itself, which is why this cannot be
     # folded into a Linux job.
-    runs-on: macos-14
+    #
+    # ⚠️ NOT macos-14. The client pulls wgpu -> apple-metal, whose Swift bridge
+    # references MTLResidencySet, MTLSamplerReductionMode, MTLSamplerDescriptor
+    # .lodBias and MTLFXTemporalScalerDescriptor.requiresSynchronousInitialization
+    # -- none of which exist in the SDK on the macos-14 image, so the Swift build
+    # fails before any of our own code is compiled. It builds locally only
+    # because the dev Mac carries a much newer SDK. Moving this image backwards
+    # will break the build again for reasons that look nothing like the cause.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
