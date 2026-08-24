@@ -1,0 +1,87 @@
+# Build the Universal Screens macOS app + DMG on a clean runner.
+#
+# Push a tag (`git tag v0.1.0 && git push --tags`) to cut a release, or run it
+# from the Actions tab. Dispatching it against a TAG ref publishes to that tag's
+# release, which is how a Mac build gets attached to a tag that was already cut
+# for Windows; dispatching against a branch just leaves an artifact.
+#
+# Why CI and not just a local build: the DMG is the thing strangers double-click,
+# so it should come from a machine with nothing on it but the declared toolchain.
+# A local build silently inherits whatever is on the dev box.
+#
+# Signed ad-hoc only, and not notarised -- standing UNI·SIM policy, same as
+# Windows. See docs/MACOS-APP.md.
+
+name: macOS app
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create/update the release on a tag
+
+jobs:
+  app:
+    # Apple Silicon runner. Both slices are cross-compiled via rustup targets, so
+    # the runner's own architecture doesn't decide what ships -- but the ad-hoc
+    # signature has to be applied by macOS itself, which is why this cannot be
+    # folded into a Linux job.
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (both Apple targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Pillow renders the .icns from the shared artwork.
+      - name: Install Pillow
+        run: python3 -m pip install --disable-pip-version-check --quiet --break-system-packages Pillow
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-app
+
+      - name: Generate the app icon
+        run: python3 scripts/make-mac-icns.py
+
+      - name: Build app + DMG
+        run: ./scripts/build-app-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: universal-screens-macos-dmg
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.sha256
+          # Adding to a release that already carries the Windows installer, so
+          # the existing body must not be clobbered.
+          append_body: true
+          body: |
+
+            **Universal Screens for macOS.** Download `UniversalScreens-*.dmg`,
+            open it, and drag the app to Applications. Universal binary — Apple
+            Silicon and Intel. **Requires macOS 12.3 or newer** (ScreenCaptureKit).
+
+            It is signed ad-hoc and **not notarised**, so the first launch is
+            refused with "cannot check it for malicious software". Don't
+            double-click again — **right-click the app and choose Open**, then
+            Open. If there's no Open button, System Settings → Privacy &
+            Security → **Open Anyway**.
+
+            ```bash
+            shasum -a 256 UniversalScreens-*.dmg
+            ```
