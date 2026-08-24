@@ -4,6 +4,71 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-24 (the macOS host finally compiled, and it ships)
+
+**`crates/host-macos` had never been built on a Mac.** Several sessions edited it
+blind — "Reviewed-not-compiled (no Mac here)" is in three entries below. It
+compiles clean, zero warnings, first try.
+
+**Shipped:** `scripts/make-mac-icns.py`, `scripts/build-app-macos.sh`,
+`installer/README-macos.txt`, `docs/MACOS-APP.md`,
+`.github/workflows/macos-release.yml`. `UniversalScreens-0.1.0.dmg` is attached
+to the **v0.1.0** release and `opensource.unisim.co.uk/screens` now offers Mac
+alongside Windows.
+
+⚠️ **Three properties are load-bearing; the script guards two.**
+
+- `MACOSX_DEPLOYMENT_TARGET=12.3`. The host calls ScreenCaptureKit (12.3+) but
+  rustc stamps **11.0 on arm64 and 10.12 on x86_64** — measured with `vtool`.
+  Unpinned, the app installs on macOS 11 and then fails to capture.
+- **Universal binary.** A single-arch build packages happily and cannot run on
+  an Intel Mac.
+- **The ad-hoc signature.** macOS *refuses to exec* an unsigned arm64 binary —
+  killed, not warned. It is what makes the app launch at all.
+
+⚠️ **CI needs `macos-26`, NOT `macos-14`.** The client pulls wgpu → `apple-metal`,
+whose Swift bridge uses `MTLResidencySet`, `MTLSamplerReductionMode`,
+`MTLSamplerDescriptor.lodBias` and
+`MTLFXTemporalScalerDescriptor.requiresSynchronousInitialization`. None exist in
+the macos-14 SDK, so the Swift build dies before any of our code compiles. It
+built locally only because this Mac has a far newer SDK. **Moving the image
+backwards breaks it again for reasons that look nothing like the cause.**
+
+⚠️ **macOS ships bash 3.2.** `mapfile` and other bash-4 builtins pass CI (bash 5)
+and fail for anyone running the script locally. The build script avoids them.
+
+**Navbar, both hosts, kept in sync:**
+
+- The suite switcher offered **"Universal QR (soon)"** — live for months — and
+  "More apps (soon)". It now lists the real "Geeky" siblings (DIY, USB Detector,
+  Beam) with their catalogue blurbs, following Universal PDF's navbar. All paths
+  checked for a 200 first.
+- The heading said "Geek Apps"; the catalogue says **"Geeky"**.
+- The "what's new" popup listed **features**, not changes. Real changelog entries
+  now, plus a "See all" link — a desktop binary can't track the live feed the way
+  the SDK's `ChangelogMenu` does, and nothing admitted that before.
+- **Profile is an avatar disc**, not the word "Profile", matching `UserProfile`.
+  Painted in code: the SDK's artwork is four SVGs and this binary has no SVG
+  rasteriser.
+- **`With ♥ from UNISIM.co.uk` is untouched.**
+
+**Verified:** the CI-built DMG mounts, is universal + ad-hoc signed + minos 12.3,
+and the app **run from the mounted DMG** both serves headless (accepts a TCP
+connection, correctly rejects a plaintext client) and opens its GUI titled
+"Universal Screens".
+
+⚠️ **NOT verified:** the **Windows host is uncompiled** — no MSVC toolchain on
+this Mac, and both navbar commits touched `host-windows/src/gui.rs`. **Build it
+before trusting it.** Also unrun: the **x86_64 slice** (no Intel Mac) and
+Gatekeeper on a machine that has never seen the app.
+
+**Still "Coming soon" on the download page, honestly:** Linux has **no host crate
+at all** — only a client — so it is a port (capture + input injection), not
+packaging. Android and iOS have real Gradle/Xcode projects but publishing needs
+James's store accounts and signing keys.
+
+---
+
 ## Update — 2026-07-13 (discovery finished: mobile + web browsing, orbit graphic, cross-network Remote access)
 
 Closed out the rest of the backlog's "discovery mode across all apps" item — the
