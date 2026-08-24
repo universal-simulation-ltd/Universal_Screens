@@ -83,6 +83,8 @@ struct HostApp {
     address: Option<String>,
     logo: Option<egui::TextureHandle>,
     app_logo: Option<egui::TextureHandle>,
+    /// The signed-out profile disc — painted once, then cached like the logos.
+    avatar: Option<egui::TextureHandle>,
     wifi: Option<crate::wifi::WifiInfo>,
     combined_qr: Option<egui::TextureHandle>,
     wifi_show_password: bool,
@@ -159,6 +161,7 @@ impl HostApp {
             address: None,
             logo: None,
             app_logo: None,
+            avatar: None,
             wifi: crate::wifi::current_wifi(),
             combined_qr: None,
             wifi_show_password: false,
@@ -640,8 +643,16 @@ impl HostApp {
                     Some(ctx.load_texture("app-logo", img, egui::TextureOptions::LINEAR));
             }
         }
+        if self.avatar.is_none() {
+            self.avatar = Some(ctx.load_texture(
+                "profile-avatar",
+                crate::qr::profile_avatar_image(48),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
         let logo = self.logo.as_ref().map(eframe::egui::TextureHandle::id);
         let app_logo = self.app_logo.as_ref().map(eframe::egui::TextureHandle::id);
+        let avatar = self.avatar.as_ref().map(eframe::egui::TextureHandle::id);
         let dark = ui.visuals().dark_mode;
         style_navbar(ui, dark);
 
@@ -756,7 +767,23 @@ impl HostApp {
                 );
 
                 sep_dot(ui, dark);
-                ui.menu_button("Profile", |ui| {
+                // The trigger is the avatar disc rather than the word "Profile":
+                // the suite's web chrome puts UserProfile behind a circular
+                // avatar, and this bar is meant to read as that same navbar.
+                // menu_custom_button, not menu_button, because the trigger is a
+                // frameless image — menu_button would draw a button box round it.
+                let profile_btn = match avatar {
+                    Some(id) => egui::Button::image(egui::Image::from_texture(
+                        egui::load::SizedTexture::new(id, egui::vec2(24.0, 24.0)),
+                    ))
+                    .frame(false),
+                    // Only reachable if the texture upload failed. A word is a
+                    // worse trigger than a disc but an infinitely better one
+                    // than nothing at all, which is what an Image with no
+                    // texture would render.
+                    None => egui::Button::new("Profile").frame(false),
+                };
+                egui::menu::menu_custom_button(ui, profile_btn, |ui| {
                     let mut dark = self.dark_mode.unwrap_or(ui.visuals().dark_mode);
                     if ui.checkbox(&mut dark, "🌙  Dark mode").changed() {
                         self.dark_mode = Some(dark);
@@ -775,7 +802,11 @@ impl HostApp {
                     if ui.checkbox(&mut dont, "Don't connect automatically").changed() {
                         self.auto_connect = !dont;
                     }
-                });
+                })
+                .response
+                // The disc carries no text, so without this the control is
+                // unnameable — nothing on hover, nothing for assistive tech.
+                .on_hover_text("Profile & settings");
             });
         });
     }

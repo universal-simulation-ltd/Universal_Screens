@@ -51,6 +51,78 @@ pub fn app_icon_image(size: u32) -> Option<egui::ColorImage> {
     decode_square(APP_ICON_PNG, size)
 }
 
+/// The signed-out profile avatar: the SDK's brand-orange disc with a simple
+/// head-and-shoulders figure on it, replacing the word "Profile" in the navbar
+/// so the host's chrome reads like `UserProfile` does in the web apps.
+///
+/// Painted in code rather than shipped as an asset. The SDK's artwork is four
+/// SVG figures (`images/profile-icon/*.svg` on the marketing site) and this
+/// binary has no SVG rasteriser -- `image` decodes PNG/JPEG only. A single
+/// figure is drawn instead: the rotation those four exist for needs somewhere
+/// to persist a counter across launches, which is a web-page idea, not a
+/// desktop-app one.
+///
+/// Supersampled 4x and box-filtered down, the same trick scripts/make-app-icon.py
+/// uses -- at 24px a hard-edged disc is visibly jagged next to the antialiased
+/// text beside it.
+pub fn profile_avatar_image(size: u32) -> egui::ColorImage {
+    const K: u32 = 4;
+    let s = size * K;
+    let sf = s as f32;
+    // Brand orange, matching BRAND in gui.rs and the suite's chrome.
+    let (br, bg, bb) = (0xe0u32, 0x55u32, 0x04u32);
+    let mut buf = vec![0u8; (size * size * 4) as usize];
+
+    let centre = sf / 2.0;
+    let disc_r = sf / 2.0;
+    // Head and shoulders, as fractions of the disc -- tuned so the figure reads
+    // at 24px rather than turning into a blob.
+    let head_c = (centre, sf * 0.38);
+    let head_r = sf * 0.16;
+    let sh_c = (centre, sf * 0.86);
+    let sh_r = sf * 0.30;
+
+    for y in 0..size {
+        for x in 0..size {
+            let (mut a_sum, mut fig_sum) = (0u32, 0u32);
+            for sy in 0..K {
+                for sx in 0..K {
+                    let px = (x * K + sx) as f32 + 0.5;
+                    let py = (y * K + sy) as f32 + 0.5;
+                    let d = ((px - centre).powi(2) + (py - centre).powi(2)).sqrt();
+                    if d > disc_r {
+                        continue;
+                    }
+                    a_sum += 1;
+                    let in_head =
+                        ((px - head_c.0).powi(2) + (py - head_c.1).powi(2)).sqrt() <= head_r;
+                    // Shoulders are the top half of a disc, so the figure sits on
+                    // the avatar's lower edge the way the SDK's do.
+                    let in_sh = py >= sh_c.1 - sh_r
+                        && ((px - sh_c.0).powi(2) + (py - sh_c.1).powi(2)).sqrt() <= sh_r;
+                    if in_head || in_sh {
+                        fig_sum += 1;
+                    }
+                }
+            }
+            let total = (K * K) as f32;
+            let alpha = a_sum as f32 / total;
+            let fig = fig_sum as f32 / total;
+            // Figure is white over the orange, both weighted by coverage.
+            let mix = |c: u32| -> u8 {
+                let base = c as f32;
+                (base + (255.0 - base) * (if alpha > 0.0 { fig / alpha } else { 0.0 })).round() as u8
+            };
+            let i = ((y * size + x) * 4) as usize;
+            buf[i] = mix(br);
+            buf[i + 1] = mix(bg);
+            buf[i + 2] = mix(bb);
+            buf[i + 3] = (alpha * 255.0).round() as u8;
+        }
+    }
+    egui::ColorImage::from_rgba_unmultiplied([size as usize, size as usize], &buf)
+}
+
 pub fn app_icon_rgba(size: u32) -> Option<Vec<u8>> {
     let logo = image::load_from_memory(APP_ICON_PNG)
         .ok()?
