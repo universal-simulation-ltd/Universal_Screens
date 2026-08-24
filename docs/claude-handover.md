@@ -4,6 +4,27 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+**iOS: built, installed and RUN on an iPhone 15 Pro** the same day. The app
+completed the handshake against the freshly built macOS host with no manual
+step — it auto-connected:
+
+```
+client 192.168.4.39:50306 hello: 1920x1080, mode ControlOnly, platform Ios, device "iPhone"
+```
+
+⚠️ **The xcframework had to be rebuilt first, and this will recur.**
+`apps/ios/libs/ExtenderMobile.xcframework` is **gitignored**, and the copy on
+this Mac was built 27 June — six weeks *before* the Noise transport encryption
+(`081c168`). A stale framework is worse than a missing one: it links, signs and
+installs perfectly happily, then fails at the protocol. Rebuild both slices
+(`aarch64-apple-ios`, `aarch64-apple-ios-sim`) and re-wrap after any `crates/`
+change. Note the library is `libextender_mobile_ffi.a` — the documented command
+said `libextender_mobile.a`, which just fails.
+
+`apps/ios/README.md` claimed **"scaffold — not built … authored on Windows
+without Xcode"**. Untrue since June; corrected, and the working device recipe
+moved into it from this file.
+
 ## Update — 2026-08-24 (the macOS host finally compiled, and it ships)
 
 **`crates/host-macos` had never been built on a Mac.** Several sessions edited it
