@@ -1,13 +1,29 @@
-# Universal Screens — iOS app (scaffold)
+# Universal Screens — iOS app
 
 A SwiftUI client that connects to an `extender-host` as a **presentation
 clicker**, mirroring the Android app. It drives the shared Rust core through the C
 ABI in `crates/mobile-ffi` (`extender_ffi.h`).
 
-> **Status: scaffold — not built.** This was authored on Windows without Xcode, so
-> it has **not** been compiled or run. The Swift sources + bridging header are a
-> starting point to drop into an Xcode project (steps below). The Rust C ABI it
-> links against *does* build and is unit-tested (`cargo test -p extender-mobile-ffi`).
+> **Status: builds, installs and runs on a real iPhone.** Last confirmed
+> **2026-08-24** on an iPhone 15 Pro — built, signed (team ZH9C5TS86A, automatic
+> provisioning), installed with `devicectl`, launched, and observed completing the
+> handshake against `extender-host-macos`:
+>
+> ```
+> client 192.168.4.39 hello: 1920x1080, mode ControlOnly, platform Ios, device "iPhone"
+> ```
+>
+> This block used to read *"scaffold — not built … authored on Windows without
+> Xcode"*. That stopped being true no later than June 2026, and a stale status
+> line is worse than none: it invites the next person to treat working code as
+> unproven, or to rebuild scaffolding that already exists.
+
+> ⚠️ **Rebuild the xcframework whenever the Rust side moves.** It is gitignored,
+> so a fresh clone has none, and a stale one is worse than a missing one — it
+> links and installs happily and then fails at the protocol. The copy on this Mac
+> predated the Noise transport encryption (`081c168`) by six weeks and had to be
+> rebuilt before the app would talk to a current host. If a connection fails right
+> after a `crates/` change, suspect this first.
 
 ## What's here
 
@@ -57,6 +73,27 @@ xcodebuild -create-xcframework \
 ```
 
 (Must be done on a Mac — the iOS targets need the Apple SDKs.)
+
+⚠️ The library is `libextender_mobile_ffi.a`, not `libextender_mobile.a` as the
+commands above once said — `-create-xcframework` fails on the wrong name.
+
+## Build and run on a connected iPhone
+
+```bash
+cd /Users/jamesmarkey/Github/UNISIM/Universal_Apps/Universal_Screens/apps/ios
+xcrun devicectl list devices          # find your device's identifier
+xcodegen generate
+xcodebuild -project ScreenExtender.xcodeproj -scheme ScreenExtender \
+  -configuration Debug -destination 'id=YOUR_DEVICE_ID' \
+  -allowProvisioningUpdates -derivedDataPath build/dd build
+xcrun devicectl device install app --device YOUR_DEVICE_ID \
+  build/dd/Build/Products/Debug-iphoneos/ScreenExtender.app
+xcrun devicectl device process launch --device YOUR_DEVICE_ID \
+  com.universalsim.screenextender
+```
+
+⚠️ **Device builds only.** The **simulator** build fails to link: the xcframework
+carries `ios-arm64` and `ios-arm64-simulator`, with no x86_64 slice.
 
 ## Assembling the Xcode project
 
