@@ -10,3 +10,9 @@ native/**/DerivedData/
 
 # Internal project notes — not published (matches the other Universal Apps repos)
 CLAUDE.md
+
+# Packaged installers (scripts/build-installer.ps1)
+/dist
+
+# Python bytecode from the asset generators
+__pycache__/

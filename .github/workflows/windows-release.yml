@@ -1,0 +1,87 @@
+# Build the Universal Screens Windows installer on a clean runner.
+#
+# Push a tag (`git tag v0.1.0 && git push --tags`) to cut a release, or run it
+# from the Actions tab to get an installer artifact without publishing anything.
+#
+# Why CI and not just a local build: the installer is the thing strangers
+# double-click, so it should come from a machine with nothing on it but the
+# declared toolchain. A local build silently inherits whatever is on the dev
+# box's PATH.
+#
+# Not signed -- standing UNI·SIM policy. See docs/WINDOWS-INSTALLER.md.
+
+name: Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create the release on a tag
+
+jobs:
+  installer:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # openh264-sys2 assembles its own source; without NASM the build fails
+      # deep inside a C build script.
+      - name: Install NASM
+        run: choco install nasm --no-progress -y
+
+      - name: Add NASM to PATH
+        run: echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+
+      # Pillow renders the multi-resolution .ico from the shared artwork.
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check --quiet Pillow
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-installer
+
+      # Inno Setup ships on the windows-latest image, but pin the check here so
+      # a future image change fails loudly instead of at the packaging step.
+      - name: Check Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          & $iscc /? | Select-Object -First 1
+
+      - name: Build installer
+        run: .\scripts\build-installer.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: universal-screens-windows-installer
+          path: |
+            dist/*.exe
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.sha256
+          body: |
+            **Universal Screens for Windows.** Download `UniversalScreens-Setup-*.exe` and run it.
+
+            It installs per-user (no admin prompt) and is **not code-signed**, so
+            SmartScreen will say "Windows protected your PC" the first time —
+            click **More info** → **Run anyway**. The `.sha256` file next to the
+            installer lets you check the download:
+
+            ```powershell
+            Get-FileHash .\UniversalScreens-Setup-*.exe -Algorithm SHA256
+            ```

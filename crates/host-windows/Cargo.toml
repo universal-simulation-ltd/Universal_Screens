@@ -8,6 +8,10 @@ license.workspace = true
 name = "extender-host-windows"
 path = "src/main.rs"
 
+[target.'cfg(target_os="windows")'.build-dependencies]
+# Embed the app icon + version metadata into the .exe (see build.rs).
+winresource = "0.1"
+
 [dependencies]
 extender-protocol.workspace = true
 # Transport encryption: auto-detect an encrypted native client vs a legacy/loopback

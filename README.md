@@ -58,6 +58,8 @@ macOS host streams to the desktop client for the same modes (the original path).
 
 - **Windows host:** `cargo run -p extender-host-windows` (GUI) or
   `… -- 0.0.0.0:9000` (headless). Needs **NASM** (openh264 builds from source).
+  To package it for other people: `.\scripts\build-installer.ps1` →
+  `dist\UniversalScreens-Setup-*.exe` — see [docs/WINDOWS-INSTALLER.md](docs/WINDOWS-INSTALLER.md).
 - **Android:** rebuild the native lib with `cargo-ndk`, then
   `apps/android/gradlew assembleDebug` → `adb install -r` — see
   [apps/android/README.md](apps/android/README.md).
@@ -76,6 +78,14 @@ macOS host streams to the desktop client for the same modes (the original path).
 **Queued (background tasks):**
 - **Phone → PC streaming** — present the phone's screen on the projector for live
   app demos, with a "Present my phone" toggle (MediaProjection + upstream video).
+
+**Shipping:**
+- **Windows installer** — done. `scripts/build-installer.ps1` (or a `v*` tag, via
+  [`windows-release.yml`](.github/workflows/windows-release.yml)) produces a
+  per-user, no-admin, statically-linked `UniversalScreens-Setup-*.exe`. Nothing is
+  published yet, so the download page still says "coming soon" — cutting the first
+  tag is what flips it.
+- **macOS / Linux packaging** — not started; the download page reflects that.
 
 **Deploy-time / external (can't be done in-repo):**
 - Host `web/.well-known/assetlinks.json` at the domain root; add the **Play
