@@ -85,7 +85,15 @@ macOS host streams to the desktop client for the same modes (the original path).
   per-user, no-admin, statically-linked `UniversalScreens-Setup-*.exe`. Nothing is
   published yet, so the download page still says "coming soon" — cutting the first
   tag is what flips it.
-- **macOS / Linux packaging** — not started; the download page reflects that.
+- **macOS packaging** — done. Universal DMG, ad-hoc signed, built by
+  [`macos-release.yml`](.github/workflows/macos-release.yml) and attached to
+  **v0.1.0**; the download page offers Mac alongside Windows. See
+  [docs/MACOS-APP.md](docs/MACOS-APP.md).
+- **Linux** — not packaging but a *port*: there is no Linux host crate, only the
+  cross-platform client. Scoped in [docs/LINUX-HOST.md](docs/LINUX-HOST.md) — the
+  shared crates already compile for Linux, so the work is the capture and input
+  backends, and X11 and Wayland are different jobs. The download page says
+  "coming soon" and that is honest.
 
 **Deploy-time / external (can't be done in-repo):**
 - Host `web/.well-known/assetlinks.json` at the domain root; add the **Play
