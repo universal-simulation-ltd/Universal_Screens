@@ -42,23 +42,43 @@ jobs:
           targets: x86_64-unknown-linux-gnu
 
       # eframe/winit link against the X11 and Wayland client libraries, and
-      # libxkbcommon for the keyboard map. The host itself needs none of them —
-      # uinput is a kernel interface — but the GUI does.
+      # libxkbcommon for the keyboard map. Injection needs none of them (uinput
+      # is a kernel interface), and neither does capture — x11rb speaks the X
+      # protocol over the socket and links nothing — but the GUI does.
+      #
+      # `xvfb` is for the TESTS, not the build: the X11 capture tests need a
+      # real X server to photograph (see the Test step). `xauth` is named
+      # explicitly because `xvfb-run` shells out to it and dies with "xauth
+      # command not found" without it - and it is only a *recommends* of the
+      # xvfb package, so it must not be left to apt's discretion.
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
-            libgl1-mesa-dev libxkbcommon-dev libwayland-dev
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            xvfb xauth
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: linux-appimage
 
-      # The unit tests are pure logic (the HID→evdev key map, nmcli and ufw
-      # parsing, the connect URL) and need no display, no uinput and no network.
+      # Most of the tests are pure logic (the HID→evdev key map, nmcli and ufw
+      # parsing, the connect URL) and need nothing. The X11 capture tests are
+      # different: they paint a root window and read the pixels back, so they
+      # need a real X server, which `xvfb-run` supplies.
+      #
+      # ⚠️ `SCREENS_REQUIRE_X11=1` is the point of this step. Without it those
+      # tests SKIP when there is no display and the job still reports green —
+      # indistinguishable from them passing. With it, a missing display is a
+      # failure, so CI cannot quietly stop exercising capture.
+      #
+      # Still out of reach here, as on any machine with no desktop: uinput
+      # injection (the runner has no `/dev/uinput`) and whether the GUI draws.
       - name: Test
-        run: cargo test -p extender-host-linux
+        run: xvfb-run -a --server-args="-screen 0 1280x800x24" cargo test -p extender-host-linux
+        env:
+          SCREENS_REQUIRE_X11: '1'
 
       - name: Build AppImage
         run: ./scripts/build-appimage.sh

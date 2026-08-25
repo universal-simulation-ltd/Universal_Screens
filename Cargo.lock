@@ -1418,8 +1418,10 @@ dependencies = [
  "extender-protocol",
  "extender-transport",
  "image",
+ "libc",
  "qrcode",
  "serde",
+ "x11rb",
 ]
 
 [[package]]

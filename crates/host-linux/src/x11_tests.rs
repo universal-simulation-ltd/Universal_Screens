@@ -1,0 +1,307 @@
+//! End-to-end capture and window-picker tests against a **live X server**,
+//! asserting real pixels rather than bytes this repo made up.
+//!
+//! The unit tests in [`crate::capture`] feed the decoder buffers constructed
+//! here, so they prove the arithmetic and nothing at all about the server. That
+//! is the shape of test that let a broken HEIC decoder ship elsewhere in this
+//! suite: a fixture generated through the same assumption it is checking. These
+//! tests paint the root window a colour whose three channels *differ* and read
+//! it back, so a B/R swap, a big-endian misread or a stride error cannot pass.
+//!
+//! They also cover what a container genuinely can prove about the Linux host —
+//! unlike Stage 1's uinput injection, which needs a real desktop. An X server is
+//! a process, so `Xvfb` is not a stand-in for the real thing here; it *is* an X
+//! server, running the same protocol a desktop one does.
+//!
+//! ## Running
+//!
+//! `DISPLAY` must point at a server: `Xvfb :99 -screen 0 1280x800x24`, with
+//! `xsetroot` (from `x11-xserver-utils`) on PATH to paint the root. Nothing else
+//! is needed — the window-picker test creates its own window rather than
+//! depending on a desktop app being installed.
+//!
+//! ⚠️ **A skipped test that reports success is worse than no test.** Without a
+//! server these skip — but `SCREENS_REQUIRE_X11=1` turns skipping into a
+//! *failure*, so a harness that quietly stopped exercising the capture path
+//! cannot look like a clean pass. The container run sets it.
+
+use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
+
+use x11rb::connection::Connection;
+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt as _};
+use x11rb::rust_connection::RustConnection;
+
+use crate::{capture, winlist};
+
+/// The root colour the tests paint and expect back. Deliberately three
+/// different channel values: any swap between R, G and B changes the answer.
+const R: u8 = 0x30;
+const G: u8 = 0x50;
+const B: u8 = 0xA0;
+
+/// True when this run insists the X11 tests really execute.
+fn required() -> bool {
+    std::env::var("SCREENS_REQUIRE_X11").is_ok_and(|v| v != "0")
+}
+
+/// WARNING: these tests share one X display, which is global mutable state - the
+/// window-picker test maps a window, and a capture test running concurrently
+/// would photograph it. `cargo test` runs tests as threads in one process, so
+/// they must take turns. (Without this lock the suite produced a convincing
+/// "capture is broken" failure that was only two tests colliding.)
+static X11: Mutex<()> = Mutex::new(());
+
+/// A held display: the turn-taking lock, plus the connection that painted the
+/// root, kept open for the life of the test.
+///
+/// WARNING: the connection must outlive the grab. X frees a client's resources
+/// when it disconnects, so painting from a short-lived helper is not reliably
+/// still on screen afterwards - which is exactly how `xsetroot -solid` behaves
+/// under Xvfb here: it exits 0 and the framebuffer stays black. Every capture
+/// test polled a black screen and blamed the decoder.
+struct Display {
+    _guard: MutexGuard<'static, ()>,
+    _conn: RustConnection,
+}
+
+/// Take the display lock, paint the root, and hand back a live handle - or
+/// `None` when this machine has no usable X server, in which case the test
+/// returns without asserting.
+///
+/// Under `SCREENS_REQUIRE_X11` a would-be skip becomes a failure instead, so a
+/// harness that quietly stopped exercising the capture path cannot pass clean.
+fn x11_ready() -> Option<Display> {
+    // A panicking test poisons the lock; the display itself is fine, so carry on
+    // with it rather than cascading one failure into five.
+    let guard = X11.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    if !std::env::var("DISPLAY").is_ok_and(|d| !d.is_empty()) {
+        assert!(
+            !required(),
+            "SCREENS_REQUIRE_X11 is set but DISPLAY is not - the X11 tests did not run"
+        );
+        eprintln!("skipping: no DISPLAY (set SCREENS_REQUIRE_X11=1 to make this a failure)");
+        return None;
+    }
+
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        assert!(!required(), "SCREENS_REQUIRE_X11 is set but no X server would accept a connection");
+        eprintln!("skipping: no X server on DISPLAY");
+        return None;
+    };
+    let screen = conn.setup().roots[screen_num].clone();
+
+    // The pixel value the way every X client packs a TrueColor 24-bit one. The
+    // decoder under test instead derives its channels from the visual's masks,
+    // so the two arrive at the answer by different routes: if this server's
+    // masks were not the standard ones, the assertions would FAIL rather than
+    // quietly agree with a matching mistake.
+    let pixel = (u32::from(R) << 16) | (u32::from(G) << 8) | u32::from(B);
+    conn.change_window_attributes(
+        screen.root,
+        &ChangeWindowAttributesAux::new().background_pixel(pixel),
+    )
+    .expect("set root background")
+    .check()
+    .expect("root background applied");
+    // Width/height 0 means "to the far edge", i.e. the whole root.
+    conn.clear_area(false, screen.root, 0, 0, 0, 0).expect("clear root").check().expect("root cleared");
+
+    // `.check()` above already round-trips, so the server has processed the
+    // repaint before any grab happens - no sleeping, no polling.
+    Some(Display { _guard: guard, _conn: conn })
+}
+
+#[test]
+fn a_captured_root_window_has_the_colour_it_was_painted() {
+    let Some(_display) = x11_ready() else { return };
+    let (w, h, bgra) =
+        capture::grab_primary_bgra().expect("an X server is present, so a grab must succeed");
+
+    assert!(w > 0 && h > 0, "non-empty geometry");
+    assert_eq!(
+        bgra.len(),
+        w as usize * h as usize * 4,
+        "tightly packed BGRA: any scanline padding must already be stripped"
+    );
+
+    // Sample several places, not just the origin: a stride bug reads row 0
+    // correctly and drifts further wrong down the frame.
+    for (x, y) in [(0, 0), (w / 2, h / 2), (w - 1, h - 1), (w - 1, 0), (0, h - 1)] {
+        let o = (y as usize * w as usize + x as usize) * 4;
+        let px = (bgra[o], bgra[o + 1], bgra[o + 2], bgra[o + 3]);
+        assert_eq!(
+            px,
+            (B, G, R, 0xFF),
+            "pixel at ({x},{y}) should be the painted colour, as B,G,R,A"
+        );
+    }
+}
+
+/// The JPEG the client actually receives, decoded again — proving the whole
+/// chain (grab → BGRA → RGB → downscale → encode) keeps the colour, not just
+/// the grab. A channel swap in `bgra_to_jpeg` would survive the test above.
+#[test]
+fn the_encoded_preview_still_carries_the_painted_colour() {
+    let Some(_display) = x11_ready() else { return };
+    let (w, h, jpeg) = capture::capture_primary_jpeg(200, 90)
+        .expect("an X server is present, so a capture must succeed");
+    assert!(w <= 200 && h <= 200, "downscaled to the cap, got {w}x{h}");
+    assert!(jpeg.starts_with(&[0xFF, 0xD8]), "JPEG SOI marker");
+
+    let decoded = image::load_from_memory(&jpeg).expect("re-decodes").to_rgb8();
+    let centre = decoded.get_pixel(decoded.width() / 2, decoded.height() / 2).0;
+    // JPEG is lossy, so allow a tolerance — but one far tighter than the gap
+    // between any two of the three channels, which is what a swap would move.
+    for (got, want, name) in [(centre[0], R, "red"), (centre[1], G, "green"), (centre[2], B, "blue")]
+    {
+        assert!(
+            got.abs_diff(want) <= 8,
+            "{name} channel: got {got}, expected about {want} (full pixel {centre:?})"
+        );
+    }
+}
+
+/// A live server must report a working backend, and name which one.
+#[test]
+fn a_live_server_reports_a_working_backend() {
+    let Some(_display) = x11_ready() else { return };
+    let status = capture::status().expect("an X server is present, so status must be Ok");
+    assert!(status.contains("X11"), "the description names the path: {status}");
+    assert!(capture::is_available());
+}
+
+/// Two grabs in a row must both work: the SHM segment is attached once and
+/// reused, so a lifetime bug there shows up on the *second* call, not the first.
+#[test]
+fn repeated_grabs_reuse_the_connection_and_stay_correct() {
+    let Some(_display) = x11_ready() else { return };
+    let (w1, h1, a) = capture::grab_primary_bgra().expect("first grab");
+    let (w2, h2, b) = capture::grab_primary_bgra().expect("second grab");
+    assert_eq!((w1, h1), (w2, h2), "same geometry");
+    assert_eq!(a.len(), b.len(), "same buffer size");
+
+    // ⚠️ Never `assert_eq!` two framebuffers: a mismatch prints megabytes of
+    // bytes. Report where they first differ, and how many pixels did.
+    if let Some(at) = a.iter().zip(&b).position(|(x, y)| x != y) {
+        let differing = (0..a.len() / 4).filter(|i| a[i * 4..i * 4 + 4] != b[i * 4..i * 4 + 4]).count();
+        panic!(
+            "two grabs of a still screen differ: first at byte {at} (pixel {}),              {differing} of {} pixels differ",
+            at / 4,
+            a.len() / 4
+        );
+    }
+}
+
+/// ⚠️ **The two grab paths must agree pixel for pixel.** The MIT-SHM path was
+/// chosen on a *speed* measurement — 11× — with nothing checking what it
+/// actually wrote. A fast wrong frame looks exactly like a fast right one, so
+/// this compares the same screen through both and fails on the first byte that
+/// differs.
+#[test]
+fn shm_and_getimage_capture_the_same_screen() {
+    let Some(_display) = x11_ready() else { return };
+
+    let mut shm = capture::Capturer::open(true).expect("a capturer with SHM preferred");
+    let mut plain = capture::Capturer::open(false).expect("a capturer without SHM");
+    assert_eq!(plain.backend(), capture::Backend::GetImage, "the flag must be honoured");
+
+    let (sw, sh, a) = shm.grab_bgra().expect("shm-preferred grab");
+    let (pw, ph, b) = plain.grab_bgra().expect("getimage grab");
+    assert_eq!((sw, sh), (pw, ph), "same geometry from both paths");
+
+    if let Some(at) = a.iter().zip(&b).position(|(x, y)| x != y) {
+        let differing = (0..a.len() / 4).filter(|i| a[i * 4..i * 4 + 4] != b[i * 4..i * 4 + 4]).count();
+        let (pixel, row, total) = (at / 4, at / 4 / sw as usize, a.len() / 4);
+        panic!(
+            "{:?} and GetImage disagree: first at byte {at} (pixel {pixel}, row {row}),              {differing} of {total} pixels differ",
+            shm.backend()
+        );
+    }
+    // And whichever path this machine offers, the colour must still be right.
+    assert_eq!(a.first_chunk::<4>(), Some(&[B, G, R, 0xFF]), "top-left is the painted colour");
+}
+
+/// The window picker against a real server, with a window this test creates
+/// itself rather than an `xmessage` that may not be installed — which also lets
+/// it assert the *title* round-trips, not merely that something was found.
+///
+/// Under Xvfb there is no window manager, so this exercises the `query_tree`
+/// fallback specifically: the path a minimal session takes when nothing
+/// publishes `_NET_CLIENT_LIST`.
+#[test]
+fn the_window_picker_finds_a_mapped_titled_window_and_keeps_its_title() {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, CreateWindowAux, PropMode, WindowClass};
+    use x11rb::wrapper::ConnectionExt as _;
+
+    let Some(_display) = x11_ready() else { return };
+    // A non-ASCII title, so the UTF-8 `_NET_WM_NAME` path is the one under test —
+    // the legacy Latin-1 `WM_NAME` fallback could not carry this correctly.
+    const TITLE: &str = "UNI·SIM probe — slidedeck";
+
+    let (conn, screen_num) = x11rb::connect(None).expect("an X server is present");
+    let screen = &conn.setup().roots[screen_num];
+    let win = conn.generate_id().expect("a window id");
+    conn.create_window(
+        x11rb::COPY_DEPTH_FROM_PARENT,
+        win,
+        screen.root,
+        10,
+        10,
+        320,
+        200,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        screen.root_visual,
+        // Default `override_redirect` is false, which is what makes this window
+        // pickable — the flag menus and tooltips set to opt out of management.
+        &CreateWindowAux::new().background_pixel(screen.white_pixel),
+    )
+    .expect("create_window");
+
+    let utf8 = conn.intern_atom(false, b"UTF8_STRING").unwrap().reply().unwrap().atom;
+    let net_wm_name = conn.intern_atom(false, b"_NET_WM_NAME").unwrap().reply().unwrap().atom;
+    conn.change_property8(PropMode::REPLACE, win, net_wm_name, utf8, TITLE.as_bytes())
+        .expect("set _NET_WM_NAME");
+    conn.change_property8(
+        PropMode::REPLACE,
+        win,
+        u32::from(AtomEnum::WM_NAME),
+        u32::from(AtomEnum::STRING),
+        b"fallback",
+    )
+    .expect("set WM_NAME");
+    conn.map_window(win).expect("map_window");
+    conn.flush().expect("flush");
+
+    // Give the server time to make it viewable before another connection looks.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let windows = winlist::list_windows();
+    let found = windows.iter().find(|(_, t)| t == TITLE);
+    assert!(
+        found.is_some(),
+        "expected the created window titled {TITLE:?} in the list, got {windows:?}"
+    );
+    // ⚠️ `_NET_WM_NAME` must win over `WM_NAME`: reading the legacy property
+    // instead would hand the client "fallback", and would mangle any accented
+    // character in a real application's title.
+    assert_ne!(found.unwrap().1, "fallback", "the UTF-8 title must win over the legacy one");
+
+    // Raising it must not panic, WM or no WM.
+    winlist::focus_window(found.unwrap().0);
+
+    // An unmapped window must drop straight back out of the list.
+    conn.unmap_window(win).expect("unmap");
+    conn.flush().expect("flush");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        !winlist::list_windows().iter().any(|(_, t)| t == TITLE),
+        "an unmapped window is not pickable"
+    );
+
+    conn.destroy_window(win).expect("destroy");
+    let _ = conn.flush();
+}

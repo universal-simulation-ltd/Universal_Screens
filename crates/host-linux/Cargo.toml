@@ -30,3 +30,14 @@ qrcode = { version = "0.14", default-features = false }
 # X11 *and* every Wayland compositor, with no portal consent dialog and no
 # display-server detection. See docs/LINUX-HOST.md §3. Pure Rust — no C deps.
 evdev = "0.13"
+# X11 screen capture and the EWMH window picker (Stage 2 of docs/LINUX-HOST.md).
+# x11rb speaks the X protocol over the socket itself, so NOTHING is linked: no
+# libX11, no libxcb, and so nothing for an AppImage to fail to find. `shm` adds
+# the MIT-SHM requests, which measured 11x faster than GetImage (0.93 ms vs
+# 10.7 ms at 1920x1080) — and notably does NOT require `allow-unsafe-code`,
+# which is the feature that would have pulled in `as-raw-xcb-connection` and put
+# libxcb back on the link line.
+x11rb = { version = "0.13", features = ["shm"] }
+# Only for the SysV shared-memory calls MIT-SHM needs (shmget/shmat/shmdt);
+# already in the tree beneath evdev.
+libc = "0.2"
