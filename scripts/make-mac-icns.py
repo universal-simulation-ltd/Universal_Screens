@@ -15,16 +15,19 @@ this uses `opaque=False`, keeping render_icon's rounded-square on a transparent
 canvas. Passing opaque=True (the iOS setting) would put a hard-cornered square in
 the Dock next to every rounded one.
 
-`iconutil` is the only supported way to build an .icns and ships with macOS, so
-this script is macOS-only by necessity — there is no Windows twin.
+`iconutil` (macOS-only) is used when it is there. Off macOS — a Linux CI box, or
+whoever is editing the artwork that day — `write_icns()` below assembles the same
+container by hand, so the committed .icns never goes stale just because nobody had
+a Mac handy.
 
 Run after changing the artwork:  python3 scripts/make-mac-icns.py
 """
 import importlib.util
+import io
 import os
 import shutil
+import struct
 import subprocess
-import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,27 +52,94 @@ SIZES = [
     (512, 1), (512, 2),
 ]
 
+# The icns element type for each (base, scale), for the no-iconutil path — the
+# same set iconutil emits: PNG payloads throughout, except the 16 and 32 px 1x
+# entries, which it writes as raw ARGB. Matching it keeps the hand-built file to
+# a shape every macOS already reads.
+ICNS_TYPES = {
+    (16, 1): "ic04", (16, 2): "ic11",
+    (32, 1): "ic05", (32, 2): "ic12",
+    (128, 1): "ic07", (128, 2): "ic13",
+    (256, 1): "ic08", (256, 2): "ic14",
+    (512, 1): "ic09", (512, 2): "ic10",
+}
+
+
+def _rle24(channel: bytes) -> bytes:
+    """PackBits-style RLE, in the variant icns uses for its raw-pixel elements.
+
+    Control byte < 0x80 → the next (n + 1) bytes are literal; >= 0x80 → the next
+    byte repeats (n - 125) times. So runs are 3..130 long and literals 1..128.
+    """
+    out = bytearray()
+    i, n = 0, len(channel)
+    while i < n:
+        run = 1
+        while i + run < n and channel[i + run] == channel[i] and run < 130:
+            run += 1
+        if run >= 3:
+            out.append(run + 125)
+            out.append(channel[i])
+            i += run
+            continue
+        # No run worth encoding — gather literals until one starts.
+        start = i
+        while i < n and i - start < 128:
+            if i + 2 < n and channel[i] == channel[i + 1] == channel[i + 2]:
+                break
+            i += 1
+        out.append(i - start - 1)
+        out += channel[start:i]
+    return bytes(out)
+
+
+def _argb_element(img) -> bytes:
+    """An 'ARGB' payload: the magic, then each channel RLE'd in A, R, G, B order."""
+    channels = (img.getchannel(c).tobytes() for c in "ARGB")
+    return b"ARGB" + b"".join(_rle24(ch) for ch in channels)
+
+
+def write_icns(images: dict, path: str) -> None:
+    """Write `{(base, scale): PIL image}` as an .icns, without iconutil.
+
+    The container is trivial: 'icns', the total byte length, then one element per
+    entry — a 4-char type, the element's own length (header included), payload.
+    """
+    body = bytearray()
+    for key, img in images.items():
+        kind = ICNS_TYPES[key]
+        if kind in ("ic04", "ic05"):
+            payload = _argb_element(img)
+        else:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            payload = buf.getvalue()
+        body += kind.encode("ascii") + struct.pack(">I", len(payload) + 8) + payload
+    with open(path, "wb") as f:
+        f.write(b"icns" + struct.pack(">I", len(body) + 8) + bytes(body))
+
 
 def main() -> None:
-    if sys.platform != "darwin":
-        sys.exit("make-mac-icns.py needs macOS (iconutil). Nothing else builds .icns.")
-    if not shutil.which("iconutil"):
-        sys.exit("iconutil not found — it ships with macOS; is this a full install?")
-
     os.makedirs(OUT_DIR, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        iconset = os.path.join(tmp, "AppIcon.iconset")
-        os.makedirs(iconset)
-        for base, scale in SIZES:
-            px = base * scale
-            suffix = "" if scale == 1 else "@2x"
-            name = f"icon_{base}x{base}{suffix}.png"
-            _mod.render_icon(px, opaque=False).save(os.path.join(iconset, name))
-            print(f"  rendered {name} ({px}px)")
-        subprocess.run(
-            ["iconutil", "-c", "icns", iconset, "-o", os.path.abspath(OUT)],
-            check=True,
-        )
+    images = {}
+    for base, scale in SIZES:
+        px = base * scale
+        images[(base, scale)] = _mod.render_icon(px, opaque=False)
+        print(f"  rendered {base}x{base}{'' if scale == 1 else '@2x'} ({px}px)")
+
+    if shutil.which("iconutil"):
+        with tempfile.TemporaryDirectory() as tmp:
+            iconset = os.path.join(tmp, "AppIcon.iconset")
+            os.makedirs(iconset)
+            for (base, scale), img in images.items():
+                suffix = "" if scale == 1 else "@2x"
+                img.save(os.path.join(iconset, f"icon_{base}x{base}{suffix}.png"))
+            subprocess.run(
+                ["iconutil", "-c", "icns", iconset, "-o", os.path.abspath(OUT)],
+                check=True,
+            )
+    else:
+        write_icns(images, os.path.abspath(OUT))
     print("wrote", os.path.normpath(OUT))
 
 

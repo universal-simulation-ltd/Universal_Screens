@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Generate the Universal Screens app icon (laptop + phone, dark with orange accent).
 
+The laptop's display is white — the lit screen is what the product is about, and
+on the dark rounded square it is also the shape that survives a 16 px render.
+
 Renders at 4x and downsamples with LANCZOS for smooth edges. Output:
   crates/host-windows/assets/app-icon.png  (256x256 RGBA)
 
@@ -23,11 +26,11 @@ SLATE800 = (30, 41, 59, 255)
 SLATE600 = (51, 65, 85, 255)
 SLATE500 = (71, 85, 105, 255)
 SLATE400 = (100, 116, 139, 255)
-SCREEN   = (11, 18, 32, 255)
+SCREEN   = (255, 255, 255, 255)  # the laptop display — lit, white
 ORANGE   = (224, 85, 4, 255)   # #e05504
-# Phone "text" lines on the orange screen — a darker orange-brown chosen to sit on
-# ORANGE with roughly the same contrast the laptop's slate lines have on its dark
-# screen (~2.7:1), so both screens read as content at a matching strength.
+# Phone "text" lines on the orange screen — a darker orange-brown, the closest the
+# orange screen gets to the way the slate lines read on the laptop's white one, so
+# both screens read as content rather than as flat fills.
 PHONE_LN = (116, 44, 4, 255)
 # Light slates for the laptop, so it reads clearly against the dark background.
 LAPTOP   = (203, 213, 225, 255)  # slate-300 — screen bezel
@@ -68,7 +71,7 @@ def render_icon(px: int, opaque: bool = False) -> Image.Image:
 
     # Laptop — screen lid (bezel + display), then the keyboard deck below.
     rr([62, 50, 194, 144], 12, LAPTOP)
-    rr([72, 60, 184, 134], 7, SCREEN)
+    rr([72, 60, 184, 134], 7, SCREEN)       # white display
     rr([84, 72, 148, 80], 4, ORANGE)        # orange accent line on the display
     rr([84, 90, 168, 96], 3, SLATE500)
     rr([84, 104, 134, 110], 3, SLATE500)
