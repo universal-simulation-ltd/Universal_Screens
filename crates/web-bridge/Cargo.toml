@@ -8,10 +8,24 @@ license.workspace = true
 # so a browser tab can reach an `extender-host`. See docs/M7-browser-client.md.
 
 [dependencies]
-# native-tls so the dial-the-room client can reach the cloud rendezvous over
-# wss:// (the LAN listener path needs no TLS). macOS uses Security.framework,
-# Windows uses SChannel — no OpenSSL to vendor.
-tungstenite = { version = "0.24", features = ["native-tls"] }
+# rustls so the dial-the-room client can reach the cloud rendezvous over wss://
+# (the LAN listener path needs no TLS). NOT native-tls: on Linux that *is*
+# OpenSSL, so the binary picks up a `libssl.so.3` runtime dependency that a
+# download-and-run AppImage cannot carry. rustls links no system TLS at all.
+#
+# `-native-roots` rather than `-webpki-roots`: the bundled-roots variant ignores
+# the machine's trust store, so a corporate network that intercepts TLS — where
+# the rendezvous certificate is re-signed by an internal CA — would fail to
+# connect. Reading the platform store costs nothing on Windows (SChannel) or
+# macOS (Security.framework), and on Linux is a path probe for /etc/ssl/certs,
+# not a link against OpenSSL.
+tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+# Direct rustls dep purely to choose the crypto provider: tungstenite pulls
+# rustls with `default-features = false`, so NEITHER `ring` nor `aws-lc-rs` is
+# enabled and `ClientConfig::builder()` would panic at the first wss:// dial
+# ("no process-level CryptoProvider"). `ring` vendors its own C/asm and needs no
+# cmake or nasm, so it cross-compiles on all three hosts' CI runners unchanged.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 # Nearby hosts for the web client: the bridge browses DNS-SD (a browser tab
 # can't multicast) and serves the peer list over GET /peers.
 extender-discovery.workspace = true

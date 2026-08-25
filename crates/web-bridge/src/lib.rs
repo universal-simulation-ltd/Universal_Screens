@@ -368,13 +368,32 @@ fn signal_type(text: &str) -> Option<&str> {
     Some(&after_colon[open..close])
 }
 
+/// Install `ring` as the process-wide rustls crypto provider, once.
+///
+/// tungstenite depends on rustls with `default-features = false`, so no provider
+/// is compiled in by *its* features; the `rustls` dependency in this crate's
+/// Cargo.toml is what supplies `ring`. Without a provider, the
+/// `ClientConfig::builder()` inside tungstenite's `wss://` path **panics** —
+/// there is no `Result` to handle, and nothing fails until the first dial. So
+/// claim the slot explicitly rather than leaning on rustls' fall-back of
+/// picking a provider from whatever crate features happen to be enabled, which
+/// also panics if a second provider ever enters the tree.
+///
+/// Idempotent: a later call finds the slot taken and leaves the winner in place,
+/// which is fine because both calls install the same provider.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Set the underlying TCP socket of a (possibly TLS-wrapped) client WebSocket to
 /// (non)blocking. The data phase wants nonblocking so a quiet upstream doesn't
 /// stall downstream delivery (same reasoning as [`proxy_connection`]).
 fn set_room_nonblocking(ws: &WebSocket<MaybeTlsStream<TcpStream>>, nonblocking: bool) -> io::Result<()> {
     match ws.get_ref() {
         MaybeTlsStream::Plain(s) => s.set_nonblocking(nonblocking),
-        MaybeTlsStream::NativeTls(s) => s.get_ref().set_nonblocking(nonblocking),
+        // `StreamOwned::sock` is the wrapped TCP stream; rustls itself has no
+        // socket options to set, so the flag goes straight through to it.
+        MaybeTlsStream::Rustls(s) => s.sock.set_nonblocking(nonblocking),
         // MaybeTlsStream is #[non_exhaustive]; other variants aren't produced here.
         _ => Ok(()),
     }
@@ -395,6 +414,7 @@ fn set_room_nonblocking(ws: &WebSocket<MaybeTlsStream<TcpStream>>, nonblocking: 
 /// # Errors
 /// Returns an error if the room connection, the host connection, or a forward fails.
 pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> {
+    install_crypto_provider();
     let url = format!("{}/screens/room?code={}&role=sender", base_url.trim_end_matches('/'), code);
     let (mut ws, _resp) =
         tungstenite::connect(&url).map_err(|e| io::Error::other(format!("room connect failed: {e}")))?;
