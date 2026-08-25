@@ -1,0 +1,17 @@
+[package]
+name = "extender-h264"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+# Only for the downscale in `fit_to_encode`. No OS crates, no codec: this crate
+# is deliberately buildable on every target the workspace has, which is what
+# makes it safe for a host on any platform to depend on.
+image = { version = "0.25", default-features = false }
+
+[dev-dependencies]
+# Only to prove this crate and the CLIENT side agree: `extender-protocol` owns
+# the inverse (AVCC -> Annex-B), and the round-trip test below is what stops the
+# two drifting into a format only one of them can read.
+extender-protocol.workspace = true

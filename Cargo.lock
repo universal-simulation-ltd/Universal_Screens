@@ -1392,6 +1392,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "extender-h264"
+version = "0.1.0"
+dependencies = [
+ "extender-protocol",
+ "image",
+]
+
+[[package]]
 name = "extender-host"
 version = "0.1.0"
 dependencies = [
@@ -1415,10 +1423,12 @@ dependencies = [
  "eframe",
  "evdev",
  "extender-discovery",
+ "extender-h264",
  "extender-protocol",
  "extender-transport",
  "image",
  "libc",
+ "openh264",
  "qrcode",
  "serde",
  "x11rb",
@@ -1449,6 +1459,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "extender-discovery",
+ "extender-h264",
  "extender-protocol",
  "extender-transport",
  "extender-web-bridge",

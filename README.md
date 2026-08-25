@@ -11,7 +11,8 @@ prefixed `postcard` frames; H.264 for video):
 
 - **Host** = the machine that *gives up* a screen (captures + streams it, and/or
   receives input). `extender-host-windows` (Windows), `extender-host` (macOS) and
-  `extender-host-linux` (Linux, X11: clicker with previews — no mirror yet).
+  `extender-host-linux` (Linux; clicker everywhere, plus previews and mirror on
+  X11).
 - **Client** = the device that *shows / drives* it. `extender-client` (desktop,
   cross-platform) and the **Android app** (`apps/android`); **iOS** is a scaffold.
 
@@ -27,7 +28,8 @@ for Windows* → Windows is the host, phone is the client).
 | `crates/core` | client `Session` (handshake, event stream, input). |
 | `crates/host` | macOS host — ScreenCaptureKit + VideoToolbox, CGVirtualDisplay (extend). |
 | `crates/host-windows` | Windows host — clicker, mirror, remote control, second screen, trackpad, GUI. |
-| `crates/host-linux` | Linux host — clicker + trackpad (uinput), slide previews + window picker (X11). No mirror yet: see [docs/LINUX-HOST.md](docs/LINUX-HOST.md). |
+| `crates/host-linux` | Linux host — clicker + trackpad (uinput), and on X11: slide previews, window picker, H.264 mirror. No second screen: see [docs/LINUX-HOST.md](docs/LINUX-HOST.md). |
+| `crates/h264` | Annex-B → wire framing + encode sizing, shared by the mirroring hosts. |
 | `crates/client` | desktop client — openh264 decode + wgpu display. |
 | `crates/mobile-ffi` | C ABI for mobile clients (`extender_ffi.h`). |
 | `crates/android-jni` | JNI bridge → `libextender_mobile.so`. |
@@ -47,9 +49,12 @@ for Windows* → Windows is the host, phone is the client).
 
 macOS host streams to the desktop client for the same modes (the original path).
 
-**Linux hosts the Clicker and Trackpad**, now with slide previews, the deck scan
-and the window picker. There is no video encoder yet, so **Mirror, Remote control
-and Second screen are still unavailable**.
+**Linux hosts the Clicker and Trackpad** everywhere, and on an **X11** session
+also slide previews, the deck scan, the window picker and **Mirror / Remote
+control** (H.264, software openh264, same 30 fps and ≤1280px cap as Windows).
+**Second screen is still unavailable** — it needs a virtual display, which on
+X11 means an `xrandr` VIRTUAL output and is deferred; a client that asks for one
+is mirrored instead.
 
 ⚠️ **Capture on Linux is X11 only, and that is a permanent split rather than a
 staging one.** Injection goes through uinput, which works identically under X11

@@ -43,7 +43,7 @@ if [[ "$OS" == "Darwin" ]]; then
   echo "Find this Mac's LAN IP with: ipconfig getifaddr en0   (or en1 for Wi-Fi)"
 else
   echo "Find this machine's LAN IP with: ip -4 -o addr show scope global"
-  echo "This host is input-only: clicker and trackpad, no screen mirroring."
+  echo "Clicker and trackpad always; previews, window picker and mirroring need X11."
 fi
 echo "Then on the client machine, run: cargo run --release -p extender-client -- <host-ip>:9000"
 echo ""

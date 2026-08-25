@@ -2,10 +2,12 @@
 //! local desktop through the kernel's **uinput** device (see [`inject`]).
 //!
 //! A phone can drive PowerPoint, LibreOffice Impress or a PDF on this machine,
-//! see live slide previews of it, and pick which window the keys land in. What
-//! it cannot do here is *mirror*: there is no H.264 video stream yet.
+//! see live slide previews of it, and pick which window the keys land in — and,
+//! on an X11 session, watch the screen itself: [`stream`] mirrors it as H.264
+//! (Stage 2b of `docs/LINUX-HOST.md`). What it still cannot do is act as a
+//! *second screen*: that needs an `xrandr` VIRTUAL output and is deferred.
 //!
-//! ⚠️ **Previews and the window picker are X11 only** — Stage 2 of
+//! ⚠️ **Previews, the mirror and the window picker are X11 only** — Stage 2 of
 //! `docs/LINUX-HOST.md`. Injection (uinput) is one implementation that works
 //! under X11 and every Wayland compositor alike; capture is not, and Wayland's
 //! is a different job again (portal + PipeWire, Stage 3). On Wayland both
@@ -23,6 +25,8 @@ mod firewall;
 mod gui;
 mod inject;
 mod qr;
+/// The H.264 mirror (Stage 2b) — X11 capture into openh264, wired in `serve`.
+mod stream;
 mod wifi;
 mod winlist;
 /// Live-X-server tests; see the module docs for how to run them and for why a
@@ -206,15 +210,26 @@ fn read_hello(
     Some((hello.platform, hello.capture_mode))
 }
 
-/// Serve one client until it disconnects.
+/// Serve one client until it disconnects: the clicker for
+/// [`CaptureMode::ControlOnly`], otherwise the H.264 mirror.
 ///
-/// WARNING: **A mirror/second-screen request is served as a clicker, not
+/// WARNING: **a mode this host can't do is served as something else, not
 /// refused.** The protocol's own note on [`CaptureMode::ControlOnly`] says a
 /// host that can't do a mode may fall back - and the client has already drawn
-/// its mode picker by the time it connects. Injecting input while sending no
-/// video degrades to a working remote control; rejecting the session gives the
-/// user a dead app and no reason. X11 capture (Stage 2) gives this host slide
-/// previews, but not yet the H.264 stream a mirror needs.
+/// its mode picker by the time it connects. Rejecting the session gives the user
+/// a dead app and no reason.
+///
+/// Two requests still take a fall-back, and they are different:
+///
+/// - **A mirror with no X server** (a Wayland session without XWayland, or a
+///   headless machine). There is nothing to photograph, so the mirror is
+///   impossible rather than merely absent; the client is served as a clicker,
+///   which is a working remote control with no video. Wayland capture is Stage 3
+///   of `docs/LINUX-HOST.md`.
+/// - **A second-screen request.** That needs a virtual display - on X11 an
+///   `xrandr` VIRTUAL output, which is deferred (§7). Its fall-back is a
+///   *mirror*, not a clicker: the phone still shows the desktop, it just shows
+///   the same one the monitor does. [`stream::run`] logs that it happened.
 fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle - low latency for input
 
@@ -222,13 +237,70 @@ fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Erro
     let name = host_name();
     let _ = protocol::write_framed(&mut writer, &Message::HostInfo { os: "linux".into(), name });
 
-    if mode != CaptureMode::ControlOnly {
-        eprintln!(
-            "client asked for {mode:?}; this host has no video stream yet - serving as a \
-             clicker with slide previews (see docs/LINUX-HOST.md)"
-        );
+    if mode == CaptureMode::ControlOnly {
+        return serve_clicker(stream, writer);
     }
-    serve_clicker(stream, writer)
+    match capture::status() {
+        Ok(backend) => {
+            println!("serving {mode:?} as a mirror ({backend})");
+            serve_mirror(stream, writer, mode == CaptureMode::VirtualDisplay)
+        }
+        Err(reason) => {
+            eprintln!(
+                "client asked for {mode:?}, but {reason} - serving as a clicker instead \
+                 (see docs/LINUX-HOST.md)"
+            );
+            serve_clicker(stream, writer)
+        }
+    }
+}
+
+/// Mirror / remote control: stream the screen as H.264 on a worker thread while
+/// this thread injects the client's input.
+///
+/// WARNING: no slide previews here, matching the Windows host. A mirror already
+/// shows the slide, at 30 fps, so a second and slower picture of the same screen
+/// would be redundant traffic - and the deck scan's page-turn storm would be
+/// visible in the mirror as the desktop flickering through the whole deck.
+fn serve_mirror(
+    stream: Conn,
+    writer: Conn,
+    second_screen: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let injector = open_injector();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+    let stream_thread = thread::spawn(move || stream::run(writer, &stop_worker, second_screen));
+
+    let mut input = stream;
+    while let Ok(event) = protocol::read_framed::<_, Input>(&mut input) {
+        if let Ok(mut guard) = injector.lock() {
+            if let Some(i) = guard.as_mut() {
+                i.inject(event);
+            }
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed); // end the stream when the client goes
+    let _ = stream_thread.join();
+    Ok(())
+}
+
+/// Open the uinput injector for one session, or report why it could not be
+/// opened and carry on without one.
+///
+/// Reported **once per session rather than per keystroke**, and the session is
+/// kept alive either way: the client shows "connected" and the GUI's uinput
+/// warning is what explains why nothing moves. A session that died here instead
+/// would look to the user like a network fault.
+fn open_injector() -> SharedInjector {
+    Arc::new(Mutex::new(match Injector::new() {
+        Ok(i) => Some(i),
+        Err(e) => {
+            eprintln!("cannot open uinput ({e}) - input will not be injected");
+            None
+        }
+    }))
 }
 
 /// Clicker: inject input, and drive slide previews, the deck scan and the window
@@ -239,16 +311,7 @@ fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Erro
 /// inline would stall the next keystroke behind the preview of the last one -
 /// and a clicker's whole value is that the key lands instantly.
 fn serve_clicker(stream: Conn, writer: Conn) -> Result<(), Box<dyn std::error::Error>> {
-    let injector: SharedInjector = Arc::new(Mutex::new(match Injector::new() {
-        Ok(i) => Some(i),
-        Err(e) => {
-            // Report it once per session rather than per keystroke, and keep the
-            // session alive so the client shows "connected" and the GUI's uinput
-            // warning is what explains the silence.
-            eprintln!("cannot open uinput ({e}) - input will not be injected");
-            None
-        }
-    }));
+    let injector = open_injector();
 
     let (snap_tx, snap_rx) = mpsc::channel::<SnapReq>();
     let snap_injector = Arc::clone(&injector);

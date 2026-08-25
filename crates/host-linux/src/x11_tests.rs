@@ -305,3 +305,112 @@ fn the_window_picker_finds_a_mapped_titled_window_and_keeps_its_title() {
     conn.destroy_window(win).expect("destroy");
     let _ = conn.flush();
 }
+
+/// The whole mirror, end to end: paint the root, run [`crate::stream`] against a
+/// loopback socket, and **decode what comes out** with the same openh264 the
+/// desktop client uses — then check the picture is the colour that was painted.
+///
+/// ⚠️ This is the test the Stage 2a work could not have: every earlier capture
+/// test stops at BGRA or JPEG. A mirror can fail in four more places after that
+/// — a wrong `StreamStart`, parameter sets sent in the wrong form, AVCC lengths
+/// off by the prefix, or a channel swap in the BGRA→YUV conversion — and every
+/// one of them produces a stream that *arrives* and is either garbage or the
+/// wrong colour. Bytes flowing is not a working mirror.
+///
+/// It uses the *client's* helpers to rebuild the access unit, so a host that
+/// framed the stream in a way only the host could read fails here.
+#[test]
+fn the_mirror_streams_decodable_frames_of_the_painted_screen() {
+    use std::io::Read;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use extender_protocol::{self as protocol, Codec, Message};
+    use extender_transport::Conn;
+    // `dimensions`/`rgb8_len` come from the trait, not the struct.
+    use openh264::formats::YUVSource;
+
+    let Some(_display) = x11_ready() else { return };
+
+    // A loopback pair standing in for a connected client. Plaintext: the Noise
+    // handshake is the transport crate's business and is tested there, and
+    // wrapping it here would test encryption rather than video.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let mut client = TcpStream::connect(addr).expect("connect loopback");
+    let (server, _) = listener.accept().expect("accept loopback");
+    // Bound every read: a mirror that silently sends nothing must fail the test
+    // rather than hang the whole suite with no output.
+    client
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .expect("read timeout");
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+    let host = std::thread::spawn(move || crate::stream::run(Conn::Plain(server), &stop_worker, false));
+
+    // 1. The stream must open with geometry a client can size a surface from.
+    let start: Message = protocol::read_framed(&mut client).expect("StreamStart arrives");
+    let Message::StreamStart { width, height, codec, parameter_sets } = start else {
+        panic!("the first message must be StreamStart, got {start:?}");
+    };
+    assert_eq!(codec, Codec::H264);
+    assert!(width > 0 && height > 0, "non-empty geometry: {width}x{height}");
+    assert_eq!(width % 2, 0, "H.264 needs even dimensions, got width {width}");
+    assert_eq!(height % 2, 0, "H.264 needs even dimensions, got height {height}");
+    assert!(width.max(height) <= 1280, "the long side is capped, got {width}x{height}");
+    assert!(!parameter_sets.is_empty(), "SPS/PPS must open the stream");
+
+    // 2. Decode frames until the decoder yields a picture. openh264 can need
+    //    more than one access unit before it emits one, so this is a loop with a
+    //    bound rather than a single decode.
+    let mut decoder = openh264::decoder::Decoder::new().expect("decoder");
+    let sps_pps = protocol::annex_b_parameter_sets(&parameter_sets);
+    let mut picture = None;
+    for _ in 0..30 {
+        let msg: Message = protocol::read_framed(&mut client).expect("a Frame arrives");
+        let Message::Frame { data, keyframe, .. } = msg else {
+            continue; // not video (nothing else is sent in mirror mode, but be exact)
+        };
+        let mut au = if keyframe { sps_pps.clone() } else { Vec::new() };
+        protocol::append_annex_b(&mut au, &data);
+        if let Ok(Some(yuv)) = decoder.decode(&au) {
+            let (w, h) = yuv.dimensions();
+            let mut rgb = vec![0u8; yuv.rgb8_len()];
+            yuv.write_rgb8(&mut rgb);
+            picture = Some((w, h, rgb));
+            break;
+        }
+    }
+    let (dw, dh, rgb) = picture.expect("openh264 must produce a picture from the host's stream");
+    assert_eq!((dw as u32, dh as u32), (width, height), "decoded size matches StreamStart");
+
+    // 3. And it must be the colour the root was painted. Sample away from the
+    //    edges: H.264 pads to macroblocks, so the last few rows are the least
+    //    trustworthy place to judge a channel swap from.
+    let (x, y) = (dw / 2, dh / 2);
+    let o = (y * dw + x) * 3;
+    let centre = (rgb[o], rgb[o + 1], rgb[o + 2]);
+    // Lossy at 4:2:0 plus a BT.601 round trip, so a tolerance — but 24 is far
+    // less than the 32 and 80 that separate the three painted channels, which is
+    // what any swap would have to move.
+    for (got, want, name) in [(centre.0, R, "red"), (centre.1, G, "green"), (centre.2, B, "blue")] {
+        assert!(
+            got.abs_diff(want) <= 24,
+            "{name} channel: got {got}, expected about {want} (full pixel {centre:?})"
+        );
+    }
+
+    // Stop the host, then close our end so a thread parked in a socket write
+    // cannot outlive the test.
+    stop.store(true, Ordering::Relaxed);
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    let mut drain = [0u8; 4096];
+    while let Ok(n) = client.read(&mut drain) {
+        if n == 0 {
+            break;
+        }
+    }
+    host.join().expect("the stream thread exits");
+}

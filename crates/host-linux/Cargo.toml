@@ -41,3 +41,13 @@ x11rb = { version = "0.13", features = ["shm"] }
 # Only for the SysV shared-memory calls MIT-SHM needs (shmget/shmat/shmdt);
 # already in the tree beneath evdev.
 libc = "0.2"
+# Mirror / remote-control: H.264-encode the captured screen (software; builds
+# openh264 from source via openh264-sys2, so a Linux build machine needs
+# `build-essential` + `nasm` — see docs/LINUX-HOST.md §1). Nothing is linked
+# dynamically, so the AppImage gains no new runtime dependency.
+openh264 = "0.9"
+# The wire framing (Annex-B → raw parameter sets + AVCC frame data) and the
+# encode-size maths, shared with the Windows host rather than forked: the format
+# is the *client's* contract, so two copies would mean two answers.
+extender-h264.workspace = true
+

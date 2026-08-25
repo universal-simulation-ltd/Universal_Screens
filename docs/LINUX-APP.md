@@ -1,9 +1,18 @@
 # Universal Screens on Linux
 
 The Linux host is the **clicker and trackpad**: your phone drives the keyboard
-and mouse on this machine. Mirror, remote control and second screen are Windows
-and macOS for now — [`LINUX-HOST.md`](LINUX-HOST.md) is the scope that explains
-why capture is a separate project and injection isn't.
+and mouse on this machine. On an **X11** session it also does **slide previews,
+the window picker, and screen mirroring / remote control**. Using the phone as a
+**second screen** is Windows and macOS only.
+
+⚠️ **Which of those you get depends on your session, and the app tells you
+which.** Everything except the clicker and trackpad needs X11: on Wayland there
+is no way to read the screen without a per-session consent dialog that isn't
+built yet, and no way to list windows at all. The host window says
+"Screen mirroring and previews ready" or "Screen mirroring off" on startup, and
+the log line says the same.
+[`LINUX-HOST.md`](LINUX-HOST.md) is the scope that explains why capture forks
+that way and injection doesn't.
 
 ## Install
 
@@ -75,28 +84,34 @@ sudo ufw allow 9000/tcp                                                         
 
 These are properties of the platform, not bugs:
 
-- **No screen mirroring, remote control or second screen.** Capture forks into
-  an X11 implementation and a Wayland/PipeWire one; see
+- **No second screen.** Mirroring shows the phone what your monitor already
+  shows; using it as an *extra* display needs a virtual monitor, which on Linux
+  means an `xrandr` VIRTUAL output and isn't built. Pick Second screen and you
+  get a **mirror** instead, which the host log says out loud.
+- **On Wayland, no mirroring, no remote control, no slide previews and no window
+  picker.** Capture forks into an X11 implementation and a Wayland/PipeWire one;
+  window enumeration has no Wayland protocol *by design*. See
   [`LINUX-HOST.md`](LINUX-HOST.md) §3.
-  ⚠️ **The phone's mode picker doesn't know that.** It offers every mode against
-  every host, because nothing in the protocol lets a host advertise what it can't
-  do. Pick Mirror against a Linux host and you get a **black screen** — your keys
-  and trackpad still work, because the session is served as a clicker, but no
-  video ever arrives. Telling the phone properly needs a protocol addition and a
-  client release, so for now: pick Clicker or Trackpad.
-- **No window picker.** The Windows clicker can list your open windows and bring
-  one to the front. Wayland has no window-enumeration protocol *by design*, so
-  the host answers the phone with an empty list and your keystrokes go to
-  whatever is focused.
+  ⚠️ **The phone's mode picker doesn't know which session you're on.** It offers
+  every mode against every host, because nothing in the protocol lets a host
+  advertise what it can't do. Pick Mirror against a Wayland Linux host and you
+  get a **black screen** — your keys and trackpad still work, because the session
+  is served as a clicker, but no video ever arrives. Telling the phone properly
+  needs a protocol addition and a client release, so on Wayland: pick Clicker or
+  Trackpad.
+- **Tapping the mirrored picture doesn't move the pointer.** Remote control is
+  driven by *relative* motion — the trackpad — on Linux and Windows alike;
+  absolute taps are ignored by both hosts.
 - ⚠️ **Typing from the phone's soft keyboard assumes a US QWERTY layout.**
   uinput sends key *positions*, and your compositor applies your layout
   afterwards — so on AZERTY, asking for `a` produces `q`. Non-ASCII characters
   can't be sent at all. The keys that matter for presenting — arrows, PageUp,
   PageDown, F5, Escape, `b`/`w`/`.` for blanking — are layout-independent and
   unaffected.
-- **Wayland is unaffected by all of the above.** uinput sits below the display
-  server, so the clicker works identically under X11, GNOME, KDE and wlroots,
-  with no portal consent dialog.
+- **The clicker and trackpad are unaffected by all of the above.** uinput sits
+  below the display server, so they work identically under X11, GNOME, KDE and
+  wlroots, with no portal consent dialog. It is only the parts that need to
+  *read* the screen that fork.
 
 ## Running headless
 
@@ -113,14 +128,18 @@ writable.
 
 ```bash
 sudo apt-get install -y pkg-config libx11-dev libxcursor-dev libxrandr-dev \
-  libxi-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev
+  libxi-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+  build-essential nasm
 cargo run -p extender-host-linux            # GUI
 cargo run -p extender-host-linux -- 0.0.0.0:9000   # headless
 ./scripts/build-appimage.sh                 # dist/UniversalScreens-*.AppImage
 ```
 
-Unlike the Windows host, **NASM is not needed** — there is no openh264 in this
-build, because there is no video to encode.
+⚠️ **`build-essential` and `nasm` are in that list for the mirror**, and this
+document used to say NASM was *not* needed. Since Stage 2b the build carries
+openh264, which `openh264-sys2` compiles from source, and its x86 assembly needs
+an assembler. Without them the build fails inside a C build script, with an
+error that names `nasm` and never mentions video.
 
 ⚠️ **Build the AppImage on the oldest distro you intend to support**, or let
 [`linux-release.yml`](../.github/workflows/linux-release.yml) do it (pinned to

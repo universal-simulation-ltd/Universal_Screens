@@ -1,13 +1,14 @@
 # Linux host — feasibility and scope
 
-**Status: Stages 1 and 2 are built** (`crates/host-linux`, 2026-08-25). The
+**Status: Stages 1, 2a and 2b are built** (`crates/host-linux`, 2026-08-25). The
 backlog said a Linux host "should be scoped as one before anyone starts" — this
 is that scope, kept as the plan for the rest and as the record of why the Linux
 host looks different from the other two.
 
-The clicker now has **slide previews, the deck scan and the window picker** on
-X11. What is left of Stage 2 is the H.264 *mirror* ("2b" below); Wayland capture
-is Stage 3 and is still a different job entirely.
+On X11 the host now does **slide previews, the deck scan, the window picker and
+the H.264 mirror** (Mirror and Remote control). Wayland capture is Stage 3 and is
+still a different job entirely; **second screen** is deferred, and a client that
+asks for one gets a mirror of the main display rather than a refusal.
 
 **Verdict: feasible, and the shared spine is already portable — but it is not one
 port.** Linux has two display stacks with different capabilities, and the app's
@@ -37,7 +38,10 @@ Both failures are **cross-compiling from Windows**, not portability:
 - `extender-client` — `openh264-sys2` wants `x86_64-linux-gnu-g++`. NASM
   assembled the x86 source fine; only the C++ compiler is missing. Natively on
   Linux this is `build-essential` + `nasm`, the same NASM requirement the Windows
-  host already documents.
+  host already documents. ⚠️ **Since Stage 2b this applies to `host-linux`
+  itself**, which now builds the same encoder: `linux-release.yml` installs both,
+  and without nasm the build fails inside a C build script whose error never
+  mentions the mirror.
 - `extender-web-bridge` — `openssl-sys` can't find a Linux libssl. ✅ **Fixed
   2026-08-25**, and the crate now builds and tests on Linux; see below.
 
@@ -71,8 +75,9 @@ On Linux reading the platform store is `openssl-probe` looking up
 
 The Windows host is 3,429 lines. Subtract the parts that are already OS-agnostic
 in substance — the 1,598-line egui GUI, QR rendering, the discovery adapter, and
-the openh264 encode and framing in `stream.rs` — and the actual platform surface
-is **about 880 lines across six primitives**:
+the openh264 encode and framing in `stream.rs` (the framing is now literally
+shared, in `crates/h264` — see §3b) — and the actual platform surface is **about
+880 lines across six primitives**:
 
 | Primitive | Windows | Lines |
 |---|---|---|
@@ -86,6 +91,11 @@ is **about 880 lines across six primitives**:
 Six primitives is the whole job — **but on Linux each may need two
 implementations**, X11 and Wayland.
 
+Monitor enumeration is the row Stage 2b did **not** have to write: with no
+second-screen mode on Linux there is no region to choose, so the Linux
+`stream.rs` mirrors the root window and came out ~120 lines shorter than its
+Windows twin.
+
 ## 3. Mode × display server — where it stops being a port
 
 | Mode | X11 | Wayland |
@@ -98,8 +108,8 @@ implementations**, X11 and Wayland.
 | **Remote control** | XTEST + capture | portal + libei |
 | **Second screen** (extend) | `xrandr` VIRTUAL output | ❌ compositor-specific, no generic route |
 
-**Everything in the X11 column above is now built**, other than Mirror (Stage 2b)
-and Second screen (deferred). The Wayland column is unchanged and unstarted.
+**Everything in the X11 column above is now built**, other than Second screen
+(deferred). The Wayland column is unchanged and unstarted.
 
 Three consequences that change the product, not just the code:
 
@@ -133,6 +143,7 @@ and so needs `libxcb1-dev` to build. The **`shm` feature alone does not** — th
 SysV `shmget`/`shmat` calls are a handful of `libc` lines. So the fast path is
 available with nothing linked: `ldd` on the release binary lists `libgcc_s`,
 `libm`, `libc` and the loader, exactly as it did before capture existed.
+(⚠️ That list changed at Stage 2b, and not because of capture — see §3b.)
 
 ⚠️ **`GetImage` is a real fallback, not a formality.** Shared memory requires
 the X server to be on this machine, so a remote display (`ssh -X`) either has no
@@ -145,6 +156,64 @@ path — but the masks are a property of the *visual*, so `capture.rs` decodes
 from `red_mask`/`green_mask`/`blue_mask` and `image_byte_order`, and *scales*
 narrow channels rather than shifting them (5 bits of full red is 31, and 31 as
 an 8-bit channel is nearly black).
+
+### 3b. What Stage 2b settled
+
+**The mirror turned out to be the smallest of the three Linux stages**, because
+the estimate in §2 was right about where the work isn't: capture was already
+done, the encoder settings are the same on every platform, and the wire framing
+is not platform work at all.
+
+✅ **The framing was extracted, not forked.** `split_annex_b`, `encode_dims`,
+`pack_rows` and the downscale now live in **`crates/h264`** (`extender-h264`),
+and `host-windows/src/stream.rs` was moved onto it in the same change — so there
+is one implementation, not a Windows one and a Linux one. This is the same
+argument §6 makes about `gui.rs`, acted on early enough to be cheap: the format
+is the **client's** contract, so two copies would eventually mean two answers and
+a stream only one host could produce correctly. What deliberately stayed in each
+host's `stream.rs` is the capture call and the monitor enumeration — the actual
+platform.
+
+⚠️ **`extender-h264` must not gain an OS dependency.** Its whole value is that it
+compiles for every target in the workspace; the day it needs a `cfg(target_os)`
+is the day it has stopped being the shared piece.
+
+⚠️ **Second screen is not "mirror plus a flag".** `CaptureMode::VirtualDisplay`
+is accepted and **served as a mirror**, with a log line saying so. The Windows
+host answers it by streaming a secondary monitor that a driver invents; X11's
+equivalent is an `xrandr` VIRTUAL output and is still deferred. Refusing the
+session instead would give the user a dead app, for the same reason a Wayland
+mirror falls back to the clicker rather than failing.
+
+⚠️ **Absolute pointer input is still ignored — and that is parity, not a Linux
+gap.** `Input::MouseMove` / `Touch` / `Gesture` are dropped by the Windows host
+too; remote control is driven by *relative* motion on both. Honouring them on
+Linux would mean a second uinput device with `ABS_X`/`ABS_Y`, which X11 and
+libinput read as a touchscreen rather than a mouse — a behaviour change to make
+deliberately, on real hardware, not as a side effect of adding video.
+
+⚠️ **The binary links `libstdc++` now**, which it did not before: openh264 is
+C++. Measured, not assumed — the pre-mirror commit built in the same container
+lists only `libgcc_s`, `libm`, `libc` and the loader; the mirror build adds
+`libstdc++.so.6` and nothing else. Practically harmless for an AppImage built on
+`ubuntu-22.04` (libstdc++ is forward-compatible from there, the same shape of
+constraint glibc already imposes), but it is a new runtime dependency and the
+kind of thing that resurfaces years later as "won't start on my distro".
+
+⚠️ **A failing grab now ends the stream** after ~3 s of consecutive failures,
+where the Windows twin retries forever. On Linux the usual cause is the X server
+going away, which never recovers, and a host that sends no frames forever is
+indistinguishable from a frozen desktop at the phone end.
+
+**Verified in a container against a live X server (Xvfb), not just compiled:**
+44 tests, including one that runs the real `stream::run` against a loopback
+socket, **decodes the H.264 with openh264**, and asserts the picture is the
+colour the root window was painted. That test was mutation-tested twice — AVCC
+lengths written little-endian (decode fails) and BGRA fed to the encoder as RGBA
+(the red channel comes back 157 instead of 48) — so it is known to catch both a
+framing bug and a channel swap. Still out of reach in a container, as ever:
+whether a real desktop's compositor, a multi-monitor `xrandr` layout, or a real
+phone client behaves.
 
 ## 4. The two shell-outs degrade rather than port
 
@@ -193,7 +262,7 @@ expensive to keep ignoring.
 | **0** | ✅ Decided: **uinput**, for the reason in §3. `host-ui` NOT extracted — see below. ✅ web-bridge/rustls done (§1). | done |
 | **1** | ✅ **Built.** `crates/host-linux`: uinput injection, no capture, no window picker, identical under X11 and Wayland. AppImage (`scripts/build-appimage.sh`), udev rule, `linux-release.yml`. Cutting a tag is what flips "Coming soon". | done |
 | **2a** | ✅ **Built.** X11 capture (`capture.rs`) + EWMH window picker (`winlist.rs`): slide previews, the deck scan and the window picker. MIT-SHM preferred, `GetImage` fallback, both pure-Rust. Six tests run against a live X server. | done |
-| **2b** | The H.264 **mirror**: feed `capture::grab_primary_bgra` into a Linux `stream.rs` (openh264 needs `build-essential` + `nasm`, per §1). The capture half is done and the signature already matches the Windows host's. | 1–2 sessions |
+| **2b** | ✅ **Built.** The H.264 **mirror**: `stream.rs` feeds `capture::grab_primary_bgra` into openh264 at 30 fps, ≤1280px long side, and `serve` branches into it for `MirrorPrimary`/`VirtualDisplay` when an X server exists. The wire framing was *not* forked — it moved into `crates/h264`, shared with the Windows host. Needs `build-essential` + `nasm` to build (per §1); nothing new is linked. See §3b. | done |
 | **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. Unaffected by 2a — X11 and Wayland capture share nothing but the `capture::` entry points. | 4+, and needs real hardware |
 | **1b** | Fold the `host-ui` extraction in — see §6. Deferred, not dropped: doing it now meant editing `host-macos/gui.rs` with no Mac to compile it on, which is the exact failure §8 warns about. Stage 1 avoided the problem by writing a lean window instead of a third fork. | next |
 | **—** | **Second screen: defer.** The Windows trick (stream the first non-primary monitor; an external driver makes it exist) transfers to X11 via a VIRTUAL output far more cheaply than macOS's `CGVirtualDisplay` did. Wayland has no generic answer. | not scheduled |

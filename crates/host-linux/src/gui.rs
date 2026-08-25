@@ -23,7 +23,7 @@ use std::thread;
 use eframe::egui;
 
 use crate::inject::{self, UinputStatus};
-use crate::{firewall, wifi, HostEvent};
+use crate::{capture, firewall, wifi, HostEvent};
 
 /// Default listen port; the first free one at or after it is used.
 const BASE_PORT: u16 = 9000;
@@ -67,6 +67,11 @@ struct HostApp {
     events: Option<Receiver<String>>,
     /// Checked when the window opens and again on each start.
     uinput: UinputStatus,
+    /// Which capture backend this session got, or why it got none - decided once
+    /// and cached, because it is an X server round trip and this is a per-frame
+    /// UI. `Ok` means slide previews AND the H.264 mirror; `Err` means neither,
+    /// which on a Wayland session is expected rather than broken.
+    capture: Result<String, String>,
     firewall: firewall::FirewallState,
     wifi: Option<wifi::WifiInfo>,
     peers: Arc<Mutex<Vec<crate::discovery::DiscoveredPeer>>>,
@@ -91,6 +96,7 @@ impl HostApp {
             status: "Not started".to_owned(),
             events: None,
             uinput: inject::uinput_status(),
+            capture: capture::status(),
             firewall: firewall::FirewallState::Inactive,
             wifi: wifi::current_wifi(),
             peers: Arc::new(Mutex::new(Vec::new())),
@@ -109,6 +115,7 @@ impl HostApp {
         self.pin = gen_pin();
         self.ip = best_lan_ip();
         self.uinput = inject::uinput_status();
+        self.capture = capture::status();
         self.firewall = firewall::state(port);
         self.wifi = wifi::current_wifi();
         self.stop = Arc::new(AtomicBool::new(false));
@@ -279,6 +286,26 @@ impl HostApp {
             }
         }
 
+        // Capture — slide previews and the mirror, together. Not an error when
+        // it is missing: a Wayland session is a supported configuration that
+        // gets a working clicker, and saying so is what stops it reading as a
+        // fault. Same "say it once, up front" reasoning as the uinput check.
+        ui.add_space(6.0);
+        match &self.capture {
+            Ok(backend) => {
+                ui.label(
+                    egui::RichText::new(format!("✔ Screen mirroring and previews ready ({backend})"))
+                        .color(ok_colour(ui)),
+                );
+            }
+            Err(reason) => {
+                ui.label(egui::RichText::new(format!("• Screen mirroring off — {reason}")).weak());
+                ui.label(
+                    egui::RichText::new("The clicker and trackpad are unaffected.").small().weak(),
+                );
+            }
+        }
+
         // Firewall — only worth a line when it's actually in the way.
         if self.running && !self.firewall.is_ok() {
             ui.add_space(6.0);
@@ -357,13 +384,16 @@ impl HostApp {
         }
 
         ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new(
-                "This host is input-only: clicker and trackpad work, screen mirroring does not.",
-            )
-            .small()
-            .weak(),
-        );
+        // What this host can actually do depends on the session it is in, so
+        // the line is built from the capture check rather than being a constant.
+        // It used to read "input-only: screen mirroring does not work", which
+        // Stage 2b made wrong on X11 and left right on Wayland.
+        let capability = if self.capture.is_ok() {
+            "Clicker, trackpad and screen mirroring all work on this session."
+        } else {
+            "Clicker and trackpad work; screen mirroring needs an X11 session."
+        };
+        ui.label(egui::RichText::new(capability).small().weak());
     }
 
     fn peers_section(&mut self, ui: &mut egui::Ui) {

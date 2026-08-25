@@ -172,9 +172,13 @@ impl Injector {
                     RelativeAxisEvent::new(RelativeAxisCode::REL_Y, dy).into(),
                 ]);
             }
-            // Absolute pointer positioning would need the display geometry this
-            // control-only host doesn't have. Stage 2 (X11 capture) is what makes
-            // these meaningful — see docs/LINUX-HOST.md §7.
+            // Absolute pointer positioning is ignored, and Stage 2b's mirror did
+            // NOT change that: the Windows host ignores exactly these three too,
+            // so remote control is driven by relative motion on all platforms
+            // that have it. Honouring them would mean a second uinput device
+            // with ABS_X/ABS_Y, which X11 and libinput read as a touchscreen
+            // rather than a mouse — a behaviour change worth making deliberately
+            // and on real hardware, not as a side effect of adding video.
             Input::MouseMove { .. } | Input::Touch { .. } | Input::Gesture(_) => {}
             // Control requests, handled by the caller rather than injected.
             Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } => {}

@@ -46,6 +46,13 @@ jobs:
       # is a kernel interface), and neither does capture — x11rb speaks the X
       # protocol over the socket and links nothing — but the GUI does.
       #
+      # `nasm` is for the H.264 encoder: openh264 is built FROM SOURCE by
+      # openh264-sys2, and its x86 assembly needs an assembler. Without it the
+      # build fails inside a C build script rather than in Rust, so the error
+      # names nasm and never mentions the mirror. `build-essential` (the C++
+      # compiler that same source needs) is already on the runner image; it is
+      # named here anyway so this list doesn't depend on that staying true.
+      #
       # `xvfb` is for the TESTS, not the build: the X11 capture tests need a
       # real X server to photograph (see the Test step). `xauth` is named
       # explicitly because `xvfb-run` shells out to it and dies with "xauth
@@ -57,6 +64,7 @@ jobs:
           sudo apt-get install -y -qq \
             pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            build-essential nasm \
             xvfb xauth
 
       - uses: Swatinem/rust-cache@v2
@@ -131,9 +139,12 @@ jobs:
             ./UniversalScreens-*.AppImage
             ```
 
-            **This build is the clicker and trackpad only** — screen mirroring
-            and second screen are Windows and macOS for now (see
-            `docs/LINUX-HOST.md`).
+            **Clicker, trackpad and screen mirroring**, with slide previews and
+            a window picker. Mirroring and previews need an **X11** session; on
+            Wayland the clicker and trackpad still work and the rest switches
+            itself off — the app says which one you got. Using the phone as a
+            **second screen** is Windows and macOS only for now; asking for one
+            here mirrors the main display instead. See `docs/LINUX-HOST.md`.
 
             **One setup step:** the app types on your behalf through
             `/dev/uinput`, which is root-owned by default. The app checks this at

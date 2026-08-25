@@ -4,6 +4,7 @@ members = [
     "crates/protocol",
     "crates/transport",
     "crates/core",
+    "crates/h264",
     "crates/discovery",
     "crates/host",
     "crates/host-windows",
@@ -25,5 +26,7 @@ license = "MIT"
 extender-protocol = { path = "crates/protocol" }
 extender-transport = { path = "crates/transport" }
 extender-core = { path = "crates/core" }
+# Platform-neutral H.264 wire framing + frame sizing, shared by every mirroring host.
+extender-h264 = { path = "crates/h264" }
 extender-discovery = { path = "crates/discovery" }
 extender-web-bridge = { path = "crates/web-bridge" }

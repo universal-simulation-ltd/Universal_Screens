@@ -40,6 +40,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # Mirror/remote-control modes: H.264-encode the captured screen (software, builds
 # from source via openh264-sys2 — needs NASM, like the desktop client's decoder).
 openh264 = "0.9"
+# The wire framing (Annex-B → raw parameter sets + AVCC frame data) and the
+# encode-size maths, shared with the Linux host so the two cannot drift apart.
+extender-h264.workspace = true
 # Host control window (GUI mode) + connection QR code. "persistence" remembers
 # the "don't connect automatically" preference across launches.
 eframe = { version = "0.29", features = ["persistence"] }
