@@ -1,7 +1,9 @@
 # Linux host — feasibility and scope
 
-**Status: scoping only. No Linux code exists yet.** The backlog said a Linux host
-"should be scoped as one before anyone starts" — this is that scope.
+**Status: scoped, and Stage 1 is built** (`crates/host-linux`, 2026-08-25). The
+backlog said a Linux host "should be scoped as one before anyone starts" — this
+is that scope, kept as the plan for Stages 2–3 and as the record of why the
+Linux host looks different from the other two.
 
 **Verdict: feasible, and the shared spine is already portable — but it is not one
 port.** Linux has two display stacks with different capabilities, and the app's
@@ -134,10 +136,11 @@ expensive to keep ignoring.
 
 | Stage | Scope | Rough size |
 |---|---|---|
-| **0** | Decide: `uinput` vs portals; extract `host-ui` yes/no; swap web-bridge to rustls | ~1 hour, no feature code |
-| **1** | **Clicker-only host.** uinput injection, no capture, no window picker. Works identically under X11 and Wayland. AppImage + udev rule + CI job. **This is what flips "Coming soon".** | ~1 session |
+| **0** | ✅ Decided: **uinput**, for the reason in §3. `host-ui` NOT extracted — see below. web-bridge/rustls still open. | done |
+| **1** | ✅ **Built.** `crates/host-linux`: uinput injection, no capture, no window picker, identical under X11 and Wayland. AppImage (`scripts/build-appimage.sh`), udev rule, `linux-release.yml`. Cutting a tag is what flips "Coming soon". | done |
 | **2** | X11 capture: XShm grab → reuse `stream.rs`/openh264 unchanged. Adds slide previews, Mirror, Remote control, EWMH window picker. | 2–3 sessions |
 | **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. | 4+, and needs real hardware |
+| **1b** | Fold the `host-ui` extraction in — see §6. Deferred, not dropped: doing it now meant editing `host-macos/gui.rs` with no Mac to compile it on, which is the exact failure §8 warns about. Stage 1 avoided the problem by writing a lean window instead of a third fork. | next |
 | **—** | **Second screen: defer.** The Windows trick (stream the first non-primary monitor; an external driver makes it exist) transfers to X11 via a VIRTUAL output far more cheaply than macOS's `CGVirtualDisplay` did. Wayland has no generic answer. | not scheduled |
 
 Stage 1 is deliberately the smallest shippable thing, and it is the mode the app
@@ -150,12 +153,31 @@ rather than needing its own answer.
 
 ## 8. ⚠️ Testing reality
 
-**There is no Linux machine in this workspace** — WSL here has only a stopped
-`docker-desktop` distro. A container can prove Stages 0–2 compile and can run the
-X11 path headlessly under Xvfb, but **Wayland cannot be validated in a container
-or in headless CI**: portal consent dialogs need a real logged-in session, and
-behaviour differs between GNOME and KDE.
+**There is no Linux machine in this workspace** — WSL here has only a
+`docker-desktop` distro. Docker turned out to be enough for more than expected,
+and the line between what it proves and what it can't is the important part.
+
+**What a container did prove for Stage 1:**
+
+- The crate **compiles and links** on real Linux, eframe and all — much stronger
+  than the `cargo check` in §1, which never invokes the linker.
+- All 27 unit tests pass: the HID→evdev key map, the `nmcli` and `ufw` parsing,
+  and the connect URL.
+- `scripts/build-appimage.sh` produces an AppImage, and the **packaged binary
+  starts and accepts a TCP connection** — the same shape of check the macOS job
+  runs against its mounted DMG.
+
+⚠️ **What no container can prove, and what is therefore still unrun:**
+
+- **Injection itself.** A container has no `/dev/uinput` and no desktop to
+  receive the events. Every keystroke path in `inject.rs` is tested at the
+  mapping layer and unexercised at the kernel layer.
+- **The GUI has never been drawn.** It compiles; nobody has seen it.
+- **Wayland**, for the same reason as before: portal behaviour and compositor
+  differences need a real logged-in session, and GNOME and KDE differ.
 
 The precedent is in this repo's own handover: `crates/host-macos` was edited
 blind across several sessions, compiled clean first try — and had still never
-been *run*. Stage 3 needs a real Linux desktop, tested on GNOME and KDE both.
+been *run*. Stage 1 is in exactly that state for the half a container can't
+reach. **The first thing to do on a real Linux desktop is install the udev rule
+and check that a phone actually moves a slide.**

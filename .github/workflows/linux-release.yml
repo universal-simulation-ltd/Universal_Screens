@@ -1,0 +1,136 @@
+# Build the Universal Screens Linux AppImage on a clean runner.
+#
+# Push a tag (`git tag v0.1.0 && git push --tags`) to cut a release, or run it
+# from the Actions tab to get an artifact without publishing anything.
+#
+# Why CI and not just a local build: the AppImage is the thing strangers
+# download and run, so it should come from a machine with nothing on it but the
+# declared toolchain. It also matters more here than on the other two platforms
+# — an AppImage bundles nothing but the app, so whatever glibc and system
+# libraries the build machine has become the app's minimum requirement.
+#
+# Not signed -- standing UNI·SIM policy, same as Windows and macOS.
+# See docs/LINUX-APP.md.
+
+name: Linux AppImage
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create/update the release on a tag
+
+jobs:
+  appimage:
+    # ⚠️ Pinned to the OLDEST supported image, deliberately, and this is the one
+    # thing in this file worth not "modernising". An AppImage links against the
+    # build machine's glibc, and glibc is forward- but not backward-compatible:
+    # built on ubuntu-latest it refuses to start on any distro older than that
+    # runner, with a "GLIBC_2.xx not found" error that names the symbol and not
+    # the cause. Building on the oldest image widens the set of machines it runs
+    # on; moving this forward silently narrows it.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      # eframe/winit link against the X11 and Wayland client libraries, and
+      # libxkbcommon for the keyboard map. The host itself needs none of them —
+      # uinput is a kernel interface — but the GUI does.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-appimage
+
+      # The unit tests are pure logic (the HID→evdev key map, nmcli and ufw
+      # parsing, the connect URL) and need no display, no uinput and no network.
+      - name: Test
+        run: cargo test -p extender-host-linux
+
+      - name: Build AppImage
+        run: ./scripts/build-appimage.sh
+
+      # Prove the thing that ships actually starts. `--help`-style smoke tests
+      # don't exist here, so bind the headless host on a spare port and check it
+      # accepts a TCP connection — the same shape of check the macOS job does
+      # against its mounted DMG.
+      - name: Smoke-test the AppImage
+        run: |
+          chmod +x dist/*.AppImage
+          # No FUSE on the runner, so run the extracted payload rather than the
+          # mounted image (the same reason build-appimage.sh extracts).
+          ./dist/*.AppImage --appimage-extract >/dev/null
+          ./squashfs-root/AppRun 127.0.0.1:9123 &
+          HOST_PID=$!
+          for _ in $(seq 1 20); do
+            if timeout 1 bash -c '</dev/tcp/127.0.0.1/9123' 2>/dev/null; then
+              echo "host accepted a connection"
+              kill $HOST_PID
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "host never accepted a connection" >&2
+          kill $HOST_PID || true
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: universal-screens-linux-appimage
+          path: |
+            dist/*.AppImage
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.AppImage
+            dist/*.sha256
+          body: |
+            **Universal Screens for Linux.** Download the `.AppImage`, make it
+            executable, and run it — no installer, no admin, no package manager.
+
+            ```bash
+            chmod +x UniversalScreens-*.AppImage
+            ./UniversalScreens-*.AppImage
+            ```
+
+            **This build is the clicker and trackpad only** — screen mirroring
+            and second screen are Windows and macOS for now (see
+            `docs/LINUX-HOST.md`).
+
+            **One setup step:** the app types on your behalf through
+            `/dev/uinput`, which is root-owned by default. The app checks this at
+            startup and shows the commands if it isn't satisfied:
+
+            ```bash
+            sudo usermod -aG input $USER
+            echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+              | sudo tee /etc/udev/rules.d/99-universal-screens-uinput.rules
+            sudo udevadm control --reload-rules && sudo udevadm trigger
+            ```
+
+            Then log out and back in — group membership only takes effect at
+            login, so until you do it looks like the rule did nothing.
+
+            The `.sha256` file lets you check the download:
+
+            ```bash
+            sha256sum -c UniversalScreens-*.AppImage.sha256
+            ```

@@ -1,0 +1,21 @@
+# Universal Screens — let the host create a virtual keyboard/mouse.
+#
+# The host injects the phone's keystrokes through the kernel's uinput device
+# (see crates/host-linux/src/inject.rs for why uinput and not XTEST or the XDG
+# RemoteDesktop portal). /dev/uinput is root-owned by default, so without this
+# rule the app runs, accepts a connection, reports "connected" — and moves
+# nothing. That silent failure is the reason the host checks the permission on
+# startup and shows this file's contents when it isn't satisfied.
+#
+# Install:
+#   sudo cp installer/99-universal-screens-uinput.rules /etc/udev/rules.d/
+#   sudo usermod -aG input $USER
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Then LOG OUT AND BACK IN — group membership is established at login, so the
+# rule appears to have done nothing until you do.
+#
+# static_node=uinput matters as much as the mode: on most systems the uinput
+# module is not loaded until something asks for it, and the device node has to
+# exist with the right ownership *before* the first open, not after.
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

@@ -10,7 +10,8 @@ Everything is **host ⇄ client** over one platform-agnostic protocol (length-
 prefixed `postcard` frames; H.264 for video):
 
 - **Host** = the machine that *gives up* a screen (captures + streams it, and/or
-  receives input). `extender-host-windows` (Windows) and `extender-host` (macOS).
+  receives input). `extender-host-windows` (Windows), `extender-host` (macOS) and
+  `extender-host-linux` (Linux, input only).
 - **Client** = the device that *shows / drives* it. `extender-client` (desktop,
   cross-platform) and the **Android app** (`apps/android`); **iOS** is a scaffold.
 
@@ -22,10 +23,11 @@ for Windows* → Windows is the host, phone is the client).
 
 | Path | What |
 |---|---|
-| `crates/protocol` | wire types (`ClientHello`, `Message`, `Input`, `CaptureMode`), framing, NAL helpers. Protocol **v9**. |
+| `crates/protocol` | wire types (`ClientHello`, `Message`, `Input`, `CaptureMode`), framing, NAL helpers. Protocol **v10**. |
 | `crates/core` | client `Session` (handshake, event stream, input). |
 | `crates/host` | macOS host — ScreenCaptureKit + VideoToolbox, CGVirtualDisplay (extend). |
 | `crates/host-windows` | Windows host — clicker, mirror, remote control, second screen, trackpad, GUI. |
+| `crates/host-linux` | Linux host — clicker + trackpad only, via uinput. No capture: see [docs/LINUX-HOST.md](docs/LINUX-HOST.md). |
 | `crates/client` | desktop client — openh264 decode + wgpu display. |
 | `crates/mobile-ffi` | C ABI for mobile clients (`extender_ffi.h`). |
 | `crates/android-jni` | JNI bridge → `libextender_mobile.so`. |
@@ -44,6 +46,12 @@ for Windows* → Windows is the host, phone is the client).
 | **Second screen** | host streams a *virtual* monitor (extend) | ✅ app+host; needs a virtual-display driver — see [docs/SECOND-SCREEN.md](docs/SECOND-SCREEN.md) |
 
 macOS host streams to the desktop client for the same modes (the original path).
+
+**Linux hosts the input modes only** — Clicker and Trackpad. There is no capture
+backend, so Mirror, Remote control and Second screen are unavailable, and the
+clicker's window picker is missing because Wayland has no way to enumerate
+windows. [docs/LINUX-HOST.md](docs/LINUX-HOST.md) is the scope; the rest is
+staged, not abandoned.
 
 ## Connect flow
 
@@ -65,6 +73,12 @@ macOS host streams to the desktop client for the same modes (the original path).
   [apps/android/README.md](apps/android/README.md).
 - **macOS host / desktop client:** see `scripts/preview.sh` /
   [docs/WINDOWS-CLIENT.md](docs/WINDOWS-CLIENT.md).
+- **Linux host:** `cargo run -p extender-host-linux` (GUI) or `… -- 0.0.0.0:9000`
+  (headless). Needs the X11/Wayland dev packages listed in
+  [docs/LINUX-APP.md](docs/LINUX-APP.md), but **not** NASM — there's no encoder in
+  this build. Package it with `./scripts/build-appimage.sh`. ⚠️ Input needs write
+  access to `/dev/uinput`; without the udev rule the app runs and silently injects
+  nothing, which is why it checks on startup.
 
 ## Status — outstanding / needed
 
@@ -89,11 +103,14 @@ macOS host streams to the desktop client for the same modes (the original path).
   [`macos-release.yml`](.github/workflows/macos-release.yml) and attached to
   **v0.1.0**; the download page offers Mac alongside Windows. See
   [docs/MACOS-APP.md](docs/MACOS-APP.md).
-- **Linux** — not packaging but a *port*: there is no Linux host crate, only the
-  cross-platform client. Scoped in [docs/LINUX-HOST.md](docs/LINUX-HOST.md) — the
-  shared crates already compile for Linux, so the work is the capture and input
-  backends, and X11 and Wayland are different jobs. The download page says
-  "coming soon" and that is honest.
+- **Linux packaging** — done for what exists. `scripts/build-appimage.sh` (or a
+  `v*` tag, via [`linux-release.yml`](.github/workflows/linux-release.yml))
+  produces an unsigned `UniversalScreens-*.AppImage`. Nothing is published yet,
+  so the download page still says "coming soon" — cutting the first tag flips it.
+  See [docs/LINUX-APP.md](docs/LINUX-APP.md).
+- **Linux capture** — not started, and the reason the Linux host is input-only.
+  Scoped in [docs/LINUX-HOST.md](docs/LINUX-HOST.md) as Stages 2 (X11) and 3
+  (Wayland/PipeWire), which are different jobs rather than one.
 
 **Deploy-time / external (can't be done in-repo):**
 - Host `web/.well-known/assetlinks.json` at the domain root; add the **Play
@@ -105,6 +122,11 @@ macOS host streams to the desktop client for the same modes (the original path).
 **Untested combos:**
 - Desktop client on **macOS** (the Windows → Mac path) — cross-platform crate,
   not yet verified building on macOS.
+- ⚠️ **The Linux host has never injected a keystroke.** It compiles, links, passes
+  its tests and packages into an AppImage that starts and accepts a connection —
+  all proven in a container, which by definition has no `/dev/uinput` and no
+  desktop. The GUI has never been drawn either. The first job on a real Linux
+  machine is to install the udev rule and check a phone actually moves a slide.
 
 ## Security
 

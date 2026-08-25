@@ -4,6 +4,109 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-25 (Linux exists: a clicker host through uinput, and the two things a container cannot prove)
+
+`docs/LINUX-HOST.md` is the scope the backlog asked for before anyone started,
+and `crates/host-linux` is its Stage 1. **Input only** — clicker and trackpad.
+No capture, no mirror, no window picker.
+
+### ⚠️ uinput, not XTEST and not the portal — and it is why this was one session
+
+XTEST is X11-only. The XDG `RemoteDesktop` portal is the sanctioned Wayland
+route but needs a compositor that implements it and opens a consent dialog.
+**uinput creates a virtual keyboard/mouse in the kernel, below the display
+server** — X11, every Wayland compositor and the login screen all see an
+ordinary USB device. One implementation instead of two, which is the entire
+reason the control half of the app was cheap while capture is still a project.
+
+The price is one permission, and it fails **silently**: `/dev/uinput` is
+root-owned, so without the udev rule the app runs, the phone connects, the window
+says "Connected" and nothing moves. `inject::uinput_status()` therefore checks it
+when the window opens and shows the three fix commands — that check is the most
+valuable 20 lines in the crate.
+
+### ⚠️ The Linux keycodes are NOT the HID range plus an offset
+
+`hid_to_windows_vk` gets away with `0x04 + n` because Windows VKs are the ASCII
+uppercase values. Linux keycodes follow the QWERTY **rows** — `KEY_Q` is 16,
+`KEY_A` is 30, `KEY_Z` is 44 — so the same arithmetic gives `KEY_S` for `b` and
+compiles perfectly. The table is spelled out and a test asserts
+`KEY_B != KEY_A + 1` so nobody "simplifies" it back.
+
+### ⚠️ uinput sends scancodes, so typed text assumes US QWERTY
+
+Windows has `KEYEVENTF_UNICODE` and macOS has `CGEventKeyboardSetUnicodeString`;
+both take a *character*. uinput takes a key *position* and the compositor applies
+the layout afterwards. So `Injector::text` spells ASCII out in US positions — on
+AZERTY, `a` arrives as `q` — and non-ASCII cannot be sent at all. Fixing it
+properly means XKB remapping (X11 only) or libei (Wayland only), i.e. giving up
+the single implementation. The presenting keys (arrows, PageUp/PageDown, F5,
+Escape, `b`/`w`/`.`) are positions, so the clicker is unaffected.
+
+### ⚠️ No third `gui.rs` fork — deliberately
+
+`host-windows/src/gui.rs` and `host-macos/src/gui.rs` are ~1,500 lines each and
+already ~1,000 lines apart. Forking again would have tripled the cost of the
+`host-ui` extraction that LINUX-HOST.md §6 argues for. This window implements the
+connect flow and nothing else — no navbar, no changelog popup, no profile disc,
+no orbit — and adopts `host-ui` when it lands. **The extraction was NOT done
+here**: it edits `host-macos/gui.rs`, and there is no Mac on this box to compile
+it, which is precisely how that crate went uncompiled for months.
+
+### What the shell-outs became, and what they gave up
+
+- **`nmcli`, not `netsh`.** Terse `-t -f` output parses under any locale (better
+  than the Windows English-label scrape) but reading the **PSK goes through
+  polkit** and usually fails non-interactively — so the Wi-Fi QR degrades to
+  SSID-only far more often than on Windows. iwd/systemd-networkd give nothing.
+- **The firewall module never changes anything.** Three front-ends, no UAC
+  equivalent, and `pkexec` from a GUI with no polkit agent hangs rather than
+  prompting. It detects ufw/firewalld and hands over the command.
+  ⚠️ `ufw status` is root-only and *failing is not the same as "no firewall"* —
+  hence the explicit `Unknown` state. `/etc/ufw/ufw.conf` is world-readable and
+  answers the common "installed but off" case without root.
+
+### Verified — and the line between what a container proves and what it cannot
+
+Docker was the only Linux available (WSL here has just the `docker-desktop`
+distro). In `rust:slim`:
+
+- The crate **compiles and links**, eframe included — far stronger than the
+  `cargo check --target x86_64-unknown-linux-gnu` that scoped it, which never
+  invokes a linker.
+- **27 unit tests pass**: the key map, the `nmcli`/`ufw` parsing, the connect URL.
+- `scripts/build-appimage.sh` produced a 6.4 MB AppImage, and **the packaged
+  binary starts, warns correctly that `/dev/uinput` is missing, listens and
+  accepts a TCP connection**.
+- `extender-host-windows` still passes its 24 tests — the workspace gained a
+  member, nothing else moved.
+
+⚠️ **NOT verified, and a container structurally cannot:** **injection itself**
+(no `/dev/uinput`, no desktop to receive it) and **the GUI has never been drawn**.
+That is `host-macos` before 2026-08-24 all over again. First job on a real Linux
+desktop: install the udev rule, connect a phone, watch a slide move.
+
+⚠️ **`linux-release.yml` is pinned to `ubuntu-22.04` on purpose.** An AppImage
+links the build machine's glibc, which is forward- but not backward-compatible —
+built on `ubuntu-latest` it refuses to start on anything older with a
+`GLIBC_2.xx not found` error naming the symbol and not the cause. Moving that
+image forward silently narrows the set of machines the app runs on.
+
+⚠️ **AppImage, not Flatpak.** A Flatpak sandbox forces the portal path — no
+uinput — removing the exact capability this host exists to provide.
+
+**Nothing is published**, so the download page still says "coming soon" for
+Linux; cutting a `v*` tag is what flips it, and no suite changelog entry was
+added for that reason. Two items the scope names are still open: swapping
+`web-bridge` off `native-tls` (which **is** OpenSSL on Linux, contradicting its
+own Cargo.toml comment) to rustls, and the `host-ui` extraction.
+
+`scripts/preview.sh` now launches the Linux host on Linux — it previously told
+Linux users to run a PowerShell script.
+
+---
+
+
 **iOS: built, installed and RUN on an iPhone 15 Pro** the same day. The app
 completed the handshake against the freshly built macOS host with no manual
 step — it auto-connected:

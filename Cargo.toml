@@ -8,6 +8,7 @@ members = [
     "crates/host",
     "crates/host-windows",
     "crates/host-macos",
+    "crates/host-linux",
     "crates/client",
     "crates/mobile-ffi",
     "crates/android-jni",

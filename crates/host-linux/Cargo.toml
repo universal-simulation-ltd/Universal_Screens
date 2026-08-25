@@ -1,0 +1,32 @@
+[package]
+name = "extender-host-linux"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "extender-host-linux"
+path = "src/main.rs"
+
+[dependencies]
+extender-protocol.workspace = true
+# Transport encryption: auto-detect an encrypted native client vs a legacy/loopback
+# plaintext peer per connection, running the Noise responder handshake keyed by the
+# host's pairing PIN. Same crate the Windows and macOS hosts use.
+extender-transport.workspace = true
+# Shared LAN peer discovery (UDP multicast beacon/listener + mDNS), wrapped by the
+# same thin egui adapter the other two hosts use.
+extender-discovery.workspace = true
+serde = { version = "1", features = ["derive"] }
+# QR rendering + logo compositing (the connect / get-the-app codes).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Host control window (GUI mode). "persistence" saves preferences across launches.
+eframe = { version = "0.29", features = ["persistence"] }
+qrcode = { version = "0.14", default-features = false }
+
+[target.'cfg(target_os="linux")'.dependencies]
+# Input injection through the kernel's uinput device. Deliberately NOT the XDG
+# RemoteDesktop portal or XTEST: uinput is one implementation that works under
+# X11 *and* every Wayland compositor, with no portal consent dialog and no
+# display-server detection. See docs/LINUX-HOST.md §3. Pure Rust — no C deps.
+evdev = "0.13"
