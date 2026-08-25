@@ -1,9 +1,13 @@
 # Linux host — feasibility and scope
 
-**Status: scoped, and Stage 1 is built** (`crates/host-linux`, 2026-08-25). The
+**Status: Stages 1 and 2 are built** (`crates/host-linux`, 2026-08-25). The
 backlog said a Linux host "should be scoped as one before anyone starts" — this
-is that scope, kept as the plan for Stages 2–3 and as the record of why the
-Linux host looks different from the other two.
+is that scope, kept as the plan for the rest and as the record of why the Linux
+host looks different from the other two.
+
+The clicker now has **slide previews, the deck scan and the window picker** on
+X11. What is left of Stage 2 is the H.264 *mirror* ("2b" below); Wayland capture
+is Stage 3 and is still a different job entirely.
 
 **Verdict: feasible, and the shared spine is already portable — but it is not one
 port.** Linux has two display stacks with different capabilities, and the app's
@@ -94,6 +98,9 @@ implementations**, X11 and Wayland.
 | **Remote control** | XTEST + capture | portal + libei |
 | **Second screen** (extend) | `xrandr` VIRTUAL output | ❌ compositor-specific, no generic route |
 
+**Everything in the X11 column above is now built**, other than Mirror (Stage 2b)
+and Second screen (deferred). The Wayland column is unchanged and unstarted.
+
 Three consequences that change the product, not just the code:
 
 - **Wayland has no window enumeration at all.** The clicker's window picker — a
@@ -110,6 +117,34 @@ Three consequences that change the product, not just the code:
   write access to `/dev/uinput`: a udev rule at install, or a first-run
   instruction. For a clicker-first host, uinput is the cheaper and broader
   answer by a wide margin.
+
+### 3a. What Stage 2a settled, with numbers
+
+⚠️ **`GetImage` vs MIT-SHM was decided by measuring, not by reputation.** On
+Xvfb at 1920×1080: **`GetImage` 10.7 ms/frame, MIT-SHM 0.93 ms/frame** — 11×.
+For a *slide preview* (one grab per page turn) either is far inside budget; for
+the Stage 2b mirror at 30 fps, 10.7 ms is a third of the frame budget spent
+before the encoder starts, and 0.93 ms is nothing.
+
+⚠️ **The reason to expect SHM to cost something turned out to be wrong, and the
+detail matters for any future X work here.** `x11rb`'s `allow-unsafe-code`
+feature pulls in `as-raw-xcb-connection`, which puts `-lxcb` on the link line
+and so needs `libxcb1-dev` to build. The **`shm` feature alone does not** — the
+SysV `shmget`/`shmat` calls are a handful of `libc` lines. So the fast path is
+available with nothing linked: `ldd` on the release binary lists `libgcc_s`,
+`libm`, `libc` and the loader, exactly as it did before capture existed.
+
+⚠️ **`GetImage` is a real fallback, not a formality.** Shared memory requires
+the X server to be on this machine, so a remote display (`ssh -X`) either has no
+SHM extension or fails to attach. `SCREENS_X11_NO_SHM=1` forces the slow path
+for debugging.
+
+⚠️ **Pixel layout is read from the server, never assumed.** The near-universal
+desktop layout is little-endian 32-bpp BGRX, and that takes a copy-only fast
+path — but the masks are a property of the *visual*, so `capture.rs` decodes
+from `red_mask`/`green_mask`/`blue_mask` and `image_byte_order`, and *scales*
+narrow channels rather than shifting them (5 bits of full red is 31, and 31 as
+an 8-bit channel is nearly black).
 
 ## 4. The two shell-outs degrade rather than port
 
@@ -157,8 +192,9 @@ expensive to keep ignoring.
 |---|---|---|
 | **0** | ✅ Decided: **uinput**, for the reason in §3. `host-ui` NOT extracted — see below. ✅ web-bridge/rustls done (§1). | done |
 | **1** | ✅ **Built.** `crates/host-linux`: uinput injection, no capture, no window picker, identical under X11 and Wayland. AppImage (`scripts/build-appimage.sh`), udev rule, `linux-release.yml`. Cutting a tag is what flips "Coming soon". | done |
-| **2** | X11 capture: XShm grab → reuse `stream.rs`/openh264 unchanged. Adds slide previews, Mirror, Remote control, EWMH window picker. | 2–3 sessions |
-| **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. | 4+, and needs real hardware |
+| **2a** | ✅ **Built.** X11 capture (`capture.rs`) + EWMH window picker (`winlist.rs`): slide previews, the deck scan and the window picker. MIT-SHM preferred, `GetImage` fallback, both pure-Rust. Six tests run against a live X server. | done |
+| **2b** | The H.264 **mirror**: feed `capture::grab_primary_bgra` into a Linux `stream.rs` (openh264 needs `build-essential` + `nasm`, per §1). The capture half is done and the signature already matches the Windows host's. | 1–2 sessions |
+| **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. Unaffected by 2a — X11 and Wayland capture share nothing but the `capture::` entry points. | 4+, and needs real hardware |
 | **1b** | Fold the `host-ui` extraction in — see §6. Deferred, not dropped: doing it now meant editing `host-macos/gui.rs` with no Mac to compile it on, which is the exact failure §8 warns about. Stage 1 avoided the problem by writing a lean window instead of a third fork. | next |
 | **—** | **Second screen: defer.** The Windows trick (stream the first non-primary monitor; an external driver makes it exist) transfers to X11 via a VIRTUAL output far more cheaply than macOS's `CGVirtualDisplay` did. Wayland has no generic answer. | not scheduled |
 
@@ -198,12 +234,55 @@ no Mac here to compile it. `security-framework` also moved 3.7.0 → 2.11.1
 (`rustls-native-certs` 0.7 pins 2.x); nothing else in the workspace depends on
 it, so the downgrade is confined to that one crate.
 
+**And Stage 2a moved the line — a container CAN prove X11 capture.** This is
+worth being precise about, because Stage 1's "verified in a container" was much
+weaker. Xvfb is not a *stand-in* for an X server; it **is** an X server, running
+the same protocol a desktop one does over the same socket. So the capture tests
+paint a root window and read the pixels back for real:
+
+- Six tests in `src/x11_tests.rs` run against a live server. They paint a colour
+  whose three channels **differ**, so a B↔R swap, a big-endian misread or a
+  stride error cannot pass unnoticed.
+- Proven by mutation, not by passing: swapping the channels in the fast path
+  fails three of them with the pixel values named, and shifting the SHM read by
+  one pixel is caught by the SHM-vs-`GetImage` cross-check.
+- ⚠️ That cross-check exists because the first cut of this work picked SHM on a
+  **speed** measurement and never compared its output to `GetImage`'s. A fast
+  wrong frame looks exactly like a fast right one.
+- ⚠️ `SCREENS_REQUIRE_X11=1` turns a skipped X11 test into a **failure**, and
+  `linux-release.yml` sets it under `xvfb-run`. Without it the job goes green
+  while quietly not exercising capture at all — the same false clean pass this
+  section exists to warn about.
+
+⚠️ **Three traps specific to testing against a live X server**, all of which
+first appeared as convincing "the capture code is broken" failures:
+
+- **`xsetroot -solid` exits 0 and leaves the Xvfb framebuffer black.** X frees a
+  client's resources when it disconnects, so a short-lived helper's paint is not
+  reliably still there. The tests now paint from their own connection and hold
+  it open for the test's lifetime.
+- **One display is global mutable state.** `cargo test` runs tests as threads in
+  one process, so the window-picker test's window was being photographed by
+  capture tests running concurrently. They take a mutex.
+- **A test that mutates `DISPLAY` breaks every other test**, for the same
+  single-process reason. Pass the display *in* instead — `Ewmh::open_display`
+  exists only for that.
+
 ⚠️ **What no container can prove, and what is therefore still unrun:**
 
 - **Injection itself.** A container has no `/dev/uinput` and no desktop to
   receive the events. Every keystroke path in `inject.rs` is tested at the
-  mapping layer and unexercised at the kernel layer.
+  mapping layer and unexercised at the kernel layer. Unchanged by Stage 2a:
+  capture is a socket protocol, injection is a kernel device, and only the
+  first of those a container has.
 - **The GUI has never been drawn.** It compiles; nobody has seen it.
+- **A real client against the packaged AppImage.** The smoke test proves it
+  starts and listens; nothing has completed a handshake and received a
+  preview.
+- **Capture on a real desktop**, as opposed to Xvfb: a compositing WM, a
+  multi-monitor `xrandr` layout, and a GPU whose readback path is not a
+  software framebuffer. The correctness tests should hold; the timings
+  above are Xvfb's and may not.
 - **Wayland**, for the same reason as before: portal behaviour and compositor
   differences need a real logged-in session, and GNOME and KDE differ.
 
