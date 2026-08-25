@@ -34,15 +34,34 @@ Both failures are **cross-compiling from Windows**, not portability:
   assembled the x86 source fine; only the C++ compiler is missing. Natively on
   Linux this is `build-essential` + `nasm`, the same NASM requirement the Windows
   host already documents.
-- `extender-web-bridge` — `openssl-sys` can't find a Linux libssl.
+- `extender-web-bridge` — `openssl-sys` can't find a Linux libssl. ✅ **Fixed
+  2026-08-25**, and the crate now builds and tests on Linux; see below.
 
-⚠️ **`crates/web-bridge/Cargo.toml` is wrong about Linux.** Its comment reads
-"macOS uses Security.framework, Windows uses SChannel — **no OpenSSL to vendor**".
-On Linux, `native-tls` *is* OpenSSL: the build needs `libssl-dev` and the binary
-then carries a distro-specific runtime dependency — poison for a
-download-and-run AppImage. Switch the `tungstenite` feature to
-`rustls-tls-native-roots` before packaging anything. Worth doing regardless; it
-removes a C dependency from all three hosts.
+✅ **`crates/web-bridge/Cargo.toml` was wrong about Linux — now corrected.** Its
+comment used to read "macOS uses Security.framework, Windows uses SChannel —
+**no OpenSSL to vendor**". On Linux, `native-tls` *is* OpenSSL: the build needed
+`libssl-dev` and the binary then carried a distro-specific runtime dependency —
+poison for a download-and-run AppImage. The `tungstenite` feature is now
+`rustls-tls-native-roots`, and `native-tls`, `openssl`, `openssl-sys`,
+`openssl-macros` and `vcpkg` are gone from `Cargo.lock` entirely. `ldd` on the
+Linux binary shows `libgcc_s`, `libc` and the loader, nothing else.
+
+⚠️ **The one-line feature swap would have shipped a panic.** tungstenite depends
+on rustls with `default-features = false`, so **neither `ring` nor `aws-lc-rs` is
+compiled in by its features** — and `ClientConfig::builder()`, deep inside
+tungstenite's `wss://` path, *panics* when no crypto provider is installed. There
+is no `Result` to handle and nothing fails until the first real dial at the cloud
+rendezvous, on a user's machine. `web-bridge` therefore depends on `rustls`
+directly to supply `ring`, and installs it as the process default explicitly
+rather than relying on rustls' pick-from-crate-features fall-back, which panics
+again the day a second provider enters the tree.
+`tests/wss_crypto_provider.rs` guards it by dialling a plain TCP listener as
+`wss://`, so the handshake reaches the panic site for real.
+
+`-native-roots` and not `-webpki-roots`: bundled roots ignore the machine's trust
+store, so a corporate network that re-signs TLS could not reach the rendezvous.
+On Linux reading the platform store is `openssl-probe` looking up
+`/etc/ssl/certs` — a path lookup in pure Rust, not a link against OpenSSL.
 
 ## 2. What genuinely has to be written
 
@@ -136,7 +155,7 @@ expensive to keep ignoring.
 
 | Stage | Scope | Rough size |
 |---|---|---|
-| **0** | ✅ Decided: **uinput**, for the reason in §3. `host-ui` NOT extracted — see below. web-bridge/rustls still open. | done |
+| **0** | ✅ Decided: **uinput**, for the reason in §3. `host-ui` NOT extracted — see below. ✅ web-bridge/rustls done (§1). | done |
 | **1** | ✅ **Built.** `crates/host-linux`: uinput injection, no capture, no window picker, identical under X11 and Wayland. AppImage (`scripts/build-appimage.sh`), udev rule, `linux-release.yml`. Cutting a tag is what flips "Coming soon". | done |
 | **2** | X11 capture: XShm grab → reuse `stream.rs`/openh264 unchanged. Adds slide previews, Mirror, Remote control, EWMH window picker. | 2–3 sessions |
 | **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. | 4+, and needs real hardware |
@@ -166,6 +185,18 @@ and the line between what it proves and what it can't is the important part.
 - `scripts/build-appimage.sh` produces an AppImage, and the **packaged binary
   starts and accepts a TCP connection** — the same shape of check the macOS job
   runs against its mounted DMG.
+
+**And for the rustls swap (2026-08-25), a container proved more than usual.** The
+`rust:slim` image ships **no `libssl-dev` at all**, so it simply could not have
+compiled the old tree — the build succeeding there *is* the result. `ldd` on the
+linked binary then showed the absence directly. The one Linux test failure,
+`peers_endpoint`, is a container with no mDNS multicast; it passes on Windows.
+
+⚠️ **Still unrun for that change: the macOS build.** `cargo tree` resolves for
+both `*-apple-darwin` targets and the code is platform-independent, but there is
+no Mac here to compile it. `security-framework` also moved 3.7.0 → 2.11.1
+(`rustls-native-certs` 0.7 pins 2.x); nothing else in the workspace depends on
+it, so the downgrade is confined to that one crate.
 
 ⚠️ **What no container can prove, and what is therefore still unrun:**
 
