@@ -4,6 +4,145 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-26 (the browser tab encrypts, and asks first whether it can)
+
+**The browser leg is end-to-end encrypted to the host.** A tab runs the same
+PIN-keyed Noise tunnel every native client has used since M10, in WASM, so
+neither the LAN bridge nor the cloud relay (our own Worker) can read the
+mirrored screen or the keystrokes going back. `docs/M10-transport-encryption.md`
+→ Follow-ups is the full record; the parts to know before touching this code:
+
+### The tunnel has no socket in it, and that was the whole blocker
+
+`M10` said for months that "a browser can't run Noise on its own". It can — the
+obstacle was that *our* tunnel was welded to a `TcpStream`. The handshake and
+record layer now live in **`transport::session`** as byte-in / byte-out state
+machines, `SecureStream` is rebuilt on top of them (one record layer, not one per
+carrier), and the crate builds for `wasm32-unknown-unknown`.
+
+⚠️ **`getrandom` needs its `js` feature** for any wasm build here, or `snow`'s
+key generation refuses to compile with an error naming neither Noise nor the
+browser. It is declared under a `cfg(target_arch = "wasm32")` block in
+`crates/transport/Cargo.toml`, so native builds are untouched.
+
+### ⚠️ Encryption is negotiated, and the two paths negotiate differently
+
+The bridge ships **inside the host binary**; the web client updates the instant
+it deploys. A tab that simply started encrypting would break every installed
+host, so:
+
+- **LAN** — the tab offers the `usscreens-e2ee.v1` WebSocket subprotocol
+  (`E2EE_SUBPROTOCOL`); a bridge that can relay verbatim echoes it. Settled in
+  the handshake: no timeout, no reconnect.
+- **Room** — the tab's socket terminates at **Cloudflare**, not at the host, so
+  no header it sends reaches the other end. `dial_room` announces `CAPS_SIGNAL`
+  (`{"type":"caps","e2ee":true}`) on pairing; the room relays it verbatim and
+  every older peer ignores an unknown `type`. Nothing heard in 1.5 s ⇒ plaintext.
+
+Both bridge paths then choose per connection from the browser's **first binary
+message**: the transport preamble ⇒ relay bytes verbatim, anything else ⇒ the
+historical re-framing. `Relay` in `crates/web-bridge/src/lib.rs`.
+
+⚠️ **Both public entry points must go through `accept_negotiating`.** When the
+subprotocol answer lived in `proxy_browser` alone, `proxy_connection` silently
+never offered encryption — a tab reaching it stayed plaintext for no visible
+reason. A test caught it; reading the code did not.
+
+⚠️ **The PIN keys the tunnel at `connect()`, not at `sendHello()`** — the
+handshake starts when the socket opens, before any hello exists. Keying with one
+PIN while announcing another fails as an *unreadable handshake*, so both
+transports throw a plain error instead.
+
+### What the browser does that the bridge used to
+
+Once encrypted the bridge is a byte pipe, so the tab owns the framing: add the
+4-byte LE length prefix on the way out (`protocol.frame`), re-assemble the
+stream on the way in (`FrameReader`). ⚠️ Neither shows up in a small test — one
+WS message usually carries one record carrying one message — until a 200 KB
+keyframe arrives.
+
+### Verifying it
+
+`node apps/web/secure.test.mjs` spawns a **real bridge in front of the shipped
+`transport::accept`** (`cargo run -p extender-web-bridge --example e2ee_testbed`)
+and drives it through `src/secure.js` and the wasm-pack artifact over a real
+WebSocket. It is the only test with the browser code in the chain.
+
+⚠️ **Rebuild `apps/web/pkg/` first** after touching `crates/protocol-wasm` — the
+test loads the built artifact, so a stale `pkg/` silently tests old bindings and
+passes.
+
+⚠️ **Node on Windows, two teardown traps** that turn a passing run into a broken
+one: killing the child and calling `process.exit()` in the same tick aborts Node
+inside libuv (every check prints PASS, then it crashes), and `shell: true` makes
+the child a shell wrapping cargo, so `kill()` leaves the testbed running and
+holding a port.
+
+**Honest caveat:** a session against a host older than 2026-08-26 still relays in
+the clear. The tab says which it got, and no UI claims encryption unconditionally.
+
+---
+
+## Update — 2026-08-25 (later) (Linux Stage 2a + 2b: the clicker sees the screen, then mirrors it)
+
+`crates/host-linux` went from a clicker to a full X11 host in two steps, both
+after the Stage 1 entry below.
+
+**Stage 2a — capture and the window picker.** `capture.rs` (MIT-SHM preferred,
+`GetImage` fallback, both pure Rust — `x11rb` speaks the protocol over the socket
+so **nothing is linked**) and `winlist.rs` (EWMH). Slide previews, the deck scan
+and the window picker.
+
+⚠️ **SHM vs `GetImage` was decided by measuring AND cross-checking pixels**, not
+by reputation: 0.93 ms vs 10.7 ms per frame at 1920×1080 on Xvfb — but the first
+cut picked the fast path on speed alone and never diffed the two, which is how a
+fast *wrong* frame ships looking like a fast right one.
+
+**Stage 2b — the H.264 mirror.** `stream.rs` feeds `capture::grab_primary_bgra`
+into openh264 at 30 fps, long side capped at 1280 px. `serve()` branches into it
+for `MirrorPrimary` / `VirtualDisplay` when an X server exists.
+
+✅ **The wire framing was extracted, not forked**: `split_annex_b`,
+`encode_dims`, `pack_rows` and the downscale live in **`crates/h264`**, and
+`host-windows/src/stream.rs` was moved onto it in the same change. The format is
+the *client's* contract — two copies would eventually mean two answers.
+
+⚠️ **Two fall-backs, two different reasons, both logged.** A mirror with **no X
+server** (Wayland, headless) is served as a *clicker*; a **second-screen**
+request is served as a *mirror* (no `xrandr` VIRTUAL output yet, but the desktop
+is still worth sending).
+
+⚠️ **Absolute pointer input is still ignored — that is parity, not a Linux gap.**
+`MouseMove` / `Touch` / `Gesture` are dropped by the **Windows** host too;
+remote control is relative motion on both.
+
+⚠️ **The binary now links `libstdc++`** (openh264 is C++), measured against a
+build of the previous commit in the same container. Nothing else changed on the
+link line.
+
+⚠️ **`nasm` + `build-essential` are now required to build this crate**, and
+`docs/LINUX-APP.md` used to say the opposite. `linux-release.yml` installs both.
+
+⚠️ **A capability sentence in the UI is a thing to grep when the capability
+lands.** The host window said "input-only: screen mirroring does not work" —
+true on Wayland, wrong on X11 the moment 2b shipped. It reads `capture::status()`
+now. The same sweep found `LINUX-APP.md` still denying the window picker a day
+after Stage 2a shipped.
+
+**Verified in a container against a live X server, then mutation-tested:** 44
+tests under `SCREENS_REQUIRE_X11=1`, including one that runs the real
+`stream::run` over a loopback socket, decodes the H.264 with openh264 through the
+*client's* own helpers, and asserts the picture is the colour the root window was
+painted. Breaking the AVCC length endianness or feeding BGRA as RGBA both fail
+it.
+
+⚠️ **Still unrun on Linux:** uinput injection, the GUI window, a real phone
+client, and capture on an actual compositing multi-monitor desktop. Xvfb is a
+real X server, so framing and colour are genuinely proven; 30 fps of a real
+desktop over Wi-Fi is not.
+
+---
+
 ## Update — 2026-08-25 (Linux exists: a clicker host through uinput, and the two things a container cannot prove)
 
 `docs/LINUX-HOST.md` is the scope the backlog asked for before anyone started,
