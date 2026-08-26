@@ -269,6 +269,24 @@ it.
   and **reconnect** (disconnect returns to the picker; saved rows reconnect).
   Remaining: resolution picker and the `connect?wifi=…&pin=…` QR deep link (the
   sibling backlog QR item).
+- **M7-E2EE — the tab encrypts.** ✅ (2026-08-26) `apps/web/src/secure.js` runs
+  the PIN-keyed Noise tunnel through the WASM shim, so the browser is no longer
+  the one client speaking in the clear. `crates/web-bridge` relays an encrypted
+  connection **verbatim** on both paths, chosen from the tab's first binary
+  message.
+  ⚠️ **Negotiated, never assumed, and the two paths differ because the topology
+  does.** LAN: the tab offers the `usscreens-e2ee.v1` **WebSocket subprotocol**
+  and a capable bridge echoes it — settled in the handshake, no timeout, no
+  reconnect. Room: the tab's socket terminates at *Cloudflare*, so the host
+  **announces** `{"type":"caps","e2ee":true}` on pairing instead and a tab that
+  hears nothing in 1.5 s stays plaintext. Both fall-backs exist because the
+  bridge ships **inside the host binary** while this page updates on deploy.
+  ⚠️ Once encrypted the tab owns the framing the bridge used to do: the 4-byte
+  length prefix out (`protocol.frame`), re-assembly in (`FrameReader`).
+  *Verified:* `apps/web/secure.test.mjs` (real bridge + real `transport::accept`,
+  driven through `src/secure.js` and the built WASM over a real WebSocket) and
+  `apps/web/room-caps.test.mjs` (the negotiation itself, including the
+  can't-be-staged case of an older host).
 - **M7f — second host + packaging.** Port the WS listener to the macOS host;
   decide where the static client is served from (bundled by the host on a local
   HTTP port for true zero-config LAN use, vs. hosted at `unisim.co.uk/screens`).

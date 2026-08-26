@@ -121,12 +121,19 @@ abandoned.
   produces an unsigned `UniversalScreens-*.AppImage`. Nothing is published yet,
   so the download page still says "coming soon" — cutting the first tag flips it.
   See [docs/LINUX-APP.md](docs/LINUX-APP.md).
-- **Linux capture** — X11 done (previews, deck scan, window picker; MIT-SHM with
-  a `GetImage` fallback, nothing linked). What's left is the **mirror**, which
-  needs a Linux `stream.rs` feeding openh264 — the capture half is done and its
-  signature already matches the Windows host's — and then **Wayland**
+- **Linux capture** — X11 done, mirror included (previews, deck scan, window
+  picker, and H.264 at 30 fps; MIT-SHM with a `GetImage` fallback, nothing
+  linked). What's left is the **second screen** (an `xrandr` VIRTUAL output —
+  a request for one is served as a mirror meanwhile) and then **Wayland**
   (portal + PipeWire), a different job again.
   See [docs/LINUX-HOST.md](docs/LINUX-HOST.md) §7.
+
+**Tests:** [`tests.yml`](.github/workflows/tests.yml) runs on every push — the
+shared crates and the Linux host (under Xvfb, where a missing display is a
+failure rather than a skip) on Linux, the Windows host on Windows, plus the
+browser client's Node tests including the encrypted leg end to end.
+⚠️ `cargo test --workspace` **fails by design** — each host crate uses its own
+platform's API unconditionally — so every job names its packages.
 
 **Deploy-time / external (can't be done in-repo):**
 - Host `web/.well-known/assetlinks.json` at the domain root; add the **Play
@@ -145,10 +152,12 @@ abandoned.
   machine is to install the udev rule and check a phone actually moves a slide.
   ⚠️ **Capture is the exception**, and worth not lumping in with the above: it is
   genuinely exercised, because Xvfb is a real X server rather than a stand-in —
-  six tests paint a root window and read the pixels back, and CI fails rather
-  than skips if no display is present. What is untested there is a *desktop*: a
-  compositing window manager, a multi-monitor layout, and a GPU readback path
-  instead of a software framebuffer.
+  tests paint a root window and read the pixels back (the mirror's too, decoding
+  its H.264 again to check the colour survived), and CI fails rather than skips
+  if no display is present. What is untested there is a *desktop*: a compositing
+  window manager, a multi-monitor layout, and a GPU readback path instead of a
+  software framebuffer — and, for the mirror, whether software openh264 holds 30
+  fps on real hardware.
 
 ## Security
 

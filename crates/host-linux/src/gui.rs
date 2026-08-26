@@ -151,7 +151,7 @@ impl HostApp {
         // Withdraw the mDNS advertisement rather than leaving a phone browsing
         // for a host that has gone.
         if let Some(ad) = self.mdns_ad.take() {
-            let _ = ad.shutdown();
+            ad.shutdown(); // returns nothing; failure here would only mean it was already gone
         }
         self.running = false;
         self.status = "Stopped".to_owned();

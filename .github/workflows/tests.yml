@@ -1,0 +1,133 @@
+# Run the tests on every push, rather than only when someone cuts a release.
+#
+# Until this existed the three workflows in this folder were all **release**
+# jobs, triggered by a `v*` tag. So on a repo that ships straight to `main` with
+# no PR gate, nothing ran the test suite automatically at all: a break would sit
+# on `main` until the next tag, which is the worst moment to discover it.
+#
+# ⚠️ `cargo test --workspace` FAILS here by design — `host-windows`, `host-macos`
+# and `host-linux` each `use` their own platform's API unconditionally, so every
+# job must name its packages. See `Docs_UNI_SIM/landmines.md`.
+#
+# Cheap to delete: it is one file, and nothing else depends on it.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push supersedes the first; no point testing a commit already replaced.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (shared crates, Linux host, browser)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Same list as linux-release.yml, and for the same reasons: the GUI links
+      # the X11/Wayland client libraries, and `nasm` + a C++ compiler are needed
+      # because openh264 is built from source (the mirror, and the desktop
+      # client's decoder). `xvfb` is for the capture tests, not the build.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            build-essential nasm \
+            xvfb xauth
+
+      # ⚠️ Node 22+, explicitly. `secure.test.mjs` drives a real WebSocket client
+      # and `WebSocket` only became a stable global in Node 22 — on the runner's
+      # default it is undefined, and the test fails for a reason that has nothing
+      # to do with what it is testing.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tests-linux
+
+      # The platform-agnostic half of the workspace: wire format, transport,
+      # client session, discovery, the shared H.264 framing, the browser shim and
+      # the WebSocket bridge.
+      - name: Test the shared crates
+        run: |
+          cargo test -p extender-protocol -p extender-transport -p extender-core \
+                     -p extender-discovery -p extender-h264 -p extender-protocol-wasm \
+                     -p extender-web-bridge
+
+      # ⚠️ `SCREENS_REQUIRE_X11=1` is the point of the xvfb wrapper: without it
+      # the capture tests SKIP when there is no display and the job still reports
+      # green — indistinguishable from them passing.
+      - name: Test the Linux host (against a live X server)
+        run: xvfb-run -a --server-args="-screen 0 1280x800x24" cargo test -p extender-host-linux
+        env:
+          SCREENS_REQUIRE_X11: '1'
+
+      - name: Clippy (the crates this job builds)
+        run: |
+          cargo clippy -p extender-protocol -p extender-transport -p extender-h264 \
+                       -p extender-protocol-wasm -p extender-host-linux --all-targets
+
+      # The browser's own logic, needing neither a server nor the WASM artifact.
+      - name: Test the browser's encryption negotiation
+        run: node apps/web/room-caps.test.mjs
+
+      # `rust-cache` caches `~/.cargo/bin`, so this compiles once and is a no-op
+      # on every later run — worth the guard, because installing it takes longer
+      # than everything else in this job put together.
+      - name: Install wasm-pack
+        run: command -v wasm-pack || cargo install wasm-pack --locked
+
+      - name: Build the WASM shim
+        run: |
+          rustup target add wasm32-unknown-unknown
+          wasm-pack build crates/protocol-wasm --dev --target web \
+            --out-dir ../../apps/web/pkg --out-name extender_protocol
+
+      # ⚠️ These load the BUILT artifact, not the Rust source, so the build step
+      # above is not optional — a stale `pkg/` would test old bindings and pass.
+      - name: Verify the shim against canonical bytes
+        run: node apps/web/verify-wasm.mjs
+
+      # The whole chain with the browser code in it: real bridge, real
+      # `transport::accept`, real WebSocket, real Noise tunnel.
+      - name: Test the encrypted browser leg end to end
+        run: node apps/web/secure.test.mjs
+
+  windows:
+    name: Windows (host)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # openh264-sys2 assembles its own source; without NASM the build fails in a
+      # C build script whose error never mentions video. Same step as
+      # windows-release.yml.
+      - name: Install NASM
+        run: choco install nasm --no-progress -y
+
+      - name: Add NASM to PATH
+        run: echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tests-windows
+
+      - name: Test the Windows host
+        run: cargo test -p extender-host-windows -p extender-h264 -p extender-transport

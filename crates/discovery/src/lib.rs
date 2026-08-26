@@ -72,34 +72,35 @@ pub fn start_listener<F>(
                 }
             }
 
-            match sock.recv_from(&mut buf) {
-                Ok((n, from_addr)) => {
-                    let from_ip = match from_addr {
-                        SocketAddr::V4(a) => a.ip().to_string(),
-                        SocketAddr::V6(_) => continue,
-                    };
-                    // Don't list ourselves.
-                    if own_ip.lock().unwrap().as_deref() == Some(from_ip.as_str()) {
-                        continue;
-                    }
-                    let Some((port, name)) = parse_beacon(&buf[..n]) else { continue };
-                    let mut list = peers.lock().unwrap();
-                    if let Some(existing) = list.iter_mut().find(|p| p.addr == from_ip) {
-                        existing.last_seen = Instant::now();
-                        existing.name = name;
-                        existing.port = port;
-                    } else {
-                        list.push(DiscoveredPeer {
-                            name,
-                            addr: from_ip,
-                            port,
-                            last_seen: Instant::now(),
-                        });
-                        drop(list);
-                        on_change();
-                    }
+            // A read timeout or transient error is normal here and means "nothing
+            // this tick", so there is no error arm to write.
+            if let Ok((n, from_addr)) = sock.recv_from(&mut buf) {
+                let from_ip = match from_addr {
+                    SocketAddr::V4(a) => a.ip().to_string(),
+                    SocketAddr::V6(_) => continue,
+                };
+                // Don't list ourselves.
+                if own_ip.lock().unwrap().as_deref() == Some(from_ip.as_str()) {
+                    continue;
                 }
-                Err(_) => {} // read timeout or transient error
+                let Some((port, name)) = parse_beacon(&buf[..n]) else {
+                    continue;
+                };
+                let mut list = peers.lock().unwrap();
+                if let Some(existing) = list.iter_mut().find(|p| p.addr == from_ip) {
+                    existing.last_seen = Instant::now();
+                    existing.name = name;
+                    existing.port = port;
+                } else {
+                    list.push(DiscoveredPeer {
+                        name,
+                        addr: from_ip,
+                        port,
+                        last_seen: Instant::now(),
+                    });
+                    drop(list);
+                    on_change();
+                }
             }
         }
     });
@@ -108,7 +109,9 @@ pub fn start_listener<F>(
 /// Spawn a beacon sender thread. Sends every 2s until `stop` is set.
 pub fn start_beacon(name: String, port: u16, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else { return };
+        let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
+            return;
+        };
         let _ = sock.set_multicast_ttl_v4(1); // LAN only, don't cross routers
         let target = SocketAddr::from((MULTICAST_ADDR, DISCOVERY_PORT));
         let beacon = format!("USSCREENS\t{port}\t{name}");
@@ -154,9 +157,22 @@ pub fn advertise_mdns(instance_name: &str, port: u16) -> Result<MdnsAd, mdns_sd:
     // DNS-SD instance names allow spaces/UTF-8, but keep the hostname label safe.
     let host_label: String = instance_name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    let host_name = format!("{}.local.", if host_label.is_empty() { "usscreens-host" } else { host_label.as_str() });
+    let host_name = format!(
+        "{}.local.",
+        if host_label.is_empty() {
+            "usscreens-host"
+        } else {
+            host_label.as_str()
+        }
+    );
     let info = mdns_sd::ServiceInfo::new(
         MDNS_SERVICE_TYPE,
         instance_name,
@@ -180,13 +196,20 @@ pub fn advertise_mdns(instance_name: &str, port: u16) -> Result<MdnsAd, mdns_sd:
 /// custom UDP beacon can't be heard — e.g. the web bridge, which typically runs
 /// on the same machine as a GUI host that already owns the beacon port.
 /// (Multiple mDNS daemons coexist on one machine; the beacon socket doesn't.)
-pub fn start_mdns_browser<F>(peers: Arc<Mutex<Vec<DiscoveredPeer>>>, stop: Arc<AtomicBool>, on_change: F)
-where
+pub fn start_mdns_browser<F>(
+    peers: Arc<Mutex<Vec<DiscoveredPeer>>>,
+    stop: Arc<AtomicBool>,
+    on_change: F,
+) where
     F: Fn() + Send + 'static,
 {
     std::thread::spawn(move || {
-        let Ok(daemon) = mdns_sd::ServiceDaemon::new() else { return };
-        let Ok(rx) = daemon.browse(MDNS_SERVICE_TYPE) else { return };
+        let Ok(daemon) = mdns_sd::ServiceDaemon::new() else {
+            return;
+        };
+        let Ok(rx) = daemon.browse(MDNS_SERVICE_TYPE) else {
+            return;
+        };
         while !stop.load(Ordering::Relaxed) {
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
@@ -206,11 +229,18 @@ where
                         .to_owned();
                     let port = info.get_port();
                     let mut list = peers.lock().unwrap();
-                    if let Some(existing) = list.iter_mut().find(|p| p.addr == addr && p.port == port) {
+                    if let Some(existing) =
+                        list.iter_mut().find(|p| p.addr == addr && p.port == port)
+                    {
                         existing.last_seen = Instant::now();
                         existing.name = name;
                     } else {
-                        list.push(DiscoveredPeer { name, addr, port, last_seen: Instant::now() });
+                        list.push(DiscoveredPeer {
+                            name,
+                            addr,
+                            port,
+                            last_seen: Instant::now(),
+                        });
                         drop(list);
                         on_change();
                     }
@@ -320,7 +350,10 @@ mod tests {
         while Instant::now() < deadline {
             {
                 let list = peers.lock().unwrap();
-                if list.iter().any(|p| p.name == "USScreens-Browse-Test" && p.port == 9098) {
+                if list
+                    .iter()
+                    .any(|p| p.name == "USScreens-Browse-Test" && p.port == 9098)
+                {
                     found = true;
                 }
             }

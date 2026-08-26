@@ -141,6 +141,16 @@ openh264, which `openh264-sys2` compiles from source, and its x86 assembly needs
 an assembler. Without them the build fails inside a C build script, with an
 error that names `nasm` and never mentions video.
 
+✅ **The whole release sequence was rehearsed on a bare `ubuntu:22.04`**
+(2026-08-26) — the workflow's exact apt list, then the tests under Xvfb, a full
+release build, `build-appimage.sh`, and the packaged binary accepting a
+connection. So the dependency list in
+[`linux-release.yml`](../.github/workflows/linux-release.yml) is known
+sufficient rather than assumed, and cutting the first `v*` tag should be a
+formality. ⚠️ `ldd` on that build lists `libstdc++` as well as `libgcc_s`,
+`libm`, `libc` and the loader — openh264 is C++ — which is one more reason the
+build machine must not be newer than the oldest distro you support.
+
 ⚠️ **Build the AppImage on the oldest distro you intend to support**, or let
 [`linux-release.yml`](../.github/workflows/linux-release.yml) do it (pinned to
 `ubuntu-22.04` for exactly this reason). An AppImage links against the build

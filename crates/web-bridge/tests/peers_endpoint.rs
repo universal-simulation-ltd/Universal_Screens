@@ -57,6 +57,20 @@ fn peers_endpoint_lists_mdns_hosts_and_gates_the_host_retarget() {
         });
     }
 
+    // ⚠️ Wait for the bridge to actually be listening before asking it anything.
+    //    `serve()` runs on a thread, and the port was chosen by binding a
+    //    throwaway listener and dropping it — so between that drop and `serve`'s
+    //    own bind there is a window where a connect gets ECONNREFUSED. Windows
+    //    happened to win that race and Linux did not, which is how this test
+    //    passed for months and then failed the first time it ran on Linux.
+    let listening = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < listening {
+        if TcpStream::connect(&bridge_addr).is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
     // 4) /peers eventually lists the advertised host (mDNS resolve is fast on
     //    loopback-capable machines, but give it a lenient window).
     let deadline = Instant::now() + Duration::from_secs(15);
