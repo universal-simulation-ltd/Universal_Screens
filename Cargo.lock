@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "extender-android-jni"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-core",
  "jni 0.21.1",
@@ -1366,7 +1366,7 @@ dependencies = [
 
 [[package]]
 name = "extender-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-core",
  "extender-protocol",
@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "extender-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-protocol",
  "extender-transport",
@@ -1386,14 +1386,14 @@ dependencies = [
 
 [[package]]
 name = "extender-discovery"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mdns-sd",
 ]
 
 [[package]]
 name = "extender-h264"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-protocol",
  "image",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "apple-cf",
  "cc",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-linux"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "evdev",
@@ -1436,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-macos"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "apple-cf",
  "cc",
@@ -1455,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-windows"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "extender-discovery",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "extender-mobile-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-core",
  "extender-transport",
@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "extender-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "postcard",
  "serde",
@@ -1490,7 +1490,7 @@ dependencies = [
 
 [[package]]
 name = "extender-protocol-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-protocol",
  "extender-transport",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "extender-transport"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.2.17",
  "sha2",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "extender-web-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "extender-discovery",
  "extender-protocol",
