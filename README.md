@@ -107,19 +107,18 @@ abandoned.
   app demos, with a "Present my phone" toggle (MediaProjection + upstream video).
 
 **Shipping:**
-- **Windows installer** — done. `scripts/build-installer.ps1` (or a `v*` tag, via
+- **Windows installer** — done and **published** (v0.2.0).
+  `scripts/build-installer.ps1` (or a `v*` tag, via
   [`windows-release.yml`](.github/workflows/windows-release.yml)) produces a
-  per-user, no-admin, statically-linked `UniversalScreens-Setup-*.exe`. Nothing is
-  published yet, so the download page still says "coming soon" — cutting the first
-  tag is what flips it.
+  per-user, no-admin, statically-linked `UniversalScreens-Setup-*.exe`.
 - **macOS packaging** — done. Universal DMG, ad-hoc signed, built by
   [`macos-release.yml`](.github/workflows/macos-release.yml) and attached to
   **v0.1.0**; the download page offers Mac alongside Windows. See
   [docs/MACOS-APP.md](docs/MACOS-APP.md).
-- **Linux packaging** — done for what exists. `scripts/build-appimage.sh` (or a
-  `v*` tag, via [`linux-release.yml`](.github/workflows/linux-release.yml))
-  produces an unsigned `UniversalScreens-*.AppImage`. Nothing is published yet,
-  so the download page still says "coming soon" — cutting the first tag flips it.
+- **Linux packaging** — done and **published** (v0.2.0, the first Linux
+  release). `scripts/build-appimage.sh` (or a `v*` tag, via
+  [`linux-release.yml`](.github/workflows/linux-release.yml)) produces an
+  unsigned `UniversalScreens-*.AppImage`.
   See [docs/LINUX-APP.md](docs/LINUX-APP.md).
 - **Linux capture** — X11 done, mirror included (previews, deck scan, window
   picker, and H.264 at 30 fps; MIT-SHM with a `GetImage` fallback, nothing
