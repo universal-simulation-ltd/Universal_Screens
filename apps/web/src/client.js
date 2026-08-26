@@ -4,6 +4,7 @@
 // with InputController forwarding mouse/keyboard/touch/gestures.
 import { ready, protocol } from "./wasm.js";
 import { Transport } from "./transport.js";
+import { SecureChannel } from "./secure.js";
 import { RoomTransport } from "./room.js";
 import { H264Decoder } from "./decoder.js";
 import { CanvasRenderer } from "./renderer.js";
@@ -175,11 +176,12 @@ async function connect(addr, mode, targetHost = null) {
     sendHelloAndAttach(mode);
     $("host-label").textContent = targetHost ?? addr;
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
+    logEncryption(transport);
   };
   transport.onClose = () => { log("host disconnected", "dim"); disconnect(); };
   transport.onError = (e) => log(`error: ${e?.message ?? e} (is the bridge running?)`, "err");
   transport.onMessage = onMessage;
-  transport.connect();
+  transport.connect(pinValue());
 }
 
 // Connect to a host across networks via the cloud rendezvous (M8). The remote
@@ -203,7 +205,9 @@ async function connectRoom(code, mode) {
   const canvas = $("screen");
   renderer = new CanvasRenderer(canvas);
   decoder = new H264Decoder((frame) => renderer.draw(frame), (e) => log(`decoder error: ${e}`, "err"));
-  transport = new RoomTransport(ROOM_BASE, room, (bytes) => protocol.decode_message(bytes));
+  transport = new RoomTransport(ROOM_BASE, room, (bytes) => protocol.decode_message(bytes), {
+    secure: (pin) => new SecureChannel(protocol, pin),
+  });
   input = new InputController(transport, renderer, canvas);
 
   transport.onWaiting = () => { $("host-label").textContent = `Remote ${room} — waiting for the host…`; log("in the room — waiting for the host to come online", "dim"); };
@@ -211,12 +215,33 @@ async function connectRoom(code, mode) {
     sendHelloAndAttach(mode);
     $("host-label").textContent = `Remote ${room}`;
     log(`paired over the cloud relay — ${mode.label} (may be slower than LAN)`, "ok");
+    logEncryption(transport);
   };
   transport.onPeerLeft = () => { log("host left the room", "dim"); disconnect(); };
   transport.onClose = () => { log("relay closed", "dim"); disconnect(); };
   transport.onError = (e) => log(`relay error: ${e?.message ?? e}`, "err");
   transport.onMessage = onMessage;
-  transport.connect();
+  transport.connect(pinValue());
+}
+
+/// The PIN as typed, as a number. One reader, because it now feeds two things
+/// that MUST agree: the tunnel's key and the hello's `pin` field.
+function pinValue() {
+  return Number($("pin").value) || 0;
+}
+
+/// Say plainly whether this session is end-to-end encrypted.
+///
+/// ⚠️ Worth a line in the log because the answer depends on the machine at the
+/// other end, not on this page: an older host relays in the clear, and the
+/// relay — ours, on the cloud path — can read what passes through it. Claiming
+/// encryption that isn't there would be worse than saying nothing.
+function logEncryption(t) {
+  if (t.encrypted) {
+    log("end-to-end encrypted — the relay cannot read this session", "ok");
+  } else {
+    log("not end-to-end encrypted: the host is an older build. Update it to encrypt.", "dim");
+  }
 }
 
 // Send the ClientHello and start forwarding input — shared by the LAN and the
@@ -229,7 +254,7 @@ function sendHelloAndAttach(mode) {
       width: Math.round(window.screen.width * dpr),
       height: Math.round(window.screen.height * dpr),
       captureMode: mode.capture,
-      pin: Number($("pin").value) || 0,
+      pin: pinValue(),
     },
   );
   input.setMode({ enabled: mode.input, pointerInput: mode.video && mode.input });

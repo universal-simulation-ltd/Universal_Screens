@@ -100,49 +100,63 @@ a **Noise** tunnel using the [`snow`](https://crates.io/crates/snow) crate:
 - **macOS host + mobile shells:** compile/run on their platforms (this box is
   Windows-only for those targets). The Rust is the shared `Conn` path the Windows
   host exercises.
-- **Browser E2E — everything but the JavaScript is built (2026-08-26).**
-  - ✅ `transport::session`: the handshake and record layer with no socket,
-    compiling for `wasm32-unknown-unknown`.
-  - ✅ `protocol-wasm::tunnel`: `Handshake` / `Tunnel` for JS, plus `frame` and
-    `FrameReader` for the two jobs the bridge stops doing once encrypted (add the
-    4-byte length prefix; re-assemble the downstream byte stream).
-  - ✅ `web-bridge`: **both** relay paths — the LAN bridge (`proxy_established`)
-    and the cloud one (`dial_room`) — decide per connection from the browser's
-    first binary message. Preamble ⇒ relay verbatim; anything else ⇒ today's
-    re-framing. Proven by `encrypted_passthrough.rs` against the shipped
-    responder, and mutation-tested both ways (force either mode and one of the
-    two paths breaks).
-  - ❌ **The browser code**, and the question below, which has to be answered
-    first.
+- **Browser E2E — ✅ DONE (2026-08-26).** A browser tab runs the same PIN-keyed
+  Noise tunnel as every native client:
+  - `transport::session` — the handshake and record layer with no socket, built
+    for `wasm32-unknown-unknown`.
+  - `protocol-wasm::tunnel` — `Handshake` / `Tunnel` for JS, plus `frame` and
+    `FrameReader` for the two jobs the bridge stops doing once encrypted.
+  - `apps/web/src/secure.js` — the browser plumbing, used by both the LAN
+    (`transport.js`) and room (`room.js`) transports.
+  - `web-bridge` — both relay paths pass an encrypted connection through
+    untouched, chosen from the browser's first binary message.
 
-  ⚠️ **The open problem is capability discovery, not cryptography.** The bridge
-  ships **inside the host binary**, and the web client updates the instant it is
-  deployed. A tab that simply started encrypting would send the preamble to every
-  host already installed on someone's machine, whose older bridge would re-frame
-  it into a garbage `ClientHello` — so the session dies rather than falling back.
-  Three routes, none free:
-  1. **WebSocket subprotocol** (`Sec-WebSocket-Protocol`). Clean and standard for
-     the **LAN** bridge — an old bridge simply doesn't echo it, so `ws.protocol`
-     is empty and the tab stays plaintext. ⚠️ It does **not** work for the room
-     path: that negotiation is with the *Worker*, not with the host on the far
-     side of it.
-  2. **A capability signal in the room.** The host announces itself after pairing
-     and an old host says nothing. Needs the portal Worker to relay an unknown
-     text frame between peers untouched — unverified, and it lives in another
-     repo.
-  3. **Try encrypted, fall back on failure.** Works everywhere with no
-     negotiation, at the cost of a reconnect against old hosts, and needs a
-     failure signal that cannot be confused with a wrong PIN — which also
-     manifests as the session closing.
-  Route 1 for the LAN plus route 3 for the room is probably the answer, but it
-  should be decided before any JS is written, not after.
+  ⚠️ **Encryption is negotiated, never assumed, and the two paths negotiate
+  differently — that is forced, not stylistic.** The bridge ships **inside the
+  host binary** while the web client updates the instant it deploys, so a tab
+  that simply started encrypting would break every already-installed host.
+  - **LAN:** the tab offers the `usscreens-e2ee.v1` WebSocket subprotocol; a
+    bridge that can relay verbatim echoes it. Settled in the handshake — no
+    timeout, no reconnect. An older bridge doesn't know the token, doesn't echo,
+    and the tab stays plaintext.
+  - **Room:** the tab's socket terminates at **Cloudflare**, not at the host, so
+    no header it sends can reach the other end. The host announces
+    `{"type":"caps","e2ee":true}` on pairing instead; the room relays it
+    verbatim and every older peer ignores an unknown `type`. A tab that hears
+    nothing within `CAPS_WAIT_MS` (1.5 s) runs plaintext — a cost paid only
+    against an out-of-date host.
 
-  ⚠️ **A test that hangs is worse than a test that fails**, and this work found
-  two of them by mutation-testing: breaking the record framing left both ends of
-  the socket tests waiting forever, and forcing the relay mode wedged
+  ⚠️ **The PIN has to be known at `connect()`, not at `sendHello()`.** The
+  handshake starts when the socket opens, before any hello exists, and keying the
+  tunnel with one PIN while announcing another fails as an unreadable handshake —
+  so both transports now throw a clear error instead. The hello's PIN check is
+  kept on top of the tunnel, unchanged.
+
+  ⚠️ **The tab says which it got.** "Encrypted" is a promise about someone's
+  screen, and it depends on a machine this page cannot see, so the session log
+  states it either way rather than implying the good case.
+
+  **Verified end to end with the real browser code in the chain:**
+  `apps/web/secure.test.mjs` spawns a real bridge in front of the shipped
+  `transport::accept` (`--example e2ee_testbed`) and drives it through
+  `src/secure.js` and the wasm-pack artifact over a real WebSocket — the
+  negotiation, a round trip, a 200 KB payload spanning many Noise records,
+  message boundaries in a burst, a wrong PIN failing to open a tunnel, and the
+  plaintext fall-back still working. Plus 46 Rust tests across the three crates.
+
+  ⚠️ **A test that hangs is worse than a test that fails**, and mutation-testing
+  found two of them here: breaking the record framing left both ends of the
+  socket tests waiting forever, and forcing the relay mode wedged
   `dial_roundtrip`. Every socket in `transport` and `web-bridge`'s tests is now
-  bounded by a read timeout. The same exercise also showed `dial_roundtrip` had
-  the **host speaking first**, an order no real session takes.
+  bounded by a read timeout. The same exercise showed `dial_roundtrip` had the
+  **host speaking first**, an order no real session takes.
+
+  ⚠️ **Two Node-on-Windows traps in the harness**, both of which turned a passing
+  run into a broken one: killing the child and calling `process.exit()` in the
+  same tick **aborts** Node inside libuv (every check printed PASS, then the
+  process crashed — any CI would call that a failure), and `shell: true` makes
+  the child a shell wrapping cargo, so `kill()` reaches the shell and **leaves
+  the testbed running** (verified: orphaned processes still holding ports).
 
   ⚠️ **`getrandom` needs its `js` feature** for any wasm build in this workspace,
   or `snow`'s key generation refuses to compile with an error that names neither

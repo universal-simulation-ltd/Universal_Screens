@@ -39,6 +39,27 @@ pub const DEFAULT_ROOM_URL: &str = "wss://opensource.unisim.co.uk";
 /// added latency per direction; fine for a LAN spike, revisited for production.
 const IDLE_POLL: Duration = Duration::from_millis(4);
 
+/// The WebSocket subprotocol a browser offers to ask "do you relay an encrypted
+/// connection verbatim?", and which a bridge that does echoes back.
+///
+/// ⚠️ **This exists because the bridge ships inside the host binary.** The web
+/// client updates the moment it deploys; the host on someone's desk might be a
+/// year old. A tab that just started encrypting would have its handshake
+/// re-framed into a garbage `ClientHello` and the session would die. An old
+/// bridge doesn't know this header, doesn't echo it, and the tab stays
+/// plaintext — no timeout, no reconnect, no guessing.
+///
+/// ⚠️ It only answers for the **LAN** path. Through the cloud rendezvous the
+/// browser negotiates with *Cloudflare*, not with the host behind it, so that
+/// path uses [`CAPS_SIGNAL`] instead.
+pub const E2EE_SUBPROTOCOL: &str = "usscreens-e2ee.v1";
+
+/// What a host announces into a rendezvous room once paired, so the browser on
+/// the other side knows it can encrypt. Relayed verbatim by the room (an
+/// unknown `type` is ignored by every existing peer, in both directions), and an
+/// older host simply never sends it.
+pub const CAPS_SIGNAL: &str = r#"{"type":"caps","e2ee":true}"#;
+
 /// Default WebSocket bind address the bridge listens on for browsers.
 pub const DEFAULT_WS_ADDR: &str = "0.0.0.0:9002";
 /// Default TCP address of the `extender-host` the bridge proxies to.
@@ -232,11 +253,9 @@ fn proxy_browser(
     peers: &Arc<Mutex<Vec<DiscoveredPeer>>>,
 ) -> io::Result<()> {
     let mut requested: Option<String> = None;
-    let mut ws = tungstenite::accept_hdr(ws_stream, |req: &tungstenite::handshake::server::Request, resp| {
+    let mut ws = accept_negotiating(ws_stream, |req| {
         requested = query_param(req.uri().query().unwrap_or(""), "host");
-        Ok(resp)
-    })
-    .map_err(|e| io::Error::other(format!("websocket handshake failed: {e}")))?;
+    })?;
 
     let target = match requested {
         None => default_host.to_owned(),
@@ -255,6 +274,20 @@ fn proxy_browser(
         }
     };
     proxy_established(ws, &target)
+}
+
+/// True when the handshake request offers [`E2EE_SUBPROTOCOL`].
+///
+/// `Sec-WebSocket-Protocol` is a comma-separated preference list, and a browser
+/// may offer several, so this looks for the token rather than matching the whole
+/// header.
+fn offers_e2ee(req: &tungstenite::handshake::server::Request) -> bool {
+    req.headers()
+        .get_all("Sec-WebSocket-Protocol")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|tok| tok.trim() == E2EE_SUBPROTOCOL)
 }
 
 /// The value of `key` in a raw `k=v&k=v` query string (no percent-decoding —
@@ -406,9 +439,38 @@ fn read_any<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
 /// # Errors
 /// Returns an error if the handshake, the host connection, or a forward fails.
 pub fn proxy_connection(ws_stream: TcpStream, host_addr: &str) -> io::Result<()> {
-    let ws = tungstenite::accept(ws_stream)
-        .map_err(|e| io::Error::other(format!("websocket handshake failed: {e}")))?;
-    proxy_established(ws, host_addr)
+    proxy_established(accept_negotiating(ws_stream, |_| {})?, host_addr)
+}
+
+/// Complete the WebSocket handshake, answering the E2EE subprotocol when the tab
+/// offered it, and letting the caller inspect the request on the way past.
+///
+/// ⚠️ **Both** entry points go through here on purpose. When the negotiation
+/// lived in `proxy_browser` alone, `proxy_connection` — a public entry point,
+/// and the one the tests drive — silently never offered encryption, so a tab
+/// reaching it would have stayed plaintext for no reason anyone could see.
+fn accept_negotiating(
+    stream: TcpStream,
+    mut inspect: impl FnMut(&tungstenite::handshake::server::Request),
+) -> io::Result<WebSocket<TcpStream>> {
+    tungstenite::accept_hdr(
+        stream,
+        |req: &tungstenite::handshake::server::Request,
+         mut resp: tungstenite::handshake::server::Response| {
+            inspect(req);
+            // Answer the E2EE subprotocol if the tab offered it, so it can tell
+            // whether this bridge understands an encrypted connection *before*
+            // sending a byte. See `E2EE_SUBPROTOCOL`.
+            if offers_e2ee(req) {
+                resp.headers_mut().insert(
+                    "Sec-WebSocket-Protocol",
+                    E2EE_SUBPROTOCOL.parse().expect("a static ASCII header value"),
+                );
+            }
+            Ok(resp)
+        },
+    )
+    .map_err(|e| io::Error::other(format!("websocket handshake failed: {e}")))
 }
 
 /// The data phase of [`proxy_connection`], starting from an already-accepted
@@ -582,6 +644,12 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
         }
     }
     println!("extender-web-bridge: paired; bridging to host {host_addr}");
+    // Tell the tab this end can relay an encrypted connection untouched. It has
+    // to arrive before the browser's first byte, so it goes out here, right after
+    // pairing and before anything else. An older host never sends it and the tab
+    // stays plaintext.
+    ws.send(Message::Text(CAPS_SIGNAL.into()))
+        .map_err(|e| io::Error::other(format!("room caps write: {e}")))?;
 
     // Phase 2: bridge the paired room to a fresh loopback connection to the host's
     // serve() — which stays completely untouched (it just sees a localhost peer).

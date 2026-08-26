@@ -39,6 +39,22 @@ This regenerates `apps/web/pkg/` (git-ignored): `extender_protocol.js` +
 node apps/web/verify-wasm.mjs   # loads pkg/ and asserts against canonical bytes
 ```
 
+## Verify the ENCRYPTED leg, end to end (Node)
+
+```sh
+node apps/web/secure.test.mjs   # real bridge + real host, driven by src/secure.js
+```
+
+Spawns `cargo run -p extender-web-bridge --example e2ee_testbed` (a real bridge
+in front of the shipped `transport::accept`) and drives it with the browser's own
+`SecureChannel` over a real WebSocket. It covers the negotiation, a round trip, a
+200 KB payload that spans many Noise records, message boundaries in a burst, a
+wrong PIN, and the plaintext fall-back.
+
+⚠️ **Rebuild `pkg/` first** if `crates/protocol-wasm` changed — the test loads the
+built artifact, not the Rust source, so a stale `pkg/` silently tests the old
+bindings.
+
 ## Run the transport spike (manual, end-to-end)
 
 1. Start a host on the target machine: `extender-host` (macOS) /

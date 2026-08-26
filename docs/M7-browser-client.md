@@ -286,7 +286,23 @@ follow-ons.
 
 ## Security / reachability
 
-Same posture as M5f and unchanged by this milestone: **LAN-first, plaintext.**
+⚠️ **Updated 2026-08-26 — the browser leg is no longer plaintext by
+construction.** A tab now runs the same PIN-keyed Noise tunnel the native
+clients use, in WASM (`crates/protocol-wasm/src/tunnel.rs` over
+`transport::session`), and the bridge relays those bytes verbatim. Two
+consequences worth reading before trusting anything below:
+
+- **`ws://` mixed content is unchanged.** Noise encrypts the *payload*; it does
+  not make the scheme `wss://`, so a browser served from `https://` still
+  refuses a `ws://` LAN socket. The packaging question below stands.
+- **Whether a given session is encrypted depends on the host at the other end.**
+  The bridge ships inside the host binary, so an older one relays in the clear.
+  The tab detects this (the E2EE subprotocol on the LAN, a `caps` signal through
+  the room) and says which it got, rather than promising encryption it does not
+  have.
+
+The original posture, still accurate for the *transport scheme* rather than the
+payload: **LAN-first, plaintext.**
 A browser will refuse a `ws://` (insecure) connection from an `https://` page
 (mixed content) — so either the client is served over plain `http://` on the LAN
 (host-bundled), or the host must offer `wss://` with a cert (self-signed →

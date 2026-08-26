@@ -271,18 +271,20 @@ because traffic now traverses a cloud rendezvous:
   the UI for video modes, and prefer the WebRTC (P2P) path once M8e lands so media
   leaves the cloud out of the loop. TURN-relayed WebRTC still touches a relay; STUN
   (direct) does not.
-- **No E2E encryption beyond TLS-to-Cloudflare** in the relay path — *for now*.
-  TLS protects the wire; it does not protect the stream from the **relay**, which
-  is our own Worker and can read the mirrored screen and every keystroke.
-  ⚠️ **The Rust half of the fix is now built** (2026-08-26): `dial_room` detects
-  the transport preamble on the browser's first binary frame and relays the
-  connection **verbatim**, so a browser running `transport::session` in WASM has
-  a PIN-keyed Noise tunnel straight to the host and the room sees only Noise
-  records. What is missing is the browser code and, before it, a way for the tab
-  to know whether the host on the other end is new enough — see
-  `M10-transport-encryption.md` → Follow-ups. Until that lands, the older
-  mitigation still stands: prefer WebRTC (DTLS-SRTP, E2E between peers) for
-  video, and keep the relay for control-only if screen contents are sensitive.
+- **E2E encryption in the relay path: ✅ built 2026-08-26, for hosts new enough.**
+  TLS only ever protected the wire, never the stream from the **relay** — which
+  is our own Worker and could read the mirrored screen and every keystroke. The
+  browser now runs a PIN-keyed Noise tunnel end to end (`SecureChannel` over the
+  WASM `transport::session`) and `dial_room` relays those bytes **verbatim**, so
+  the room sees only Noise records.
+  ⚠️ **Whether a given session is encrypted depends on the host at the other
+  end**, because the bridge ships inside the host binary. A current host
+  announces `{"type":"caps","e2ee":true}` on pairing — relayed verbatim by the
+  room, and ignored by any older peer, which is what makes it safe to add. A tab
+  that hears nothing within `CAPS_WAIT_MS` runs plaintext and says so in its log.
+  So for an out-of-date host the older mitigation still applies: prefer WebRTC
+  (DTLS-SRTP, E2E between peers) for video, or keep the relay to control-only if
+  screen contents are sensitive.
 
 ## Open questions / risks
 
