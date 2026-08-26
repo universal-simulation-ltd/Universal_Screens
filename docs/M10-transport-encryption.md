@@ -45,11 +45,18 @@ a **Noise** tunnel using the [`snow`](https://crates.io/crates/snow) crate:
   bytes. A `PREAMBLE` marker ⇒ run the Noise responder (keyed by the host's PIN) ⇒
   encrypted `Conn`. Anything else ⇒ a legacy/loopback plaintext peer ⇒ plaintext
   `Conn` (logged with a warning).
-- **Browser bridge** (`crates/web-bridge`): unchanged. It forwards raw frames from a
-  browser tab to the host over **loopback**, and a browser can't run Noise on its
-  own, so that path stays plaintext and the host auto-detects it. The browser leg is
-  therefore **not** yet end-to-end encrypted (it relies on `wss://` to the cloud
-  rendezvous).
+- **Browser bridge** (`crates/web-bridge`): still forwards raw frames, so the
+  browser leg is **not yet end-to-end encrypted** — it relies on `wss://` to the
+  cloud rendezvous, which protects the wire but leaves the *relay* able to read
+  the stream.
+  ⚠️ **The reason given here for years — "a browser can't run Noise on its own" —
+  is no longer true**, and was never quite the obstacle. The blocker was that
+  this crate's handshake and record layer were welded to `TcpStream`, which a
+  browser does not have. Both now live in
+  [`transport::session`](../crates/transport/src/session.rs), which is byte-in /
+  byte-out and **builds for `wasm32-unknown-unknown`**. What remains for the
+  browser leg is the carrier work, not the crypto: WASM bindings, a dual-mode
+  bridge, and the JS handshake — see Follow-ups.
 
 ### What is deliberately unchanged
 
@@ -93,6 +100,23 @@ a **Noise** tunnel using the [`snow`](https://crates.io/crates/snow) crate:
 - **macOS host + mobile shells:** compile/run on their platforms (this box is
   Windows-only for those targets). The Rust is the shared `Conn` path the Windows
   host exercises.
-- **Browser E2E:** the browser client still relies on `wss://` transport rather than
-  the Noise tunnel; bringing it under encryption needs a browser-side Noise (WASM) or
-  a different scheme.
+- **Browser E2E — the crypto half is done; the carrier half is not.**
+  `transport::session` runs the initiator handshake and the record layer with no
+  socket, compiles to wasm, and is proven against the *shipped* host responder by
+  `a_carrier_with_no_socket_api_completes_the_real_handshake`. Three pieces are
+  left, and none of them is cryptography:
+  1. **WASM bindings** in `crates/protocol-wasm` exposing `Initiator`/`Session`
+     to JS as byte arrays.
+  2. **A dual-mode bridge.** `crates/web-bridge` reframes today (WS message ↔
+     4-byte-LE-prefixed TCP frame). An encrypted browser must instead be relayed
+     **verbatim**, because its Noise records already contain the protocol's own
+     framing. ⚠️ Detect the mode from the first upstream message the same way the
+     host does — a `PREAMBLE` ⇒ passthrough, anything else ⇒ today's behaviour —
+     or a new web client will break against every already-installed host, since
+     the bridge ships *inside the host binary*.
+  3. **The JS**: run the handshake, then wrap/unwrap, and add the 4-byte length
+     prefix the WASM shim currently gets for free from the bridge.
+  ⚠️ **`getrandom` needs its `js` feature** for any wasm build in this workspace,
+  or `snow`'s key generation refuses to compile with an error that names neither
+  Noise nor the browser. It is declared in `crates/transport/Cargo.toml` under a
+  `cfg(target_arch = "wasm32")` target block, so it costs native builds nothing.

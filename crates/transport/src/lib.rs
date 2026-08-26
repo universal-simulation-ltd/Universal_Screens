@@ -41,17 +41,31 @@
 //! write_framed}` run over it unchanged. The secure variant transparently splits
 //! the byte stream into Noise transport messages (each ≤ 64 KiB, the Noise limit)
 //! carried as `u16`-length-prefixed ciphertext. The read and write halves share one
-//! [`snow::TransportState`] behind a mutex; each `Conn` clone drives a single
-//! direction (one reader thread, one writer thread — the pattern the client session
-//! and both hosts already use), so nonce order always matches wire order.
+//! [`Session`] behind a mutex; each `Conn` clone drives a single direction (one
+//! reader thread, one writer thread — the pattern the client session and both
+//! hosts already use), so nonce order always matches wire order.
+//!
+//! ## Where the socket isn't
+//!
+//! The handshake and the record layer live in [`session`], which touches no
+//! socket at all — it is bytes in, bytes out. That is what allows the **browser**
+//! client, whose carrier is a WebSocket, to run the same tunnel with the same
+//! code rather than a JavaScript re-implementation of the same wire format.
+//! Everything in this file is the `TcpStream` adapter on top of it.
 
-use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
+
+/// The socket-free half of this crate: the initiator handshake and the record
+/// layer as byte-in/byte-out state machines, so a carrier that is not a
+/// `TcpStream` (a browser's WebSocket) can run the identical tunnel.
+pub mod session;
+
+pub use session::{Initiator, Session};
 
 /// The Noise handshake pattern + crypto suite. `NNpsk0`: ephemeral-ephemeral (no
 /// static keys to distribute) with the PIN mixed in as a pre-shared key at the
@@ -133,26 +147,23 @@ fn read_handshake_msg<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
 /// Returns an error if the preamble/handshake write or read fails, or the peer
 /// rejects the handshake (e.g. a PIN mismatch, which fails the AEAD).
 pub fn connect(mut stream: TcpStream, pin: u32) -> io::Result<Conn> {
-    let psk = derive_psk(pin);
-    let mut hs = snow::Builder::new(noise_params()?)
-        .psk(0, &psk)
-        .build_initiator()
-        .map_err(noise_err)?;
-
-    stream.write_all(&PREAMBLE)?;
-
-    // -> psk, e
-    let mut buf = [0u8; MAX_HANDSHAKE_MSG];
-    let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
-    write_handshake_msg(&mut stream, &buf[..n])?;
+    // The handshake itself is socket-free (`session::Initiator`), so this
+    // function is only the I/O: send what it produced, read the reply, hand it
+    // back. That split is what lets a browser — which has a WebSocket and no
+    // TcpStream — run the identical handshake. See `session.rs`.
+    let (init, first) = session::Initiator::start(pin)?;
+    stream.write_all(&first)?; // PREAMBLE + the length-prefixed `-> psk, e`
+    stream.flush()?;
 
     // <- e, ee
     let msg = read_handshake_msg(&mut stream)?;
-    let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
-    hs.read_message(&msg, &mut scratch).map_err(noise_err)?;
+    let mut reply = u16::try_from(msg.len())
+        .map_err(|_| noise_err("handshake message too large"))?
+        .to_le_bytes()
+        .to_vec();
+    reply.extend_from_slice(&msg);
 
-    let transport = hs.into_transport_mode().map_err(noise_err)?;
-    Ok(Conn::Secure(SecureStream::new(stream, transport)))
+    Ok(Conn::Secure(SecureStream::new(stream, init.finish(&reply)?)))
 }
 
 /// Accept a connection as the host: peek the first bytes to decide whether the peer
@@ -196,7 +207,7 @@ fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn
     write_handshake_msg(&mut stream, &buf[..n])?;
 
     let transport = hs.into_transport_mode().map_err(noise_err)?;
-    Ok(Conn::Secure(SecureStream::new(stream, transport)))
+    Ok(Conn::Secure(SecureStream::new(stream, Session::from_transport(transport))))
 }
 
 /// Peek (without consuming) enough bytes to tell whether the peer opened with the
@@ -327,50 +338,22 @@ impl Write for Conn {
 /// encrypt the caller's bytes into `≤ 64 KiB` Noise messages.
 pub struct SecureStream {
     inner: TcpStream,
-    transport: Arc<Mutex<snow::TransportState>>,
-    /// Decrypted plaintext already read off the socket but not yet handed to the
-    /// caller (a Noise message can hold more bytes than one `read` asked for).
-    rbuf: VecDeque<u8>,
+    /// The tunnel itself — cipher state *and* the buffers for a record that
+    /// spans reads. Shared between the read and write clones, which is what
+    /// keeps nonce order equal to wire order.
+    session: Arc<Mutex<Session>>,
 }
 
 impl SecureStream {
-    fn new(inner: TcpStream, transport: snow::TransportState) -> Self {
-        SecureStream {
-            inner,
-            transport: Arc::new(Mutex::new(transport)),
-            rbuf: VecDeque::new(),
-        }
+    fn new(inner: TcpStream, session: Session) -> Self {
+        SecureStream { inner, session: Arc::new(Mutex::new(session)) }
     }
 
     fn try_clone(&self) -> io::Result<SecureStream> {
         Ok(SecureStream {
             inner: self.inner.try_clone()?,
-            transport: Arc::clone(&self.transport),
-            rbuf: VecDeque::new(),
+            session: Arc::clone(&self.session),
         })
-    }
-
-    /// Read and decrypt exactly one Noise transport message into `rbuf`. Returns
-    /// `Ok(false)` on a clean EOF at a message boundary, `Ok(true)` otherwise.
-    fn fill_rbuf(&mut self) -> io::Result<bool> {
-        let mut len_buf = [0u8; 2];
-        match self.inner.read_exact(&mut len_buf) {
-            Ok(()) => {}
-            // A clean EOF exactly at a message boundary is a normal stream end.
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(false),
-            Err(e) => return Err(e),
-        }
-        let clen = u16::from_le_bytes(len_buf) as usize;
-        let mut ct = vec![0u8; clen];
-        self.inner.read_exact(&mut ct)?;
-
-        let mut pt = vec![0u8; clen];
-        let n = {
-            let mut t = self.transport.lock().unwrap();
-            t.read_message(&ct, &mut pt).map_err(noise_err)?
-        };
-        self.rbuf.extend(pt[..n].iter().copied());
-        Ok(true)
     }
 }
 
@@ -379,18 +362,33 @@ impl Read for SecureStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        // Refill until we have plaintext or hit a real EOF. The loop skips any
-        // (unexpected) empty Noise message rather than misreporting it as EOF.
-        while self.rbuf.is_empty() {
-            if !self.fill_rbuf()? {
-                return Ok(0);
+        loop {
+            // Hand back anything already decrypted before touching the socket.
+            {
+                let mut session = self.session.lock().unwrap();
+                let n = session.take(buf);
+                if n > 0 {
+                    return Ok(n);
+                }
             }
+            // ⚠️ Read WITHOUT the lock held: a blocking read here while a writer
+            // waits to seal would deadlock the session.
+            let mut chunk = [0u8; 16 * 1024];
+            let n = self.inner.read(&mut chunk)?;
+            if n == 0 {
+                let session = self.session.lock().unwrap();
+                return if session.has_partial_record() {
+                    // Cut off mid-record: a truncated stream, not a clean close.
+                    Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "stream ended inside a Noise record",
+                    ))
+                } else {
+                    Ok(0)
+                };
+            }
+            self.session.lock().unwrap().feed(&chunk[..n])?;
         }
-        let n = buf.len().min(self.rbuf.len());
-        for slot in buf.iter_mut().take(n) {
-            *slot = self.rbuf.pop_front().expect("rbuf non-empty");
-        }
-        Ok(n)
     }
 }
 
@@ -399,21 +397,11 @@ impl Write for SecureStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        // Encrypt every chunk under the lock (so nonces increment in order), then
-        // release the lock before the socket write so a concurrent reader can
-        // decrypt meanwhile. Correct because exactly one thread ever writes a given
-        // direction, so encryption order == wire order.
-        let mut out = Vec::with_capacity(buf.len() + 32);
-        {
-            let mut t = self.transport.lock().unwrap();
-            for chunk in buf.chunks(MAX_PLAINTEXT) {
-                let mut ct = vec![0u8; chunk.len() + 16];
-                let n = t.write_message(chunk, &mut ct).map_err(noise_err)?;
-                let clen = u16::try_from(n).map_err(|_| noise_err("ciphertext too large"))?;
-                out.extend_from_slice(&clen.to_le_bytes());
-                out.extend_from_slice(&ct[..n]);
-            }
-        }
+        // Seal under the lock (so nonces increment in order), then release it
+        // before the socket write so a concurrent reader can decrypt meanwhile.
+        // Correct because exactly one thread ever writes a given direction, so
+        // encryption order == wire order.
+        let out = self.session.lock().unwrap().seal(buf)?;
         self.inner.write_all(&out)?;
         Ok(buf.len())
     }
@@ -430,6 +418,10 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::thread;
     use std::time::Duration;
+
+    /// Cap every socket read in these tests. Long enough that a loaded machine
+    /// never trips it, short enough that a broken build reports in seconds.
+    const TEST_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
     #[test]
     fn psk_is_deterministic_and_pin_sensitive() {
@@ -455,9 +447,16 @@ mod tests {
         let addr = listener.local_addr()?;
         let host = thread::spawn(move || {
             let (sock, _) = listener.accept().unwrap();
+            // ⚠️ Bounded so a broken record layer FAILS instead of hanging. Every
+            // test below waits on bytes the other end sends, so mis-framing them
+            // leaves both ends blocked forever — a wedged CI run that names
+            // nothing, rather than a failure that names the break.
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
             accept(sock, pin_host)
         });
-        let client = connect(TcpStream::connect(addr)?, pin_client)?;
+        let client_sock = TcpStream::connect(addr)?;
+        client_sock.set_read_timeout(Some(TEST_IO_TIMEOUT))?;
+        let client = connect(client_sock, pin_client)?;
         let server = host.join().unwrap()?;
         Ok((client, server))
     }
@@ -602,5 +601,101 @@ mod tests {
         let mut body = [0u8; 5];
         conn.read_exact(&mut body).unwrap();
         assert_eq!(&body, b"world");
+    }
+    /// A **browser-shaped** client against the real host `accept`: the handshake
+    /// and every byte of framing come from [`session`], and the socket is used
+    /// only as an opaque "send these bytes / here are some bytes" carrier — which
+    /// is exactly what a WebSocket is.
+    ///
+    /// ⚠️ This is the test that makes the socket-free core trustworthy. Its own
+    /// unit tests drive both halves from the same module, so a mistake shared by
+    /// the sealer and the opener would pass them. Here the peer is the shipped
+    /// responder, so the bytes have to be right by the *host's* definition.
+    #[test]
+    fn a_carrier_with_no_socket_api_completes_the_real_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            // ⚠️ Bounded on BOTH sides. Wrong framing makes each end wait for
+            // bytes the other will never send, so without these a mutation turns
+            // this test into a hang - which in CI is worse than a failure,
+            // because it wedges the run instead of naming the break. Found by
+            // mutation-testing exactly that.
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+            let mut conn = accept(sock, 2468).unwrap();
+            assert!(conn.is_encrypted(), "the preamble must select the encrypted path");
+            // Read one framed message and answer with another, as a host would.
+            let mut len = [0u8; 4];
+            conn.read_exact(&mut len).unwrap();
+            let mut body = vec![0u8; u32::from_le_bytes(len) as usize];
+            conn.read_exact(&mut body).unwrap();
+            conn.write_all(&(body.len() as u32).to_le_bytes()).unwrap();
+            conn.write_all(&body).unwrap();
+            conn.flush().unwrap();
+            body
+        });
+
+        // --- the "browser" side: bytes in, bytes out, nothing else ------------
+        let mut carrier = TcpStream::connect(addr).unwrap();
+        carrier.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+        let (init, first) = Initiator::start(2468).unwrap();
+        carrier.write_all(&first).unwrap(); // one opaque chunk
+        carrier.flush().unwrap();
+
+        // The reply arrives as a chunk; a WebSocket would hand over a whole
+        // message, so read what the host sent and pass it in untouched.
+        let mut reply = [0u8; 2 + MAX_HANDSHAKE_MSG];
+        carrier.read_exact(&mut reply[..2]).unwrap();
+        let n = u16::from_le_bytes([reply[0], reply[1]]) as usize;
+        carrier.read_exact(&mut reply[2..2 + n]).unwrap();
+        let mut session = init.finish(&reply[..2 + n]).unwrap();
+
+        // A real framed protocol message, sealed by the browser-side session.
+        let mut framed = (11u32).to_le_bytes().to_vec();
+        framed.extend_from_slice(b"page down!!");
+        carrier.write_all(&session.seal(&framed).unwrap()).unwrap();
+        carrier.flush().unwrap();
+
+        // And the echo back, opened by it.
+        while session.available() < framed.len() {
+            let mut chunk = [0u8; 1024];
+            let got = carrier.read(&mut chunk).expect("host echoed within the timeout");
+            assert_ne!(got, 0, "host closed before echoing");
+            session.feed(&chunk[..got]).unwrap();
+        }
+        assert_eq!(session.take_all(), framed);
+        assert_eq!(host.join().unwrap(), b"page down!!");
+    }
+
+    /// The same carrier with the wrong PIN: the host's responder builds a
+    /// different PSK, so the reply cannot authenticate. Proves the browser path
+    /// inherits the PIN binding rather than merely being encrypted.
+    #[test]
+    fn a_carrier_with_the_wrong_pin_is_rejected() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+            accept(sock, 1111)
+        });
+
+        let mut carrier = TcpStream::connect(addr).unwrap();
+        carrier.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+        let (init, first) = Initiator::start(2222).unwrap();
+        carrier.write_all(&first).unwrap();
+        carrier.flush().unwrap();
+
+        // The host fails first (it reads our message under the wrong PSK), so the
+        // client either reads a rejected reply or sees the socket close. Both are
+        // failures; neither is a session.
+        let mut reply = vec![0u8; 2 + MAX_HANDSHAKE_MSG];
+        let outcome = carrier
+            .read(&mut reply)
+            .map_err(|e| e.to_string())
+            .and_then(|n| init.finish(&reply[..n]).map_err(|e| e.to_string()));
+        assert!(outcome.is_err(), "a wrong PIN must not yield a session");
+        assert!(host.join().unwrap().is_err(), "and the host must reject it too");
     }
 }

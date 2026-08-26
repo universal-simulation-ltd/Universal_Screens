@@ -17,3 +17,12 @@ license.workspace = true
 snow = { version = "0.9", default-features = false, features = ["default-resolver"] }
 # PIN -> 32-byte pre-shared key derivation (SHA-256). Pure Rust, all targets.
 sha2 = "0.10"
+
+# wasm32 only, and NOT this crate's own code: `snow`'s ephemeral key generation
+# reaches `getrandom`, which refuses to build for `wasm*-unknown-unknown` unless
+# told which randomness source the target has. The `js` feature points it at
+# `crypto.getRandomValues`. Declaring it here (rather than in the browser crate)
+# is what makes `cargo build --target wasm32-unknown-unknown` work at all -- the
+# feature has to be on for the dependency graph, not just for the leaf.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
