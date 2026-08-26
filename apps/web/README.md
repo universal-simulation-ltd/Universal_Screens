@@ -39,6 +39,19 @@ This regenerates `apps/web/pkg/` (git-ignored): `extender_protocol.js` +
 node apps/web/verify-wasm.mjs   # loads pkg/ and asserts against canonical bytes
 ```
 
+## Verify the room's encryption negotiation (Node, no server)
+
+```sh
+node apps/web/room-caps.test.mjs   # stubs WebSocket; needs no Worker and no WASM
+```
+
+Covers the browser half of the room negotiation: a host that announces
+`{"type":"caps","e2ee":true}` gets an encrypted tunnel, one that announces
+nothing still pairs and runs plaintext, and the tab reports which it got.
+
+⚠️ The second case is why this exists — **you cannot ask a real host to be an old
+one**, so the compatibility path has no other way to be tested.
+
 ## Verify the ENCRYPTED leg, end to end (Node)
 
 ```sh
