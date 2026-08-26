@@ -3,6 +3,15 @@
 //! `{"type":"paired"}` then relays) and a fake host (a TCP server speaking the
 //! length-prefixed framing), run `dial_room` between them, and assert a host
 //! frame reaches the room and a room frame reaches the host.
+//!
+//! ⚠️ **The browser speaks first, and this test now says so.** It used to have
+//! the fake host push its frame before the room sent anything — an order no real
+//! session takes, because a host answers a `ClientHello` and never opens the
+//! conversation. That went unnoticed until `dial_room` had to read the browser's
+//! first message to choose a relay mode (plaintext re-framing vs encrypted
+//! passthrough), at which point the artificial order deadlocked. Nothing is lost
+//! by a host that writes early — TCP buffers it — but the test should exercise
+//! the real sequence.
 
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -24,10 +33,13 @@ fn dial_room_bridges_a_paired_room_to_the_host_both_ways() {
     let host_thread = thread::spawn(move || {
         let (sock, _) = host_listener.accept().unwrap();
         let mut writer = sock.try_clone().unwrap();
+        sock.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         let mut reader = std::io::BufReader::new(sock);
-        write_frame_body(&mut writer, DOWN).unwrap(); // host -> (bridge) -> room
+        // Read the browser's frame first (a real host waits for the hello), then
+        // answer — the order a live session actually uses.
         let up = read_frame_body(&mut reader).unwrap(); // room -> (bridge) -> host
         host_got_tx.send(up).unwrap();
+        write_frame_body(&mut writer, DOWN).unwrap(); // host -> (bridge) -> room
     });
 
     // --- fake room: accept the bridge's ws, say "paired", relay one each way ---
@@ -38,7 +50,10 @@ fn dial_room_bridges_a_paired_room_to_the_host_both_ways() {
         let (sock, _) = room_listener.accept().unwrap();
         let mut ws = tungstenite::accept(sock).unwrap();
         ws.send(Message::Text(r#"{"type":"paired","peerRole":"receiver"}"#.into())).unwrap();
-        // First binary we receive is the host's DOWN frame, relayed by the bridge.
+        // The browser's frame goes up first; it is also what tells the bridge
+        // which relay mode this connection is (this one is plaintext).
+        ws.send(Message::Binary(UP.to_vec())).unwrap();
+        // Then the host's DOWN frame comes back, relayed by the bridge.
         loop {
             match ws.read().unwrap() {
                 Message::Binary(b) => {
@@ -49,9 +64,7 @@ fn dial_room_bridges_a_paired_room_to_the_host_both_ways() {
                 _ => {}
             }
         }
-        // Now push an UP frame for the bridge to forward to the host.
-        ws.send(Message::Binary(UP.to_vec())).unwrap();
-        // Keep the socket open briefly so the bridge can forward it, then close.
+        // Keep the socket open briefly, then close.
         thread::sleep(Duration::from_millis(300));
         let _ = ws.close(None);
         let _ = ws.flush();

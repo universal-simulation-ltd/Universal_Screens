@@ -29,6 +29,11 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 # Nearby hosts for the web client: the bridge browses DNS-SD (a browser tab
 # can't multicast) and serves the peer list over GET /peers.
 extender-discovery.workspace = true
+# Only for `PREAMBLE`: the bridge decides per connection whether a browser is
+# speaking the encrypted transport (relay its bytes verbatim) or the historical
+# plaintext one (re-frame them). Detecting the same marker the host detects is
+# what keeps a new web client working against an already-installed host.
+extender-transport.workspace = true
 
 [dev-dependencies]
 # The round-trip test builds real protocol messages to prove the bridge forwards

@@ -24,6 +24,12 @@ use extender_protocol::{
 };
 use wasm_bindgen::prelude::*;
 
+/// The encrypted browser leg: the PIN-keyed Noise tunnel plus the protocol
+/// framing the bridge stops doing once a connection is encrypted.
+pub mod tunnel;
+
+pub use tunnel::{frame, FrameReader, Handshake, Tunnel};
+
 // ---------------------------------------------------------------------------
 // Enum <-> u8 mappings shared with the TS side (and `hid.ts`). Kept explicit so
 // an out-of-range value is a clear error rather than a silent wrong variant.

@@ -267,6 +267,133 @@ fn query_param(query: &str, key: &str) -> Option<String> {
         .map(|(_, v)| v.to_owned())
 }
 
+/// How the bridge moves bytes between the browser and the host.
+///
+/// ⚠️ **Chosen per connection, from the browser's first message, and it has to
+/// be** — the bridge ships **inside the host binary** (the hosts call
+/// [`dial_room`]), so a web client that assumed one mode would break against
+/// every host already installed on someone's machine. Detecting instead is the
+/// same trick `transport::accept` uses one layer down, and for the same reason.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Relay {
+    /// The historical mode: each WS message is one bare `postcard` body, so the
+    /// bridge adds and strips the protocol's 4-byte length prefix.
+    Reframe,
+    /// An **encrypted** browser: the messages are Noise records, which already
+    /// contain the protocol's framing, so the bridge must not touch them. It
+    /// becomes a byte pipe and the host's own `transport::accept` does the rest.
+    Passthrough,
+}
+
+impl Relay {
+    /// Passthrough when the first upstream message opens with the transport
+    /// [`PREAMBLE`](extender_transport::PREAMBLE), otherwise re-framing.
+    fn for_first_message(first: &[u8]) -> Self {
+        if first.starts_with(&extender_transport::PREAMBLE) {
+            Self::Passthrough
+        } else {
+            Self::Reframe
+        }
+    }
+
+    /// One WS message, as the bytes to write to the host.
+    fn upstream(self, body: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Passthrough => body.to_vec(),
+            Self::Reframe => {
+                let mut out = Vec::with_capacity(4 + body.len());
+                out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+                out.extend_from_slice(body);
+                out
+            }
+        }
+    }
+}
+
+/// Block until the browser sends its first binary/text message, so the relay
+/// mode can be decided before a single byte reaches the host.
+///
+/// The socket is already nonblocking, so `WouldBlock` is "not yet" rather than
+/// an error; a close or a real error ends the connection.
+fn first_upstream_message(ws: &mut WebSocket<TcpStream>) -> io::Result<Vec<u8>> {
+    loop {
+        match ws.read() {
+            Ok(Message::Binary(b)) => return Ok(b),
+            Ok(Message::Text(t)) => return Ok(t.into_bytes()),
+            Ok(Message::Close(_)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "browser closed before sending anything",
+                ))
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(IDLE_POLL);
+            }
+            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "browser closed before sending anything",
+                ))
+            }
+            Err(e) => return Err(io::Error::other(format!("ws read: {e}"))),
+        }
+    }
+}
+
+/// Wait for the browser's first **binary** frame from the rendezvous room, so
+/// the relay mode can be decided before anything reaches the host.
+///
+/// Text frames in a room are rendezvous signals, not payload; `peer-left` ends
+/// the session (`Ok(None)`), and everything else is skipped. Bounded only by the
+/// peer: a browser that pairs and then says nothing simply holds an idle room,
+/// exactly as it did before this function existed.
+fn first_room_binary(
+    ws: &mut WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>,
+    host_writer: &mut TcpStream,
+) -> io::Result<Option<Vec<u8>>> {
+    loop {
+        match ws.read() {
+            Ok(Message::Binary(b)) => return Ok(Some(b)),
+            Ok(Message::Text(t)) => {
+                if signal_type(&t) == Some("peer-left") {
+                    let _ = host_writer.shutdown(std::net::Shutdown::Both);
+                    return Ok(None);
+                }
+            }
+            Ok(Message::Close(_)) => {
+                let _ = host_writer.shutdown(std::net::Shutdown::Both);
+                return Ok(None);
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(IDLE_POLL);
+            }
+            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                let _ = host_writer.shutdown(std::net::Shutdown::Both);
+                return Ok(None);
+            }
+            Err(e) => return Err(io::Error::other(format!("room read: {e}"))),
+        }
+    }
+}
+
+/// Read whatever bytes are available from the host, for [`Relay::Passthrough`].
+///
+/// ⚠️ Chunk boundaries are meaningless here and must be: a Noise record can span
+/// two reads, and two records can arrive in one. The browser's `Session` buffers
+/// across chunks, so the bridge's only job is to lose nothing and reorder
+/// nothing. An EOF is reported as an error so the reader thread ends.
+fn read_any<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
+    let mut buf = vec![0u8; 16 * 1024];
+    let n = r.read(&mut buf)?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "host closed"));
+    }
+    buf.truncate(n);
+    Ok(buf)
+}
+
 /// Proxy a single browser: complete the WS handshake on `ws_stream`, open a TCP
 /// connection to `host_addr`, then pump messages both ways until either side
 /// closes.
@@ -299,12 +426,28 @@ pub fn proxy_established(mut ws: WebSocket<TcpStream>, host_addr: &str) -> io::R
     host.set_nodelay(true)?;
     let mut host_writer = host.try_clone()?;
 
-    // Downstream (host → browser) reader thread: parse each framed body off the
-    // host and hand it to the main loop, which owns the WS for writing.
+    // ⚠️ The mode is decided by the browser's FIRST message, before anything is
+    // forwarded, and it must be — see [`Relay`]. Waiting here is safe because no
+    // host speaks first: `serve()` sends `HostInfo` only after reading the
+    // client's hello, and the Noise responder only after the client's preamble.
+    let first = first_upstream_message(&mut ws)?;
+    let relay = Relay::for_first_message(&first);
+    host_writer.write_all(&relay.upstream(&first))?;
+    host_writer.flush()?;
+
+    // Downstream (host → browser) reader thread: turn what the host sends into
+    // WS messages — one protocol frame each when re-framing, or raw chunks when
+    // passing an encrypted stream through — and hand them to the main loop,
+    // which owns the WS for writing.
     let (down_tx, down_rx) = mpsc::channel::<Vec<u8>>();
     let mut host_reader = BufReader::new(host);
     thread::spawn(move || {
-        while let Ok(body) = read_frame_body(&mut host_reader) {
+        loop {
+            let chunk = match relay {
+                Relay::Reframe => read_frame_body(&mut host_reader),
+                Relay::Passthrough => read_any(&mut host_reader),
+            };
+            let Ok(body) = chunk else { break };
             if down_tx.send(body).is_err() {
                 break; // main loop gone
             }
@@ -336,10 +479,14 @@ pub fn proxy_established(mut ws: WebSocket<TcpStream>, host_addr: &str) -> io::R
 
         // 2) Forward one upstream WS message to the host (nonblocking).
         match ws.read() {
-            Ok(Message::Binary(body)) => write_frame_body(&mut host_writer, &body)?,
+            Ok(Message::Binary(body)) => {
+                host_writer.write_all(&relay.upstream(&body))?;
+            }
             // A browser may send the hello as text in early experiments; treat its
             // bytes the same. Ping/Pong are handled internally by tungstenite.
-            Ok(Message::Text(t)) => write_frame_body(&mut host_writer, t.as_bytes())?,
+            Ok(Message::Text(t)) => {
+                host_writer.write_all(&relay.upstream(t.as_bytes()))?;
+            }
             Ok(Message::Close(_)) => {
                 let _ = host_writer.shutdown(std::net::Shutdown::Both);
                 return Ok(());
@@ -443,10 +590,26 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
     host.set_nodelay(true)?;
     let mut host_writer = host.try_clone()?;
 
+    // Same dual-mode decision as the LAN bridge, and it matters MORE here: this
+    // is the path through the cloud rendezvous, so "plaintext" means the relay
+    // itself can read the mirrored screen and every keystroke. A browser that
+    // opens with the transport preamble gets its bytes passed through untouched,
+    // and the Worker sees only Noise records.
+    let first = first_room_binary(&mut ws, &mut host_writer)?;
+    let Some(first) = first else { return Ok(()) }; // peer left before speaking
+    let relay = Relay::for_first_message(&first);
+    host_writer.write_all(&relay.upstream(&first))?;
+    host_writer.flush()?;
+
     let (down_tx, down_rx) = mpsc::channel::<Vec<u8>>();
     let mut host_reader = BufReader::new(host);
     thread::spawn(move || {
-        while let Ok(body) = read_frame_body(&mut host_reader) {
+        loop {
+            let chunk = match relay {
+                Relay::Reframe => read_frame_body(&mut host_reader),
+                Relay::Passthrough => read_any(&mut host_reader),
+            };
+            let Ok(body) = chunk else { break };
             if down_tx.send(body).is_err() {
                 break;
             }
@@ -477,7 +640,9 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
         // 2) Room → host: a binary frame is the browser's `Input`; a text frame is
         // a rendezvous signal (only `peer-left` matters here).
         match ws.read() {
-            Ok(Message::Binary(body)) => write_frame_body(&mut host_writer, &body)?,
+            Ok(Message::Binary(body)) => {
+                host_writer.write_all(&relay.upstream(&body))?;
+            }
             Ok(Message::Text(t)) => {
                 if signal_type(&t) == Some("peer-left") {
                     let _ = host_writer.shutdown(std::net::Shutdown::Both);

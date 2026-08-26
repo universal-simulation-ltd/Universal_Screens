@@ -271,9 +271,18 @@ because traffic now traverses a cloud rendezvous:
   the UI for video modes, and prefer the WebRTC (P2P) path once M8e lands so media
   leaves the cloud out of the loop. TURN-relayed WebRTC still touches a relay; STUN
   (direct) does not.
-- **No E2E encryption beyond TLS-to-Cloudflare** in the relay path. If that's not
-  acceptable for screen contents, gate video modes behind WebRTC-only (DTLS-SRTP,
-  E2E between peers) and keep the relay for control-only.
+- **No E2E encryption beyond TLS-to-Cloudflare** in the relay path — *for now*.
+  TLS protects the wire; it does not protect the stream from the **relay**, which
+  is our own Worker and can read the mirrored screen and every keystroke.
+  ⚠️ **The Rust half of the fix is now built** (2026-08-26): `dial_room` detects
+  the transport preamble on the browser's first binary frame and relays the
+  connection **verbatim**, so a browser running `transport::session` in WASM has
+  a PIN-keyed Noise tunnel straight to the host and the room sees only Noise
+  records. What is missing is the browser code and, before it, a way for the tab
+  to know whether the host on the other end is new enough — see
+  `M10-transport-encryption.md` → Follow-ups. Until that lands, the older
+  mitigation still stands: prefer WebRTC (DTLS-SRTP, E2E between peers) for
+  video, and keep the relay for control-only if screen contents are sensitive.
 
 ## Open questions / risks
 

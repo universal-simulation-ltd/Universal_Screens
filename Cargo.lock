@@ -1493,6 +1493,7 @@ name = "extender-protocol-wasm"
 version = "0.1.0"
 dependencies = [
  "extender-protocol",
+ "extender-transport",
  "postcard",
  "serde",
  "wasm-bindgen",
@@ -1513,6 +1514,7 @@ version = "0.1.0"
 dependencies = [
  "extender-discovery",
  "extender-protocol",
+ "extender-transport",
  "postcard",
  "rustls",
  "tungstenite",

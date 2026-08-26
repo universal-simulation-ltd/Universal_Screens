@@ -100,22 +100,50 @@ a **Noise** tunnel using the [`snow`](https://crates.io/crates/snow) crate:
 - **macOS host + mobile shells:** compile/run on their platforms (this box is
   Windows-only for those targets). The Rust is the shared `Conn` path the Windows
   host exercises.
-- **Browser E2E — the crypto half is done; the carrier half is not.**
-  `transport::session` runs the initiator handshake and the record layer with no
-  socket, compiles to wasm, and is proven against the *shipped* host responder by
-  `a_carrier_with_no_socket_api_completes_the_real_handshake`. Three pieces are
-  left, and none of them is cryptography:
-  1. **WASM bindings** in `crates/protocol-wasm` exposing `Initiator`/`Session`
-     to JS as byte arrays.
-  2. **A dual-mode bridge.** `crates/web-bridge` reframes today (WS message ↔
-     4-byte-LE-prefixed TCP frame). An encrypted browser must instead be relayed
-     **verbatim**, because its Noise records already contain the protocol's own
-     framing. ⚠️ Detect the mode from the first upstream message the same way the
-     host does — a `PREAMBLE` ⇒ passthrough, anything else ⇒ today's behaviour —
-     or a new web client will break against every already-installed host, since
-     the bridge ships *inside the host binary*.
-  3. **The JS**: run the handshake, then wrap/unwrap, and add the 4-byte length
-     prefix the WASM shim currently gets for free from the bridge.
+- **Browser E2E — everything but the JavaScript is built (2026-08-26).**
+  - ✅ `transport::session`: the handshake and record layer with no socket,
+    compiling for `wasm32-unknown-unknown`.
+  - ✅ `protocol-wasm::tunnel`: `Handshake` / `Tunnel` for JS, plus `frame` and
+    `FrameReader` for the two jobs the bridge stops doing once encrypted (add the
+    4-byte length prefix; re-assemble the downstream byte stream).
+  - ✅ `web-bridge`: **both** relay paths — the LAN bridge (`proxy_established`)
+    and the cloud one (`dial_room`) — decide per connection from the browser's
+    first binary message. Preamble ⇒ relay verbatim; anything else ⇒ today's
+    re-framing. Proven by `encrypted_passthrough.rs` against the shipped
+    responder, and mutation-tested both ways (force either mode and one of the
+    two paths breaks).
+  - ❌ **The browser code**, and the question below, which has to be answered
+    first.
+
+  ⚠️ **The open problem is capability discovery, not cryptography.** The bridge
+  ships **inside the host binary**, and the web client updates the instant it is
+  deployed. A tab that simply started encrypting would send the preamble to every
+  host already installed on someone's machine, whose older bridge would re-frame
+  it into a garbage `ClientHello` — so the session dies rather than falling back.
+  Three routes, none free:
+  1. **WebSocket subprotocol** (`Sec-WebSocket-Protocol`). Clean and standard for
+     the **LAN** bridge — an old bridge simply doesn't echo it, so `ws.protocol`
+     is empty and the tab stays plaintext. ⚠️ It does **not** work for the room
+     path: that negotiation is with the *Worker*, not with the host on the far
+     side of it.
+  2. **A capability signal in the room.** The host announces itself after pairing
+     and an old host says nothing. Needs the portal Worker to relay an unknown
+     text frame between peers untouched — unverified, and it lives in another
+     repo.
+  3. **Try encrypted, fall back on failure.** Works everywhere with no
+     negotiation, at the cost of a reconnect against old hosts, and needs a
+     failure signal that cannot be confused with a wrong PIN — which also
+     manifests as the session closing.
+  Route 1 for the LAN plus route 3 for the room is probably the answer, but it
+  should be decided before any JS is written, not after.
+
+  ⚠️ **A test that hangs is worse than a test that fails**, and this work found
+  two of them by mutation-testing: breaking the record framing left both ends of
+  the socket tests waiting forever, and forcing the relay mode wedged
+  `dial_roundtrip`. Every socket in `transport` and `web-bridge`'s tests is now
+  bounded by a read timeout. The same exercise also showed `dial_roundtrip` had
+  the **host speaking first**, an order no real session takes.
+
   ⚠️ **`getrandom` needs its `js` feature** for any wasm build in this workspace,
   or `snow`'s key generation refuses to compile with an error that names neither
   Noise nor the browser. It is declared in `crates/transport/Cargo.toml` under a

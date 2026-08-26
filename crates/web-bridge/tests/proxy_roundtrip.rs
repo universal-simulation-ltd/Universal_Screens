@@ -41,6 +41,12 @@ fn browser_hello_and_host_message_round_trip_through_the_bridge() {
     let host_downstream = downstream.clone();
     let host = thread::spawn(move || {
         let (mut sock, _) = host_listener.accept().unwrap();
+        // ⚠️ Bounded so a bridge that forwards the WRONG SHAPE fails here instead
+        // of hanging: without it, a mutation that stopped re-framing left this
+        // thread waiting forever for a length prefix that never comes, and the
+        // run wedged rather than reporting. (Found by mutation-testing the relay
+        // mode; the same fix is in crates/transport's tests.)
+        sock.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         let mut reader = BufReader::new(sock.try_clone().unwrap());
         // The hello the browser sent must arrive here byte-identical (re-framed).
         let got: ClientHello = protocol::read_framed(&mut reader).unwrap();
@@ -63,6 +69,9 @@ fn browser_hello_and_host_message_round_trip_through_the_bridge() {
     //    then read the downstream Message back.
     let url = format!("ws://{ws_addr}/");
     let (mut ws, _resp) = tungstenite::connect(&url).expect("ws connect");
+    if let tungstenite::stream::MaybeTlsStream::Plain(s) = ws.get_ref() {
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    }
 
     let hello_bytes = postcard::to_stdvec(&expected_hello).unwrap();
     ws.send(WsMessage::Binary(hello_bytes)).unwrap();
