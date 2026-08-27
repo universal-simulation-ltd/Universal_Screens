@@ -54,7 +54,13 @@ DisableProgramGroupPage=yes
 LicenseFile={#SourceDir}\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=UniversalScreens-Setup-{#AppVersion}
-SetupIconFile={#SourceDir}\crates\host-windows\assets\app-icon.ico
+; The SETUP program's own icon: the app mark with the UNI·SIM globe sealed
+; into the corner. Deliberately NOT app-icon.ico, which is what this used to
+; point at - Setup.exe and the installed program were then the same picture,
+; and a downloads folder full of UNI·SIM installers told you nothing about
+; which was which. Generated from the canonical mark by the platform repo's
+; scripts/app-marks/desktop-icons.mjs; matches what Universal PDF ships.
+SetupIconFile={#SourceDir}\crates\host-windows\assets\installer-icon.ico
 UninstallDisplayIcon={app}\{#HostExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern
