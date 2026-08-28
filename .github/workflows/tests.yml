@@ -39,12 +39,6 @@ jobs:
       # because openh264 is built from source (the mirror, and the desktop
       # client's decoder). `xvfb` is for the capture tests, not the build.
       #
-      # ⚠️ `xserver-xorg-video-dummy` is NOT a duplicate of xvfb. Xvfb's RandR
-      # size range reports maximum == current, so its framebuffer cannot grow and
-      # the SECOND SCREEN cannot be made on it - `vdisplay.rs` does nothing else.
-      # The dummy driver is a real Xorg DDX that resizes. Drop it and the
-      # second-screen tests skip, which under `SCREENS_REQUIRE_RANDR` is a
-      # failure rather than a silent green.
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
@@ -52,8 +46,7 @@ jobs:
             pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
             build-essential nasm \
-            xvfb xauth x11-utils x11-xserver-utils \
-            xserver-xorg-core xserver-xorg-video-dummy
+            xvfb xauth
 
       # ⚠️ Node 22+, explicitly. `secure.test.mjs` drives a real WebSocket client
       # and `WebSocket` only became a stable global in Node 22 — on the runner's
@@ -83,16 +76,17 @@ jobs:
                      -p extender-discovery -p extender-h264 -p extender-protocol-wasm \
                      -p extender-web-bridge -p extender-host-ui
 
-      # Two X servers, run by one script — the same script a developer runs
-      # locally through `scripts/docker-test-linux.sh` / `.ps1` from a Mac or
-      # Windows box. Sharing it is what stops CI and the local run drifting into
-      # testing different things.
+      # ⚠️ `xvfb` here, not the whole script: the SECOND SCREEN needs a server
+      # whose framebuffer can grow, which neither Xvfb nor this runner's Xorg
+      # can — see the `second-screen` job below. The script is shared with the
+      # local run (`scripts/docker-test-linux.sh` / `.ps1`) so the two cannot
+      # drift into testing different things.
       #
-      # ⚠️ The script sets `SCREENS_REQUIRE_X11=1` and `SCREENS_REQUIRE_RANDR=1`.
-      # Without them a missing server makes those tests SKIP and the job still
-      # reports green — indistinguishable from them passing.
-      - name: Test the Linux host (against live X servers)
-        run: scripts/test-linux-x11.sh
+      # ⚠️ It sets `SCREENS_REQUIRE_X11=1`. Without that a missing server makes
+      # the capture tests SKIP and the job still reports green — indistinguishable
+      # from them passing.
+      - name: Test the Linux host (against a live X server)
+        run: scripts/test-linux-x11.sh xvfb
 
       - name: Clippy (the crates this job builds)
         run: |
@@ -125,6 +119,48 @@ jobs:
       # `transport::accept`, real WebSocket, real Noise tunnel.
       - name: Test the encrypted browser leg end to end
         run: node apps/web/secure.test.mjs
+
+  second-screen:
+    # ⚠️ **24.04, not 22.04, and the reason is one package version.** The second
+    # screen grows the X root framebuffer, so it needs a server that can resize —
+    # which Xvfb cannot (its RandR size range reports maximum == current) and
+    # which Xorg can only with a driver implementing **RandR 1.2**. Measured on
+    # both: `xserver-xorg-video-dummy` is **0.3.8** on Ubuntu 22.04 and has none,
+    # so Xorg falls back to emulation (one `default` output, screen pinned at the
+    # configured Virtual size); it is **0.4.0** on 24.04 and Debian 12, which
+    # offers real `DUMMY0..15` outputs and resizes.
+    #
+    # A separate job rather than moving the `linux` job to 24.04: that job is
+    # pinned to 22.04 to match `linux-release.yml`'s glibc floor, and the point
+    # of the pin is that the AppImage runs on older distros.
+    name: Linux (the second screen, on a resizable X server)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            build-essential nasm \
+            x11-utils x11-xserver-utils \
+            xserver-xorg-core xserver-xorg-video-dummy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tests-second-screen
+
+      # ⚠️ The script checks the server really can resize BEFORE running anything,
+      # and fails naming the driver version if it cannot — so a distro bump that
+      # takes the capability away is a clear error rather than three tests failing
+      # with a message blaming Xvfb.
+      - name: Test the second screen
+        run: scripts/test-linux-x11.sh xorg
 
   windows:
     name: Windows (host)

@@ -67,6 +67,27 @@ if ! DISPLAY=:77 xdpyinfo >/dev/null 2>&1; then
 fi
 DISPLAY=:77 xrandr --query | head -3
 
+# ⚠️ Starting is not enough - the driver must implement **RandR 1.2**, and the
+# stock `dummy` does not on every distro. Measured: Ubuntu 22.04 ships
+# `xserver-xorg-video-dummy` **0.3.8**, which has none, so the server falls back
+# to RandR 1.2 *emulation* - one output called `default`, screen pinned at the
+# configured `Virtual` size, `maximum == current`. Debian 12 and Ubuntu 24.04
+# ship **0.4.0**, which offers real outputs (`DUMMY0..15`) and resizes.
+#
+# Without this check the three second-screen tests fail one by one with a message
+# blaming Xvfb - which is not what is running. Fail here instead, and say why.
+size_line="$(DISPLAY=:77 xrandr --query | head -1)"
+cur_w="$(printf '%s' "$size_line" | sed -n 's/.*current \([0-9]*\) x .*/\1/p')"
+max_w="$(printf '%s' "$size_line" | sed -n 's/.*maximum \([0-9]*\) x .*/\1/p')"
+if [ -z "$max_w" ] || [ -z "$cur_w" ] || [ "$max_w" -le "$cur_w" ]; then
+    echo "!! This Xorg cannot resize its framebuffer: $size_line" >&2
+    echo "!! The dummy driver needs RandR 1.2, which arrived in version 0.4.0." >&2
+    echo "!! Installed: $(dpkg-query -W -f='${Version}' xserver-xorg-video-dummy 2>/dev/null || echo unknown)" >&2
+    echo "!! Ubuntu 22.04 ships 0.3.8 and will NOT work; Debian 12 and Ubuntu" >&2
+    echo "!! 24.04 ship 0.4.0 and do." >&2
+    exit 1
+fi
+
 DISPLAY=:77 SCREENS_REQUIRE_X11=1 SCREENS_REQUIRE_RANDR=1 \
     cargo test -p extender-host-linux
 

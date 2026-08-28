@@ -255,9 +255,20 @@ can ever be made on it — while every *other* X11 test in the crate is perfectl
 happy there, because none of them resizes anything. A second X server was needed:
 **Xorg with the `dummy` driver**, a real DDX reporting `minimum 64 x 64 … maximum
 32767 x 32767` that resizes on request and runs in a plain container with no
-`--privileged`. `scripts/test-linux-x11.sh` starts both servers in turn and is
-what CI runs; `scripts/docker-test-linux.sh` / `.ps1` run it from a Mac or
-Windows box.
+`--privileged`. `scripts/test-linux-x11.sh` starts both servers in turn;
+`scripts/docker-test-linux.sh` / `.ps1` run it from a Mac or Windows box.
+
+⚠️ **And not just any `dummy` — it must be 0.4.0 or newer**, which is where the
+driver gained RandR 1.2. Found by CI failing, not by reading: **Ubuntu 22.04
+ships 0.3.8**, which has none, so Xorg falls back to RandR *emulation* — a single
+output named `default`, the screen pinned at the configured `Virtual` size,
+`maximum == current`. It starts, it accepts connections, and it is no more
+resizable than Xvfb. Debian 12 and Ubuntu 24.04 ship 0.4.0 and offer real
+`DUMMY0..15` outputs. So `tests.yml` runs this phase in its own **`ubuntu-24.04`**
+job while the main Linux job stays pinned to 22.04 for `linux-release.yml`'s
+glibc floor — and the script now checks the framebuffer really can grow *before*
+running anything, so a future distro bump that takes the capability away says so
+in one line instead of failing three tests with a message blaming Xvfb.
 
 **Verified against that server, not just compiled:** 57 tests (was 44), three of
 them new and live — the framebuffer grows by exactly the client's width and

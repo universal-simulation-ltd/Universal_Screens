@@ -431,9 +431,15 @@ const S_B: u8 = 0x70;
 /// ⚠️ A separate switch from `SCREENS_REQUIRE_X11`, because they need a
 /// **different** X server. Xvfb fixes its framebuffer at the size it was started
 /// with (measured: `maximum` equals `current` in its RandR size range), so the
-/// desktop cannot grow and a second screen cannot be made — the capture tests
-/// run there perfectly well. `scripts/test-linux-x11.sh` starts an Xorg with the
-/// `dummy` driver for these, and sets this.
+/// desktop cannot grow and a second screen cannot be made — while the capture
+/// tests run there perfectly well. `scripts/test-linux-x11.sh` starts an Xorg
+/// with the `dummy` driver for these, and sets this.
+///
+/// ⚠️ And not just any dummy: **the driver needs RandR 1.2, which arrived in
+/// version 0.4.0**. Ubuntu 22.04's 0.3.8 has none, so Xorg falls back to RandR
+/// emulation — one output named `default`, screen pinned at the configured
+/// `Virtual` size — and is no more resizable than Xvfb. Debian 12 and Ubuntu
+/// 24.04 ship 0.4.0, which is why CI runs this phase on `ubuntu-24.04`.
 fn randr_required() -> bool {
     std::env::var("SCREENS_REQUIRE_RANDR").is_ok_and(|v| v != "0")
 }
@@ -468,9 +474,11 @@ fn randr_ready() -> Option<(Display, RustConnection, u32, (u16, u16))> {
         None => {
             assert!(
                 !randr_required(),
-                "SCREENS_REQUIRE_RANDR is set but this X server's framebuffer cannot grow - the \
-                 second-screen tests did not run (Xvfb is fixed at its start-up size; use the \
-                 Xorg dummy driver, as scripts/test-linux-x11.sh does)"
+                "SCREENS_REQUIRE_RANDR is set but this X server's framebuffer cannot grow - \
+                 the second-screen tests did not run. Two servers report that: Xvfb (fixed at \
+                 its start-up size) and an Xorg whose driver has no RandR 1.2, which includes \
+                 xserver-xorg-video-dummy before 0.4.0 - Ubuntu 22.04's. Use \
+                 scripts/test-linux-x11.sh, which checks for this before running anything."
             );
             eprintln!(
                 "skipping: this X server cannot resize its framebuffer (set \

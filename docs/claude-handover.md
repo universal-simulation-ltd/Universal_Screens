@@ -53,6 +53,17 @@ real DDX (`minimum 64 x 64 … maximum 32767 x 32767`, resizes on request, offer
 `DUMMY0..15`) and starts in a plain container with **no `--privileged`**. That is
 worth remembering for any future X work here that looked untestable.
 
+⚠️ **But the dummy driver must be 0.4.0+, and CI found that out the hard way.**
+The first push went red: **Ubuntu 22.04 ships `xserver-xorg-video-dummy` 0.3.8**,
+which has no RandR 1.2, so Xorg falls back to emulation — one output called
+`default`, screen pinned at the configured `Virtual` size, `maximum == current`.
+It starts and accepts connections and is no more resizable than Xvfb. Debian 12
+(the local container) and Ubuntu 24.04 ship 0.4.0. So the second-screen phase is
+its own **`ubuntu-24.04`** job; the main Linux job stays on 22.04 because
+`linux-release.yml` pins it there for the AppImage's glibc floor. The script now
+checks resizability *before* running anything and fails naming the installed
+driver version — verified on both distros, in both directions.
+
 New scripts, all committed:
 
 - `scripts/xorg-dummy.conf` — ⚠️ its `VideoRam` must cover `Virtual` at 4 bytes
