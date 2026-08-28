@@ -73,6 +73,48 @@ pub fn is_wayland_session() -> bool {
         || std::env::var("WAYLAND_DISPLAY").is_ok_and(|d| !d.is_empty())
 }
 
+/// A rectangle of the root window, in root coordinates.
+///
+/// X's own units: `i16` origin (the root's coordinate space is signed, and a
+/// monitor can legally sit at a negative offset) and `u16` extent. Kept as one
+/// type rather than four loose numbers because it travels from
+/// [`crate::vdisplay`] to the grab and back out as the stream's frame size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Region {
+    /// This rectangle intersected with a `w` × `h` root window, or `None` when
+    /// they do not overlap at all.
+    ///
+    /// ⚠️ Clipping rather than rejecting is deliberate: a desktop that shrinks
+    /// mid-session should narrow the second screen's picture, not end it. The
+    /// caller then sees a size change and restarts the stream, which is the same
+    /// path an `xrandr` resolution change already takes.
+    pub(crate) fn clip_to(self, w: u16, h: u16) -> Option<Self> {
+        let left = self.x.max(0);
+        let top = self.y.max(0);
+        // `i32` throughout: `x + width` overflows `i16` for a rectangle at the
+        // far edge of a 32767-pixel root, which is a legal desktop.
+        let right = (i32::from(self.x) + i32::from(self.width)).min(i32::from(w));
+        let bottom = (i32::from(self.y) + i32::from(self.height)).min(i32::from(h));
+        let width = u16::try_from((right - i32::from(left)).max(0)).ok()?;
+        let height = u16::try_from((bottom - i32::from(top)).max(0)).ok()?;
+        if width == 0 || height == 0 {
+            return None;
+        }
+        Some(Self { x: left, y: top, width, height })
+    }
+
+    fn into_parts(self) -> (i16, i16, u16, u16) {
+        (self.x, self.y, self.width, self.height)
+    }
+}
+
 /// How to turn one stored pixel into R, G and B, read from the server's own
 /// declared format rather than assumed.
 ///
@@ -330,8 +372,28 @@ impl Capturer {
     /// an `xrandr` resolution change mid-session produces a correctly sized
     /// frame rather than a torn one.
     pub fn grab_bgra(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        self.grab_area(None)
+    }
+
+    /// Capture one rectangle of the root window, or the whole thing when `area`
+    /// is `None`.
+    ///
+    /// A region is what the **second screen** streams: the extra desktop area
+    /// [`crate::vdisplay`] adds is a part of the same root window, so capturing
+    /// it is this grab with an offset rather than a second capture path. That is
+    /// the same shape as the Windows host, where a secondary monitor is a
+    /// rectangle of the virtual screen.
+    ///
+    /// ⚠️ The region is **clipped to the root**, not trusted. The root can shrink
+    /// under a live session (the user changes resolution, or another client
+    /// resizes the framebuffer), and asking X for pixels outside the drawable is
+    /// a `BadMatch` that would end the stream rather than shrink the picture.
+    pub fn grab_area(&mut self, area: Option<Region>) -> Option<(u32, u32, Vec<u8>)> {
         let geom = self.conn.get_geometry(self.root).ok()?.reply().ok()?;
-        let (w, h) = (geom.width, geom.height);
+        let (x, y, w, h) = match area {
+            Some(r) => r.clip_to(geom.width, geom.height)?.into_parts(),
+            None => (0, 0, geom.width, geom.height),
+        };
         if w == 0 || h == 0 {
             return None;
         }
@@ -345,7 +407,7 @@ impl Capturer {
         if let Some(seg) = self.shm.as_ref() {
             let got = self
                 .conn
-                .shm_get_image(self.root, 0, 0, w, h, !0, ImageFormat::Z_PIXMAP.into(), seg.seg, 0)
+                .shm_get_image(self.root, x, y, w, h, !0, ImageFormat::Z_PIXMAP.into(), seg.seg, 0)
                 .ok()
                 .and_then(|c| c.reply().ok());
             if got.is_some() {
@@ -363,7 +425,7 @@ impl Capturer {
 
         let reply = self
             .conn
-            .get_image(ImageFormat::Z_PIXMAP, self.root, 0, 0, w, h, !0)
+            .get_image(ImageFormat::Z_PIXMAP, self.root, x, y, w, h, !0)
             .ok()?
             .reply()
             .ok()?;
@@ -436,6 +498,16 @@ pub fn is_available() -> bool {
 /// `snapshot::grab_primary_bgra`, so `stream.rs` can consume either.
 pub fn grab_primary_bgra() -> Option<(u32, u32, Vec<u8>)> {
     with_capturer(Capturer::grab_bgra)
+}
+
+/// Capture one rectangle of the desktop — the second screen's area, when
+/// [`crate::vdisplay`] has made one. `None` means the whole desktop, so a caller
+/// that may or may not have a second screen has one call rather than a branch.
+///
+/// The Windows host's `snapshot::grab_region_bgra` is the same idea with
+/// `MONITORINFO` coordinates; here the coordinates come from RandR.
+pub fn grab_bgra_of(area: Option<Region>) -> Option<(u32, u32, Vec<u8>)> {
+    with_capturer(|c| c.grab_area(area))
 }
 
 /// Capture the primary display, downscale so its longest side is at most
@@ -575,4 +647,53 @@ mod tests {
         assert!(bgra_to_jpeg(400, 200, &[0u8; 16], 100, 70).is_none());
         assert!(bgra_to_jpeg(0, 0, &[], 100, 70).is_none());
     }
+
+    /// The second screen sits to the right of the desktop, so its region starts
+    /// where the old framebuffer ended and must survive intact.
+    #[test]
+    fn a_region_inside_the_root_is_left_alone() {
+        let r = Region { x: 1920, y: 0, width: 1179, height: 1080 };
+        assert_eq!(r.clip_to(3099, 1080), Some(r));
+    }
+
+    /// The failure this prevents: the desktop shrinks under a live second
+    /// screen, and asking X for pixels past the root's edge is a BadMatch that
+    /// ends the stream instead of narrowing the picture.
+    #[test]
+    fn a_region_hanging_off_the_edge_is_trimmed_not_refused() {
+        let r = Region { x: 1920, y: 0, width: 1179, height: 1080 };
+        assert_eq!(
+            r.clip_to(2400, 900),
+            Some(Region { x: 1920, y: 0, width: 480, height: 900 })
+        );
+    }
+
+    #[test]
+    fn a_region_entirely_off_the_root_has_nothing_to_capture() {
+        let r = Region { x: 1920, y: 0, width: 1179, height: 1080 };
+        assert_eq!(r.clip_to(1920, 1080), None);
+    }
+
+    /// A monitor may legally sit at a negative offset, and the origin has to be
+    /// pulled back to 0 without the width growing to compensate.
+    #[test]
+    fn a_region_starting_before_the_origin_is_clipped_at_zero() {
+        let r = Region { x: -40, y: -10, width: 200, height: 100 };
+        assert_eq!(
+            r.clip_to(1920, 1080),
+            Some(Region { x: 0, y: 0, width: 160, height: 90 })
+        );
+    }
+
+    /// ⚠️ `x + width` overflows `i16` on a legal 32767-pixel root, which is why
+    /// the arithmetic is done in `i32`.
+    #[test]
+    fn a_region_at_the_far_edge_of_a_huge_root_does_not_wrap() {
+        let r = Region { x: 32000, y: 0, width: 1000, height: 100 };
+        assert_eq!(
+            r.clip_to(32767, 1080),
+            Some(Region { x: 32000, y: 0, width: 767, height: 100 })
+        );
+    }
+
 }

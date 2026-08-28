@@ -348,7 +348,7 @@ fn the_mirror_streams_decodable_frames_of_the_painted_screen() {
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_worker = Arc::clone(&stop);
-    let host = std::thread::spawn(move || crate::stream::run(Conn::Plain(server), &stop_worker, false));
+    let host = std::thread::spawn(move || crate::stream::run(Conn::Plain(server), &stop_worker, &crate::stream::StreamRequest::mirror()));
 
     // 1. The stream must open with geometry a client can size a surface from.
     let start: Message = protocol::read_framed(&mut client).expect("StreamStart arrives");
@@ -413,4 +413,282 @@ fn the_mirror_streams_decodable_frames_of_the_painted_screen() {
         }
     }
     host.join().expect("the stream thread exits");
+}
+
+// ---------------------------------------------------------------------------
+// The second screen (`crate::vdisplay`)
+// ---------------------------------------------------------------------------
+
+/// Second-screen colour: distinct from the root's `R`/`G`/`B` in every channel,
+/// so a capture that ignored the region's offset and photographed the desktop
+/// instead fails on the pixels rather than on the size.
+const S_R: u8 = 0xC0;
+const S_G: u8 = 0x20;
+const S_B: u8 = 0x70;
+
+/// True when this run insists the second-screen tests really execute.
+///
+/// ⚠️ A separate switch from `SCREENS_REQUIRE_X11`, because they need a
+/// **different** X server. Xvfb fixes its framebuffer at the size it was started
+/// with (measured: `maximum` equals `current` in its RandR size range), so the
+/// desktop cannot grow and a second screen cannot be made — the capture tests
+/// run there perfectly well. `scripts/test-linux-x11.sh` starts an Xorg with the
+/// `dummy` driver for these, and sets this.
+fn randr_required() -> bool {
+    std::env::var("SCREENS_REQUIRE_RANDR").is_ok_and(|v| v != "0")
+}
+
+/// Whether this server's framebuffer can grow at all, plus its current size.
+/// `None` — a skip — when it cannot, which is Xvfb and any server at its limit.
+fn resizable_root(conn: &RustConnection, root: u32) -> Option<(u16, u16)> {
+    use x11rb::protocol::randr::ConnectionExt as _;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+
+    let ver = conn.randr_query_version(1, 5).ok()?.reply().ok()?;
+    if (ver.major_version, ver.minor_version) < (1, 5) {
+        return None;
+    }
+    let range = conn.randr_get_screen_size_range(root).ok()?.reply().ok()?;
+    let geom = conn.get_geometry(root).ok()?.reply().ok()?;
+    (range.max_width > geom.width && range.max_height >= geom.height)
+        .then_some((geom.width, geom.height))
+}
+
+/// Take the display and confirm it can be extended, or skip — loudly under
+/// `SCREENS_REQUIRE_RANDR`, for the same reason as [`x11_ready`].
+fn randr_ready() -> Option<(Display, RustConnection, u32, (u16, u16))> {
+    let display = x11_ready()?;
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        assert!(!randr_required(), "SCREENS_REQUIRE_RANDR is set but no X server would connect");
+        return None;
+    };
+    let root = conn.setup().roots[screen_num].root;
+    match resizable_root(&conn, root) {
+        Some(size) => Some((display, conn, root, size)),
+        None => {
+            assert!(
+                !randr_required(),
+                "SCREENS_REQUIRE_RANDR is set but this X server's framebuffer cannot grow - the \
+                 second-screen tests did not run (Xvfb is fixed at its start-up size; use the \
+                 Xorg dummy driver, as scripts/test-linux-x11.sh does)"
+            );
+            eprintln!(
+                "skipping: this X server cannot resize its framebuffer (set \
+                 SCREENS_REQUIRE_RANDR=1 to make this a failure)"
+            );
+            None
+        }
+    }
+}
+
+/// Every monitor the server currently lists, by name.
+fn monitor_names(conn: &RustConnection, root: u32) -> Vec<String> {
+    use x11rb::protocol::randr::ConnectionExt as _;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+
+    let Some(reply) =
+        conn.randr_get_monitors(root, false).ok().and_then(|c| c.reply().ok())
+    else {
+        return Vec::new();
+    };
+    reply
+        .monitors
+        .iter()
+        .filter_map(|m| {
+            let name = conn.get_atom_name(m.name).ok()?.reply().ok()?.name;
+            String::from_utf8(name).ok()
+        })
+        .collect()
+}
+
+/// The whole lifecycle in one test, because the half nobody would notice is the
+/// *end*: a host that grew the desktop and never shrank it again leaves the user
+/// with a 3000-pixel-wide screen and no idea why.
+#[test]
+fn a_second_screen_extends_the_desktop_and_puts_it_back_afterwards() {
+    use x11rb::protocol::xproto::ConnectionExt as _;
+
+    let Some((_display, conn, root, (w0, h0))) = randr_ready() else { return };
+
+    let before = monitor_names(&conn, root);
+    assert!(
+        !before.iter().any(|n| n == "Universal-Screens"),
+        "a leftover monitor from an earlier run would make this test pass for the wrong reason: \
+         {before:?}"
+    );
+
+    {
+        let vs = crate::vdisplay::VirtualScreen::create(800, 600, "test phone")
+            .expect("this server can resize, so a second screen must be creatable");
+
+        // It goes to the RIGHT of the existing desktop, at the full requested
+        // size: overlapping the real desktop would mean the phone showing the
+        // user's own windows back to them.
+        let region = vs.region();
+        assert_eq!(
+            (region.x, region.y, region.width, region.height),
+            (i16::try_from(w0).unwrap(), 0, 800, 600),
+            "the new area starts where the old desktop ended"
+        );
+
+        let geom = conn.get_geometry(root).unwrap().reply().unwrap();
+        assert_eq!(geom.width, w0 + 800, "the framebuffer grew by exactly the client's width");
+        assert_eq!(geom.height, h0.max(600), "and is tall enough for the client");
+
+        // ⚠️ Being *listed as a monitor* is the whole difference between a
+        // second screen and a rectangle we photograph: it is what makes a window
+        // manager maximise into the area and a toolkit treat it as a display.
+        assert!(
+            monitor_names(&conn, root).iter().any(|n| n == "Universal-Screens"),
+            "the new area must be a RandR monitor, not just extra framebuffer"
+        );
+    }
+
+    // Dropped: the desktop must be exactly as it was found.
+    let geom = conn.get_geometry(root).unwrap().reply().unwrap();
+    assert_eq!(
+        (geom.width, geom.height),
+        (w0, h0),
+        "the desktop must be back to its original size once the client goes"
+    );
+    assert!(
+        !monitor_names(&conn, root).iter().any(|n| n == "Universal-Screens"),
+        "the monitor must be deleted too, not just the framebuffer shrunk"
+    );
+}
+
+/// The offset is the thing this can get wrong: `shm_get_image`/`get_image` take
+/// x and y, and passing 0 for them compiles, runs, and streams the user's own
+/// desktop to the phone that asked for an empty second screen.
+#[test]
+fn the_second_screen_captures_its_own_area_and_not_the_desktop() {
+    use x11rb::protocol::xproto::{ConnectionExt as _, CreateWindowAux, WindowClass};
+
+    let Some((_display, conn, root, _)) = randr_ready() else { return };
+
+    let vs = crate::vdisplay::VirtualScreen::create(800, 600, "test phone")
+        .expect("a second screen on a resizable server");
+    let region = vs.region();
+
+    // Fill the new area with a colour the desktop does not have. Override
+    // redirect: there is no window manager here, and a managed window could be
+    // placed somewhere else entirely.
+    let pixel = (u32::from(S_R) << 16) | (u32::from(S_G) << 8) | u32::from(S_B);
+    let win = conn.generate_id().expect("a window id");
+    conn.create_window(
+        x11rb::COPY_DEPTH_FROM_PARENT,
+        win,
+        root,
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        conn.setup().roots[0].root_visual,
+        &CreateWindowAux::new().background_pixel(pixel).override_redirect(1),
+    )
+    .expect("create_window");
+    conn.map_window(win).expect("map_window");
+    conn.flush().expect("flush");
+    std::thread::sleep(Duration::from_millis(300));
+
+    let (w, h, bgra) =
+        capture::grab_bgra_of(Some(region)).expect("the second screen's area must be capturable");
+    assert_eq!((w, h), (800, 600), "a region grab returns the region's size, not the desktop's");
+
+    for (x, y) in [(1, 1), (w / 2, h / 2), (w - 2, h - 2)] {
+        let o = (y as usize * w as usize + x as usize) * 4;
+        assert_eq!(
+            (bgra[o], bgra[o + 1], bgra[o + 2]),
+            (S_B, S_G, S_R),
+            "pixel at ({x},{y}) is the second screen's colour, not the desktop's ({B},{G},{R})"
+        );
+    }
+
+    // And the desktop itself is untouched — the region grab is not a resize of
+    // the whole-root one.
+    let (_, _, root_bgra) = capture::grab_primary_bgra().expect("the desktop is still capturable");
+    assert_eq!(
+        (root_bgra[0], root_bgra[1], root_bgra[2]),
+        (B, G, R),
+        "the desktop's own top-left pixel is unchanged"
+    );
+
+    conn.destroy_window(win).expect("destroy");
+    let _ = conn.flush();
+}
+
+/// End to end, the way the phone sees it: ask [`crate::stream`] for a second
+/// screen and check the video that comes back is the size the *client* asked
+/// for, not the size of this desktop.
+///
+/// ⚠️ That one assertion is the whole test. A host that quietly mirrored instead
+/// — which is exactly what this host did until the second screen existed, and
+/// what it still does on a server that cannot resize — sends a stream sized from
+/// the desktop. The two are indistinguishable in every other way: same codec,
+/// same framing, same message order.
+#[test]
+fn asking_for_a_second_screen_streams_the_second_screen() {
+    use std::io::Read;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use extender_protocol::{self as protocol, Message};
+    use extender_transport::Conn;
+
+    let Some((_display, conn, root, (w0, h0))) = randr_ready() else { return };
+    // A size that cannot be confused with this desktop's, and that survives the
+    // encoder's 1280-px cap unscaled so the assertion is exact.
+    const CLIENT: (u32, u32) = (720, 1180);
+    assert_ne!((u32::from(w0), u32::from(h0)), CLIENT, "the test size must differ from the desktop");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let mut client = TcpStream::connect(addr).expect("connect loopback");
+    let (server, _) = listener.accept().expect("accept loopback");
+    client.set_read_timeout(Some(Duration::from_secs(30))).expect("read timeout");
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+    let req = crate::stream::StreamRequest {
+        second_screen: true,
+        client_size: CLIENT,
+        label: "test phone".to_owned(),
+    };
+    let host =
+        std::thread::spawn(move || crate::stream::run(Conn::Plain(server), &stop_worker, &req));
+
+    let start: Message = protocol::read_framed(&mut client).expect("StreamStart arrives");
+    let Message::StreamStart { width, height, .. } = start else {
+        panic!("the first message must be StreamStart, got {start:?}");
+    };
+    assert_eq!(
+        (width, height),
+        CLIENT,
+        "the stream is the second screen the client asked for, not a mirror of this desktop \
+         ({w0}x{h0})"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    let mut drain = [0u8; 4096];
+    while let Ok(n) = client.read(&mut drain) {
+        if n == 0 {
+            break;
+        }
+    }
+    host.join().expect("the stream thread exits");
+
+    // ⚠️ And the desktop is back afterwards. The virtual screen is owned by the
+    // stream, so a leak here would be invisible to every other assertion and
+    // would leave a real user's display permanently wider.
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let geom = conn.get_geometry(root).unwrap().reply().unwrap();
+    assert_eq!(
+        (geom.width, geom.height),
+        (w0, h0),
+        "ending the stream must put the desktop back"
+    );
 }

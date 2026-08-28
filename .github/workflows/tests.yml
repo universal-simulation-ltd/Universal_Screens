@@ -38,6 +38,13 @@ jobs:
       # the X11/Wayland client libraries, and `nasm` + a C++ compiler are needed
       # because openh264 is built from source (the mirror, and the desktop
       # client's decoder). `xvfb` is for the capture tests, not the build.
+      #
+      # ⚠️ `xserver-xorg-video-dummy` is NOT a duplicate of xvfb. Xvfb's RandR
+      # size range reports maximum == current, so its framebuffer cannot grow and
+      # the SECOND SCREEN cannot be made on it - `vdisplay.rs` does nothing else.
+      # The dummy driver is a real Xorg DDX that resizes. Drop it and the
+      # second-screen tests skip, which under `SCREENS_REQUIRE_RANDR` is a
+      # failure rather than a silent green.
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
@@ -45,7 +52,8 @@ jobs:
             pkg-config libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
             build-essential nasm \
-            xvfb xauth
+            xvfb xauth x11-utils x11-xserver-utils \
+            xserver-xorg-core xserver-xorg-video-dummy
 
       # ⚠️ Node 22+, explicitly. `secure.test.mjs` drives a real WebSocket client
       # and `WebSocket` only became a stable global in Node 22 — on the runner's
@@ -75,13 +83,16 @@ jobs:
                      -p extender-discovery -p extender-h264 -p extender-protocol-wasm \
                      -p extender-web-bridge -p extender-host-ui
 
-      # ⚠️ `SCREENS_REQUIRE_X11=1` is the point of the xvfb wrapper: without it
-      # the capture tests SKIP when there is no display and the job still reports
-      # green — indistinguishable from them passing.
-      - name: Test the Linux host (against a live X server)
-        run: xvfb-run -a --server-args="-screen 0 1280x800x24" cargo test -p extender-host-linux
-        env:
-          SCREENS_REQUIRE_X11: '1'
+      # Two X servers, run by one script — the same script a developer runs
+      # locally through `scripts/docker-test-linux.sh` / `.ps1` from a Mac or
+      # Windows box. Sharing it is what stops CI and the local run drifting into
+      # testing different things.
+      #
+      # ⚠️ The script sets `SCREENS_REQUIRE_X11=1` and `SCREENS_REQUIRE_RANDR=1`.
+      # Without them a missing server makes those tests SKIP and the job still
+      # reports green — indistinguishable from them passing.
+      - name: Test the Linux host (against live X servers)
+        run: scripts/test-linux-x11.sh
 
       - name: Clippy (the crates this job builds)
         run: |

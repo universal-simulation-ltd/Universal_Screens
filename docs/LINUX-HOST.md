@@ -1,14 +1,15 @@
 # Linux host — feasibility and scope
 
-**Status: Stages 1, 2a and 2b are built** (`crates/host-linux`, 2026-08-25). The
-backlog said a Linux host "should be scoped as one before anyone starts" — this
-is that scope, kept as the plan for the rest and as the record of why the Linux
-host looks different from the other two.
+**Status: Stages 1, 2a, 2b and 2c are built** (`crates/host-linux`; 2c on
+2026-08-28). The backlog said a Linux host "should be scoped as one before anyone
+starts" — this is that scope, kept as the plan for the rest and as the record of
+why the Linux host looks different from the other two.
 
-On X11 the host now does **slide previews, the deck scan, the window picker and
-the H.264 mirror** (Mirror and Remote control). Wayland capture is Stage 3 and is
-still a different job entirely; **second screen** is deferred, and a client that
-asks for one gets a mirror of the main display rather than a refusal.
+**The X11 column of §3 is now complete.** On X11 the host does slide previews,
+the deck scan, the window picker, the H.264 mirror *and* the **second screen**
+(§3c) — every mode the app offers. Wayland capture is Stage 3 and is still a
+different job entirely; on a Wayland session the mirror and the second screen
+both degrade to the clicker rather than failing.
 
 **Verdict: feasible, and the shared spine is already portable — but it is not one
 port.** Linux has two display stacks with different capabilities, and the app's
@@ -106,10 +107,10 @@ Windows twin.
 | **Trackpad** | XTEST relative motion | libei / `uinput` |
 | **Mirror** | XShm capture | ScreenCast portal (consent dialog each session) |
 | **Remote control** | XTEST + capture | portal + libei |
-| **Second screen** (extend) | `xrandr` VIRTUAL output | ❌ compositor-specific, no generic route |
+| **Second screen** (extend) | RandR: grow the framebuffer + `RRSetMonitor` (§3c) | ❌ compositor-specific, no generic route |
 
-**Everything in the X11 column above is now built**, other than Second screen
-(deferred). The Wayland column is unchanged and unstarted.
+**Everything in the X11 column above is now built.** The Wayland column is
+unchanged and unstarted.
 
 Three consequences that change the product, not just the code:
 
@@ -178,12 +179,12 @@ platform.
 compiles for every target in the workspace; the day it needs a `cfg(target_os)`
 is the day it has stopped being the shared piece.
 
-⚠️ **Second screen is not "mirror plus a flag".** `CaptureMode::VirtualDisplay`
-is accepted and **served as a mirror**, with a log line saying so. The Windows
-host answers it by streaming a secondary monitor that a driver invents; X11's
-equivalent is an `xrandr` VIRTUAL output and is still deferred. Refusing the
-session instead would give the user a dead app, for the same reason a Wayland
-mirror falls back to the clicker rather than failing.
+⚠️ **Second screen is not "mirror plus a flag".** At Stage 2b
+`CaptureMode::VirtualDisplay` was accepted and **served as a mirror**, with a log
+line saying so — the extra display did not exist. Stage 2c built it (§3c), so the
+mirror is now the *fallback* rather than the answer. Falling back at all is still
+the right call: refusing the session would give the user a dead app, for the same
+reason a Wayland mirror falls back to the clicker rather than failing.
 
 ⚠️ **Absolute pointer input is still ignored — and that is parity, not a Linux
 gap.** `Input::MouseMove` / `Touch` / `Gesture` are dropped by the Windows host
@@ -214,6 +215,65 @@ lengths written little-endian (decode fails) and BGRA fed to the encoder as RGBA
 framing bug and a channel swap. Still out of reach in a container, as ever:
 whether a real desktop's compositor, a multi-monitor `xrandr` layout, or a real
 phone client behaves.
+
+### 3c. What Stage 2c settled — the second screen
+
+⚠️ **The `VIRTUAL` output this document named for three revisions is the wrong
+mechanism**, and finding that out is most of what this stage was. Enabling a
+spare RandR output is the obvious reading of "the X11 equivalent of a virtual
+display driver", and it is what `xf86-video-intel` (`VIRTUAL1`/`VIRTUAL2`) and
+the dummy driver (`DUMMY0`…`DUMMY15`) offer — but **`modesetting`, the default
+driver on essentially every current desktop, exposes no spare outputs at all**.
+That route would have worked on a minority of machines and silently mirrored on
+the rest, which is the worst shape of feature: present in the code, absent in
+practice, and indistinguishable from the fallback without reading a log.
+
+**What was built instead needs nothing from the driver**: grow the root
+framebuffer with `RRSetScreenSize`, then declare the new area a monitor with
+`RRSetMonitor` (`src/vdisplay.rs`). Toolkits and window managers enumerate
+displays through exactly that call, so a window maximises into the new area and
+the pointer crosses into it — it is a display, not a rectangle the host happens
+to photograph. Capture is then the Stage 2a grab with an offset, which is why the
+whole stage is ~300 lines rather than a fork of `stream.rs`.
+
+⚠️ **`RRSetMonitor` monitor lifetime is NOT the same on every server** — measured,
+not assumed. On Xvfb a monitor vanishes when the client that created it
+disconnects; on a real Xorg it persists. So the host does both: an explicit
+`RRDeleteMonitor` on teardown, *and* it holds its own X connection for the length
+of the session, so a crash still cleans up on the servers that honour it.
+Relying on either alone leaves a stale monitor on half the world's desktops.
+
+⚠️ **Restoring the framebuffer is conditional, deliberately.** `Drop` shrinks the
+desktop back only if it is still the size the host made it. An unconditional
+restore would silently undo a resolution change the *user* made while their phone
+was connected — a bug that surfaces minutes later as "my display settings keep
+resetting" and would never be traced back to here.
+
+⚠️ **Xvfb cannot test any of this, and that is not obvious.** Its RandR size range
+reports `maximum == current`, so `RRSetScreenSize` is refused and no second screen
+can ever be made on it — while every *other* X11 test in the crate is perfectly
+happy there, because none of them resizes anything. A second X server was needed:
+**Xorg with the `dummy` driver**, a real DDX reporting `minimum 64 x 64 … maximum
+32767 x 32767` that resizes on request and runs in a plain container with no
+`--privileged`. `scripts/test-linux-x11.sh` starts both servers in turn and is
+what CI runs; `scripts/docker-test-linux.sh` / `.ps1` run it from a Mac or
+Windows box.
+
+**Verified against that server, not just compiled:** 57 tests (was 44), three of
+them new and live — the framebuffer grows by exactly the client's width and
+shrinks back on drop, the monitor is listed and then deleted, a capture returns
+the *second screen's* pixels rather than the desktop's, and an end-to-end
+`stream::run` opens with a `StreamStart` at the client's size rather than this
+desktop's. ⚠️ The pixel test was mutation-tested: passing `0, 0` instead of the
+region's `x, y` to `GetImage` — the one-line mistake that would stream the user's
+own desktop to a phone expecting an empty screen — fails it on the colour.
+
+**Still unproven, and needs a real Linux desktop:** whether a *compositing* window
+manager draws into an area with no CRTC behind it, how GNOME's and KDE's display
+panels react to a monitor appearing and vanishing mid-session, and whether
+full-screen video will go full-screen there. The mechanism is standard — it is
+what the ultrawide-splitting `xrandr --setmonitor` recipes use — but "standard"
+is not "watched working here".
 
 ## 4. The two shell-outs degrade rather than port
 
@@ -264,8 +324,8 @@ expensive to keep ignoring.
 | **2a** | ✅ **Built.** X11 capture (`capture.rs`) + EWMH window picker (`winlist.rs`): slide previews, the deck scan and the window picker. MIT-SHM preferred, `GetImage` fallback, both pure-Rust. Six tests run against a live X server. | done |
 | **2b** | ✅ **Built.** The H.264 **mirror**: `stream.rs` feeds `capture::grab_primary_bgra` into openh264 at 30 fps, ≤1280px long side, and `serve` branches into it for `MirrorPrimary`/`VirtualDisplay` when an X server exists. The wire framing was *not* forked — it moved into `crates/h264`, shared with the Windows host. Needs `build-essential` + `nasm` to build (per §1); nothing new is linked. See §3b. | done |
 | **3** | Wayland capture: `ashpd` portal + PipeWire, plus the consent UX. Unaffected by 2a — X11 and Wayland capture share nothing but the `capture::` entry points. | 4+, and needs real hardware |
-| **1b** | Fold the `host-ui` extraction in — see §6. Deferred, not dropped: doing it now meant editing `host-macos/gui.rs` with no Mac to compile it on, which is the exact failure §8 warns about. Stage 1 avoided the problem by writing a lean window instead of a third fork. | next |
-| **—** | **Second screen: defer.** The Windows trick (stream the first non-primary monitor; an external driver makes it exist) transfers to X11 via a VIRTUAL output far more cheaply than macOS's `CGVirtualDisplay` did. Wayland has no generic answer. | not scheduled |
+| **1b** | ✅ **Done 2026-08-28**, on a Mac — which is what unblocked it: §6's extraction meant editing `host-macos/gui.rs`, and doing that with no Mac to compile it on is the exact failure §8 warns about. `crates/host-ui` now holds the Windows and macOS hosts' shared chrome. ⚠️ **The Linux host is deliberately not a consumer**: `host-linux/src/gui.rs` shares ~28 lines with those two, having shipped a lean window rather than a third fork, so folding it in would be a rewrite rather than a de-duplication. | done |
+| **2c** | ✅ **Built.** The **second screen** (`src/vdisplay.rs`): `RRSetScreenSize` grows the root framebuffer, `RRSetMonitor` declares the new area a display, and `stream.rs` captures that region. No driver support needed, and no `VIRTUAL` output — §3c is why that route was rejected. Wayland still has no generic answer. | done |
 
 Stage 1 is deliberately the smallest shippable thing, and it is the mode the app
 is actually used in at a lectern.
@@ -337,6 +397,16 @@ first appeared as convincing "the capture code is broken" failures:
   single-process reason. Pass the display *in* instead — `Ewmh::open_display`
   exists only for that.
 
+**And a container proves more than §8 first claimed.** Xvfb is not the only
+headless option: **Xorg with the `dummy` driver** starts in a plain container
+with no `--privileged`, and is a real DDX with a real RandR implementation —
+resizable framebuffer, spare outputs, `minimum 64 x 64 … maximum 32767 x 32767`.
+That is what made Stage 2c testable at all, and it is worth reaching for before
+declaring any X feature untestable here. ⚠️ Its one trap: `VideoRam` must cover
+the configured `Virtual` size at 4 bytes per pixel, or Xorg exits with "no
+screens found", which reads like a missing driver rather than a number that is
+too small.
+
 ⚠️ **What no container can prove, and what is therefore still unrun:**
 
 - **Injection itself.** A container has no `/dev/uinput` and no desktop to
@@ -352,6 +422,12 @@ first appeared as convincing "the capture code is broken" failures:
   multi-monitor `xrandr` layout, and a GPU whose readback path is not a
   software framebuffer. The correctness tests should hold; the timings
   above are Xvfb's and may not.
+- **The second screen on a real desktop** (Stage 2c, §3c). A container proves
+  more here than expected — Xorg with the `dummy` driver is a real DDX with a
+  real resizable framebuffer, and the whole create/capture/restore cycle runs
+  against it. What it cannot prove is a **compositing** window manager drawing
+  into an area with no CRTC behind it, and how GNOME's or KDE's display panel
+  reacts to a monitor appearing and vanishing mid-session.
 - **Wayland**, for the same reason as before: portal behaviour and compositor
   differences need a real logged-in session, and GNOME and KDE differ.
 

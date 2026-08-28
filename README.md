@@ -28,7 +28,7 @@ for Windows* → Windows is the host, phone is the client).
 | `crates/core` | client `Session` (handshake, event stream, input). |
 | `crates/host` | macOS host — ScreenCaptureKit + VideoToolbox, CGVirtualDisplay (extend). |
 | `crates/host-windows` | Windows host — clicker, mirror, remote control, second screen, trackpad, GUI. |
-| `crates/host-linux` | Linux host — clicker + trackpad (uinput), and on X11: slide previews, window picker, H.264 mirror. No second screen: see [docs/LINUX-HOST.md](docs/LINUX-HOST.md). |
+| `crates/host-linux` | Linux host — clicker + trackpad (uinput), and on X11: slide previews, window picker, H.264 mirror, and a second screen (RandR). Wayland capture is still Stage 3: see [docs/LINUX-HOST.md](docs/LINUX-HOST.md). |
 | `crates/h264` | Annex-B → wire framing + encode sizing, shared by the mirroring hosts. |
 | `crates/client` | desktop client — openh264 decode + wgpu display. |
 | `crates/mobile-ffi` | C ABI for mobile clients (`extender_ffi.h`). |

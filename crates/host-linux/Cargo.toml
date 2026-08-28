@@ -37,7 +37,10 @@ evdev = "0.13"
 # 10.7 ms at 1920x1080) — and notably does NOT require `allow-unsafe-code`,
 # which is the feature that would have pulled in `as-raw-xcb-connection` and put
 # libxcb back on the link line.
-x11rb = { version = "0.13", features = ["shm"] }
+# `randr` is the second screen (src/vdisplay.rs): RRSetScreenSize to grow the
+# root framebuffer and RRSetMonitor to declare the new area a display. Like
+# `shm`, it is protocol only — no libXrandr, nothing added to the link line.
+x11rb = { version = "0.13", features = ["shm", "randr"] }
 # Only for the SysV shared-memory calls MIT-SHM needs (shmget/shmat/shmdt);
 # already in the tree beneath evdev.
 libc = "0.2"

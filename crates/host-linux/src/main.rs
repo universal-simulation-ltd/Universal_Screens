@@ -4,8 +4,9 @@
 //! A phone can drive PowerPoint, LibreOffice Impress or a PDF on this machine,
 //! see live slide previews of it, and pick which window the keys land in — and,
 //! on an X11 session, watch the screen itself: [`stream`] mirrors it as H.264
-//! (Stage 2b of `docs/LINUX-HOST.md`). What it still cannot do is act as a
-//! *second screen*: that needs an `xrandr` VIRTUAL output and is deferred.
+//! (Stage 2b of `docs/LINUX-HOST.md`), or becomes a **second screen** —
+//! [`vdisplay`] grows the X framebuffer and declares the new area a RandR
+//! monitor, so the phone is extra desktop rather than a copy of this one.
 //!
 //! ⚠️ **Previews, the mirror and the window picker are X11 only** — Stage 2 of
 //! `docs/LINUX-HOST.md`. Injection (uinput) is one implementation that works
@@ -27,6 +28,9 @@ mod inject;
 mod qr;
 /// The H.264 mirror (Stage 2b) — X11 capture into openh264, wired in `serve`.
 mod stream;
+/// The X11 **second screen** — a RandR monitor over a grown root framebuffer,
+/// so the phone becomes an extra display rather than a copy of this one.
+mod vdisplay;
 mod wifi;
 mod winlist;
 /// Live-X-server tests; see the module docs for how to run them and for why a
@@ -60,6 +64,10 @@ const SCAN_PAGE_DELAY: Duration = Duration::from_millis(250);
 const SCAN_MAX_PAGES: u32 = 500;
 /// Wait after raising a window before sending F5, so it is focused first.
 const FOCUS_SETTLE: Duration = Duration::from_millis(250);
+/// Largest client panel size this host will believe, matching the macOS host.
+/// The hello's size is what a second screen is built from, so a nonsense value
+/// would be a nonsense `xrandr` framebuffer rather than merely a bad log line.
+const MAX_DIMENSION: u32 = 16384;
 
 /// HID usage ids for the keys the deck scan taps. The clicker's own key handling
 /// is the client's job; these are the two this host originates.
@@ -155,9 +163,12 @@ pub(crate) fn serve_loop(
                                 "warning: client {peer} connected without transport encryption (plaintext)"
                             );
                         }
-                        if let Some((platform, mode)) = read_hello(&mut conn, &peer, expected_pin) {
-                            on_event(HostEvent::Connected { peer: peer.clone(), platform });
-                            if let Err(e) = serve(conn, mode) {
+                        if let Some(req) = read_hello(&mut conn, &peer, expected_pin) {
+                            on_event(HostEvent::Connected {
+                                peer: peer.clone(),
+                                platform: req.platform,
+                            });
+                            if let Err(e) = serve(conn, &req) {
                                 on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
                             }
                             on_event(HostEvent::Disconnected(peer));
@@ -177,14 +188,25 @@ pub(crate) fn serve_loop(
     }
 }
 
+/// The half of a client's [`ClientHello`] this host acts on.
+///
+/// A struct rather than the macOS host's five-tuple, which reads
+/// `Some((platform, mode, width, height, name))` at both ends and has two `u32`s
+/// next to each other that nothing but their order distinguishes.
+struct ClientRequest {
+    platform: ClientPlatform,
+    mode: CaptureMode,
+    /// The client's panel size in physical pixels, used to size a second screen.
+    size: (u32, u32),
+    /// The device's name, already defaulted from the platform when the client
+    /// sent none.
+    label: String,
+}
+
 /// Read and log the client's [`ClientHello`], tolerating a protocol-version skew
-/// the way the other hosts do. Returns the client's [`ClientPlatform`] and
-/// requested mode, or `None` (and logs) on a missing or garbled hello.
-fn read_hello(
-    stream: &mut Conn,
-    peer: &str,
-    expected_pin: u32,
-) -> Option<(ClientPlatform, CaptureMode)> {
+/// the way the other hosts do. Returns what this host needs from it, or `None`
+/// (and logs) on a missing, garbled or implausible hello.
+fn read_hello(stream: &mut Conn, peer: &str, expected_pin: u32) -> Option<ClientRequest> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -203,11 +225,36 @@ fn read_hello(
         eprintln!("client {peer} rejected: wrong pairing PIN");
         return None;
     }
+    // ⚠️ Checked, not trusted: the size decides how far this host grows the X
+    // framebuffer for a second screen. The same bound the macOS host applies.
+    if hello.width == 0
+        || hello.height == 0
+        || hello.width > MAX_DIMENSION
+        || hello.height > MAX_DIMENSION
+    {
+        eprintln!(
+            "client {peer} hello has implausible size {}x{}; skipping",
+            hello.width, hello.height
+        );
+        return None;
+    }
+    // Label a second screen by the name the client supplied, falling back to a
+    // generic platform label when it sent none.
+    let label = if hello.device_name.trim().is_empty() {
+        hello.platform.device_label().to_owned()
+    } else {
+        hello.device_name.clone()
+    };
     println!(
-        "client {peer} hello: {}x{}, mode {:?}, platform {:?}",
+        "client {peer} hello: {}x{}, mode {:?}, platform {:?}, device {label:?}",
         hello.width, hello.height, hello.capture_mode, hello.platform
     );
-    Some((hello.platform, hello.capture_mode))
+    Some(ClientRequest {
+        platform: hello.platform,
+        mode: hello.capture_mode,
+        size: (hello.width, hello.height),
+        label,
+    })
 }
 
 /// Serve one client until it disconnects: the clicker for
@@ -226,24 +273,38 @@ fn read_hello(
 ///   impossible rather than merely absent; the client is served as a clicker,
 ///   which is a working remote control with no video. Wayland capture is Stage 3
 ///   of `docs/LINUX-HOST.md`.
-/// - **A second-screen request.** That needs a virtual display - on X11 an
-///   `xrandr` VIRTUAL output, which is deferred (§7). Its fall-back is a
+/// - **A second screen this X server cannot make.** [`vdisplay`] extends the
+///   desktop by growing the root framebuffer, which a fixed-size headless server
+///   (Xvfb) and a driver at its maximum both refuse. Its fall-back is a
 ///   *mirror*, not a clicker: the phone still shows the desktop, it just shows
-///   the same one the monitor does. [`stream::run`] logs that it happened.
-fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Error>> {
+///   the same one the monitor does. [`stream::run`] logs the reason.
+fn serve(stream: Conn, req: &ClientRequest) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true); // disable Nagle - low latency for input
 
     let mut writer = stream.try_clone()?;
     let name = host_name();
     let _ = protocol::write_framed(&mut writer, &Message::HostInfo { os: "linux".into(), name });
 
-    if mode == CaptureMode::ControlOnly {
+    if req.mode == CaptureMode::ControlOnly {
         return serve_clicker(stream, writer);
     }
+    let mode = req.mode;
     match capture::status() {
         Ok(backend) => {
-            println!("serving {mode:?} as a mirror ({backend})");
-            serve_mirror(stream, writer, mode == CaptureMode::VirtualDisplay)
+            let second_screen = mode == CaptureMode::VirtualDisplay;
+            println!(
+                "serving {mode:?} as {} ({backend})",
+                if second_screen { "a second screen" } else { "a mirror" }
+            );
+            serve_mirror(
+                stream,
+                writer,
+                &stream::StreamRequest {
+                    second_screen,
+                    client_size: req.size,
+                    label: req.label.clone(),
+                },
+            )
         }
         Err(reason) => {
             eprintln!(
@@ -265,12 +326,13 @@ fn serve(stream: Conn, mode: CaptureMode) -> Result<(), Box<dyn std::error::Erro
 fn serve_mirror(
     stream: Conn,
     writer: Conn,
-    second_screen: bool,
+    req: &stream::StreamRequest,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let injector = open_injector();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_worker = Arc::clone(&stop);
-    let stream_thread = thread::spawn(move || stream::run(writer, &stop_worker, second_screen));
+    let req = req.clone();
+    let stream_thread = thread::spawn(move || stream::run(writer, &stop_worker, &req));
 
     let mut input = stream;
     while let Ok(event) = protocol::read_framed::<_, Input>(&mut input) {

@@ -4,6 +4,85 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-28 (the Linux second screen, and the X server that could test it)
+
+**Stage 2c: the phone is a second screen on Linux, not just a mirror.** That was
+the last unbuilt row of the X11 column in `docs/LINUX-HOST.md` §3, and the column
+is now complete. `crates/host-linux/src/vdisplay.rs` is the new module; §3c of
+that doc is the full record. What to know before touching it:
+
+### ⚠️ The mechanism this repo had written down for three revisions was wrong
+
+Every earlier version of `LINUX-HOST.md` said the X11 equivalent of a virtual
+display driver is an **`xrandr` VIRTUAL output**. It is not a usable one:
+`xf86-video-intel` and the dummy driver offer spare outputs, but **`modesetting`
+— the default driver on essentially every current desktop — exposes none at all**.
+That route works on a minority of machines and silently mirrors on the rest,
+which is the worst shape of feature: in the code, absent in practice, and
+indistinguishable from the fallback without reading a log.
+
+What shipped instead needs nothing from the driver: **`RRSetScreenSize` to grow
+the root framebuffer, then `RRSetMonitor` to declare the new area a display.**
+Toolkits and WMs enumerate monitors through exactly that call, so it is a real
+display rather than a rectangle the host photographs. Capture is then the Stage
+2a grab with an offset — which is why the whole stage is ~300 lines.
+
+### ⚠️ Three things that will bite whoever edits this next
+
+- **`RRSetMonitor` lifetime differs per server.** Measured: on Xvfb the monitor
+  vanishes when its creating client disconnects; on a real Xorg it persists. The
+  host therefore does *both* — an explicit `RRDeleteMonitor`, and it holds its own
+  X connection for the session. Drop either and half the world's desktops keep a
+  stale monitor after a crash.
+- **The framebuffer is restored *conditionally*.** `Drop` shrinks back only if
+  the desktop is still the size the host made it. Unconditional restore would
+  undo a resolution change the *user* made mid-session — a bug that surfaces
+  minutes later and never gets traced here.
+- **`grab_area` clips the region to the root.** Asking X for pixels outside the
+  drawable is a `BadMatch` that ends the stream; a desktop that shrinks under a
+  live second screen should narrow the picture instead.
+
+### ⚠️ Xvfb cannot test any of it — and every other X11 test is fine on Xvfb
+
+Xvfb's RandR size range reports **`maximum == current`**, so `RRSetScreenSize` is
+refused and no second screen can ever exist there. Nothing else in the crate
+resizes anything, so this is invisible until you write the first test that does.
+
+The answer is a **second X server**: `Xorg` with the `dummy` driver, which is a
+real DDX (`minimum 64 x 64 … maximum 32767 x 32767`, resizes on request, offers
+`DUMMY0..15`) and starts in a plain container with **no `--privileged`**. That is
+worth remembering for any future X work here that looked untestable.
+
+New scripts, all committed:
+
+- `scripts/xorg-dummy.conf` — ⚠️ its `VideoRam` must cover `Virtual` at 4 bytes
+  per pixel, or Xorg exits with "no screens found", which reads like a missing
+  driver rather than a number that is too small.
+- `scripts/test-linux-x11.sh [all|xvfb|xorg]` — runs both servers in turn. **CI
+  now calls this instead of its own inline `xvfb-run` line**, so the local run
+  and the CI run cannot drift. Only the *server* is started under `sudo`; cargo
+  stays as the invoking user, or a cached CI job silently full-rebuilds.
+- `scripts/docker-test-linux.sh` / `.ps1` — run the above from a Mac or a Windows
+  box. This is now the way to check the Linux host before pushing.
+
+### Verified, and what is still not
+
+**57 tests (was 44)**, run against both servers. Three are new and live: the
+framebuffer grows by exactly the client's width and shrinks back on drop; the
+monitor is listed and then deleted; a capture returns the *second screen's*
+pixels, not the desktop's; and `stream::run` opens with a `StreamStart` at the
+client's size rather than this desktop's — the one assertion that separates a
+real second screen from the mirror this host used to send instead.
+
+⚠️ The pixel test was **mutation-tested**: passing `0, 0` instead of the region's
+`x, y` to `GetImage` — the one-line slip that would stream the user's own desktop
+to a phone expecting an empty screen — fails it on the colour, as it should.
+
+**Still needs a real Linux desktop**, and is unchanged by this work: whether a
+*compositing* WM draws into an area with no CRTC behind it, how GNOME's and KDE's
+display panels react to a monitor appearing mid-session, and everything §8
+already lists (injection, the GUI, a real phone).
+
 ## Update — 2026-08-26 (the browser tab encrypts, and asks first whether it can)
 
 **The browser leg is end-to-end encrypted to the host.** A tab runs the same

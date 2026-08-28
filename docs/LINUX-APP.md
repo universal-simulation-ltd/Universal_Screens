@@ -2,8 +2,8 @@
 
 The Linux host is the **clicker and trackpad**: your phone drives the keyboard
 and mouse on this machine. On an **X11** session it also does **slide previews,
-the window picker, and screen mirroring / remote control**. Using the phone as a
-**second screen** is Windows and macOS only.
+the window picker, screen mirroring / remote control, and using the phone as a
+**second screen** — extra desktop, not a copy of your monitor.
 
 ⚠️ **Which of those you get depends on your session, and the app tells you
 which.** Everything except the clicker and trackpad needs X11: on Wayland there
@@ -84,12 +84,17 @@ sudo ufw allow 9000/tcp                                                         
 
 These are properties of the platform, not bugs:
 
-- **No second screen.** Mirroring shows the phone what your monitor already
-  shows; using it as an *extra* display needs a virtual monitor, which on Linux
-  means an `xrandr` VIRTUAL output and isn't built. Pick Second screen and you
-  get a **mirror** instead, which the host log says out loud.
-- **On Wayland, no mirroring, no remote control, no slide previews and no window
-  picker.** Capture forks into an X11 implementation and a Wayland/PipeWire one;
+- **The second screen has no hardware behind it.** It is a RandR monitor over
+  extra framebuffer, which is enough for windows to maximise into it and for the
+  pointer to cross — but it is not a display your GPU scans out, so a few things
+  behave oddly: a compositor may not redirect windows there, and full-screen
+  video may refuse to go full-screen on it. Your desktop widens while the phone
+  is connected and goes back to normal the moment it disconnects.
+  ⚠️ If the desktop *cannot* be widened — a headless or fixed-size X server, or a
+  driver already at its maximum framebuffer — you get a **mirror** instead, and
+  the host log says why in one line.
+- **On Wayland, no mirroring, no second screen, no remote control, no slide
+  previews and no window picker.** Capture forks into an X11 implementation and a Wayland/PipeWire one;
   window enumeration has no Wayland protocol *by design*. See
   [`LINUX-HOST.md`](LINUX-HOST.md) §3.
   ⚠️ **The phone's mode picker doesn't know which session you're on.** It offers

@@ -15,10 +15,19 @@
 //! clicker when there is no X server to photograph. A Wayland mirror is Stage 3
 //! (portal + PipeWire), and shares nothing with this file.
 //!
-//! ⚠️ **There is no extend/second-screen mode on Linux.** The Windows host
-//! streams a secondary monitor that a virtual-display driver invents; the X11
-//! equivalent is an `xrandr` VIRTUAL output, which is deferred (LINUX-HOST §7).
-//! A client that asks for one is mirrored instead — see [`run`].
+//! **The second screen is X11 too.** A client that asks to *extend* rather than
+//! mirror gets a real extra display: [`crate::vdisplay`] grows the root
+//! framebuffer and declares the new area a RandR monitor, and this module
+//! captures that rectangle instead of the whole desktop. Everything downstream —
+//! encoder, framing, wire format — is identical, which is the point: a second
+//! screen is a different *region*, not a different stream.
+//!
+//! ⚠️ **It still degrades to a mirror**, and the reasons are ordinary rather than
+//! exotic: a Wayland session (no X server to extend), a fixed-size headless
+//! server such as Xvfb, or a driver whose framebuffer cannot grow that far.
+//! [`crate::vdisplay::VirtualScreen::create`] returns the reason and [`run`]
+//! logs it — a phone that has already drawn its mode picker gets the desktop
+//! mirrored rather than a dead session.
 
 use std::io::{BufWriter, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +35,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use extender_protocol::{self as protocol, Codec, Message};
-use crate::capture;
+use crate::capture::{self, Region};
+use crate::vdisplay::VirtualScreen;
 use extender_transport::Conn;
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, Profile,
@@ -54,29 +64,70 @@ const MAX_ENCODE_LONG_SIDE: u32 = 1280;
 /// Ending the stream at least lets the client say the mirror stopped.
 const MAX_CONSECUTIVE_GRAB_FAILURES: u32 = 90; // ~3 s at 30 fps
 
-/// Capture + encode + stream the primary display down `stream` until `stop` is
-/// set or the client disconnects. Best-effort: logs and returns on any error.
+/// What the client asked the stream for, as far as this module needs it.
 ///
-/// `asked_for_second_screen` only affects the log line — this host has no
-/// second-screen mode, so the client is mirrored either way. Refusing instead
-/// would leave a phone that has already drawn its mode picker with a dead
-/// session and no reason, which is the same call [`crate::serve`] makes about a
-/// mirror on a machine with no X server.
-pub(crate) fn run(stream: Conn, stop: &AtomicBool, asked_for_second_screen: bool) {
-    if asked_for_second_screen {
-        eprintln!(
-            "client asked for a second screen; this host has no virtual display (see \
-             docs/LINUX-HOST.md §7) - mirroring the primary instead"
-        );
+/// A struct rather than more positional arguments: `run(conn, stop, true, 1179,
+/// 2556, name)` is exactly the call site where a width and a height get swapped
+/// and nobody notices until a phone shows a sideways desktop.
+#[derive(Debug, Clone)]
+pub(crate) struct StreamRequest {
+    /// The client wants to *extend* the desktop, not mirror it.
+    pub second_screen: bool,
+    /// The client's panel size in physical pixels, from its hello — the size the
+    /// second screen is made, so the phone shows it 1:1 rather than scaled.
+    pub client_size: (u32, u32),
+    /// The client's device name, for the log line ("James's iPhone").
+    pub label: String,
+}
+
+impl StreamRequest {
+    /// A plain mirror of this desktop, with no client size to honour.
+    #[cfg(test)]
+    pub(crate) fn mirror() -> Self {
+        Self { second_screen: false, client_size: (0, 0), label: String::new() }
     }
-    if let Err(e) = run_inner(stream, stop) {
+}
+
+/// Capture + encode + stream a screen down `stream` until `stop` is set or the
+/// client disconnects. Best-effort: logs and returns on any error.
+///
+/// For [`StreamRequest::second_screen`] this first tries to *make* the screen
+/// (see [`crate::vdisplay`]) and streams that region; the virtual screen lives
+/// exactly as long as this call, so the desktop is back to its normal size by
+/// the time the client is disconnected. When it cannot be made, the reason is
+/// logged and the primary display is mirrored instead.
+pub(crate) fn run(stream: Conn, stop: &AtomicBool, req: &StreamRequest) {
+    // ⚠️ Bound to a named local, not a temporary: dropping the `VirtualScreen`
+    // is what shrinks the desktop again, so it has to outlive the whole stream
+    // rather than the `if` that made it.
+    let virtual_screen = if req.second_screen {
+        match VirtualScreen::create(req.client_size.0, req.client_size.1, &req.label) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!(
+                    "client asked for a second screen, but {e} - mirroring the primary instead \
+                     (see docs/LINUX-HOST.md §7)"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let area = virtual_screen.as_ref().map(VirtualScreen::region);
+
+    if let Err(e) = run_inner(stream, stop, area) {
         eprintln!("screen stream ended: {e}");
     }
 }
 
-fn run_inner(stream: Conn, stop: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_inner(
+    stream: Conn,
+    stop: &AtomicBool,
+    area: Option<Region>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Learn the display size from a first capture; H.264 needs even dimensions.
-    let (cap_w, cap_h, _) = capture::grab_primary_bgra().ok_or("screen capture failed")?;
+    let (cap_w, cap_h, _) = capture::grab_bgra_of(area).ok_or("screen capture failed")?;
     let src_w = cap_w & !1;
     let src_h = cap_h & !1;
     if src_w == 0 || src_h == 0 {
@@ -84,7 +135,8 @@ fn run_inner(stream: Conn, stop: &AtomicBool) -> Result<(), Box<dyn std::error::
     }
     let (width, height) = extender_h264::encode_dims(src_w, src_h, MAX_ENCODE_LONG_SIDE);
     println!(
-        "mirror: {}x{} captured via {}, encoding at {width}x{height}",
+        "{}: {}x{} captured via {}, encoding at {width}x{height}",
+        if area.is_some() { "second screen" } else { "mirror" },
         cap_w,
         cap_h,
         capture::status().unwrap_or_else(|e| e)
@@ -115,7 +167,7 @@ fn run_inner(stream: Conn, stop: &AtomicBool) -> Result<(), Box<dyn std::error::
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
 
-        let Some((cw, ch, bgra)) = capture::grab_primary_bgra() else {
+        let Some((cw, ch, bgra)) = capture::grab_bgra_of(area) else {
             misses += 1;
             if misses >= MAX_CONSECUTIVE_GRAB_FAILURES {
                 return Err("screen capture stopped working (X server gone?)".into());
@@ -125,8 +177,10 @@ fn run_inner(stream: Conn, stop: &AtomicBool) -> Result<(), Box<dyn std::error::
         };
         misses = 0;
         // A resolution change would need a fresh StreamStart — end the stream.
-        // `capture::grab_bgra` re-reads the root geometry every frame, so an
-        // `xrandr` change is seen here rather than silently producing torn frames.
+        // `capture::grab_area` re-reads the root geometry every frame, so an
+        // `xrandr` change is seen here rather than silently producing torn
+        // frames. For a second screen the region is fixed, so this fires only
+        // when the desktop shrank underneath it and the region got clipped.
         if cw & !1 != src_w || ch & !1 != src_h {
             break;
         }
