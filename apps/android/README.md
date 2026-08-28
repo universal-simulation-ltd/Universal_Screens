@@ -55,10 +55,27 @@ cargo ndk -t arm64-v8a \
 Then build the APK and install it:
 
 ```bash
-cd apps/android
+cd /Users/jamesmarkey/Github/UNISIM/Universal_Apps/Universal_Screens/apps/android
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/android-ndk-r27c"
 ./gradlew assembleDebug        # or open in Android Studio and Run
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+⚠️ **`JAVA_HOME` is not optional on this Mac.** The only JDK on the PATH is
+**Java 25**, and the Gradle wrapper here is **8.7**, which does not support it —
+the build dies with a bare `* What went wrong:` followed by the version number
+and nothing else, which reads like a corrupted install rather than an
+unsupported JDK. Android Studio's bundled JBR is **21** and works. Either export
+it as above or run the build from Android Studio, which uses it automatically.
+
+⚠️ **The `.so` files in `jniLibs/` are gitignored, so a fresh clone has none —
+and a STALE one is worse than missing**, exactly as on the iOS side: it loads,
+the app runs, and the connection then fails at the protocol. The copies found on
+this Mac on 2026-08-28 were from **27 June**, predating the Noise transport
+encryption (`081c168`, 20 July) by three weeks and the transport rework
+(`570fe89`, 26 Aug) by two months. Rebuild them whenever `crates/` moves.
 
 In the app, enter the host's `ip:port` and pick a mode. For the Windows clicker
 host, run `cargo run -p extender-host-windows`. To test over a USB cable (handy

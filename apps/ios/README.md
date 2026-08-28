@@ -24,6 +24,18 @@ ABI in `crates/mobile-ffi` (`extender_ffi.h`).
 > predated the Noise transport encryption (`081c168`) by six weeks and had to be
 > rebuilt before the app would talk to a current host. If a connection fails right
 > after a `crates/` change, suspect this first.
+>
+> It happened AGAIN on **2026-08-28**: the framework was dated 24 Aug and
+> `crates/transport` had moved on 26 Aug (`570fe89`, the Noise tunnel lifted off
+> the socket). Twice in a fortnight is not bad luck — the check is cheap, so make
+> it a habit rather than a diagnosis:
+>
+> ```bash
+> stat -f '%Sm %N' -t '%Y-%m-%d' apps/ios/libs/ExtenderMobile.xcframework
+> git -C . log -1 --format=%ad --date=short -- crates/transport crates/core crates/protocol
+> ```
+>
+> If the second date is newer than the first, rebuild before you build the app.
 
 ## What's here
 
