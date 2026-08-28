@@ -63,3 +63,14 @@ fn current_ssid() -> Option<String> {
     None
 }
 
+
+/// Borrow this host's Wi-Fi details in the shape `extender_host_ui::connect_url`
+/// takes. The shared helper reads only these three values, so it does not need
+/// to know about the platform-specific ways of obtaining them.
+pub fn as_qr(info: &WifiInfo) -> extender_host_ui::WifiQr<'_> {
+    extender_host_ui::WifiQr {
+        ssid: &info.ssid,
+        password: info.password.as_deref(),
+        auth: &info.auth,
+    }
+}

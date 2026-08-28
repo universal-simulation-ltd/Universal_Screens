@@ -7,6 +7,7 @@ members = [
     "crates/h264",
     "crates/discovery",
     "crates/host",
+    "crates/host-ui",
     "crates/host-windows",
     "crates/host-macos",
     "crates/host-linux",
@@ -29,4 +30,5 @@ extender-core = { path = "crates/core" }
 # Platform-neutral H.264 wire framing + frame sizing, shared by every mirroring host.
 extender-h264 = { path = "crates/h264" }
 extender-discovery = { path = "crates/discovery" }
+extender-host-ui = { path = "crates/host-ui" }
 extender-web-bridge = { path = "crates/web-bridge" }

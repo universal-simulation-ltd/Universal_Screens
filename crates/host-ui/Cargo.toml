@@ -1,0 +1,15 @@
+[package]
+name = "extender-host-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+extender-protocol.workspace = true
+# `nearby_orbit` renders discovered peers; DiscoveredPeer is this crate's type,
+# which both hosts merely re-export through their own `discovery` module.
+extender-discovery.workspace = true
+# egui types (Ui, Color32, Context). Comes via eframe so the version matches the
+# hosts' exactly — a mismatched egui here would not unify and the types would
+# silently stop being the same types.
+eframe = { version = "0.29", features = ["persistence"] }

@@ -13,51 +13,22 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use eframe::egui;
-use extender_protocol::ClientPlatform;
 use serde::{Deserialize, Serialize};
 
 use crate::{serve_loop, HostEvent};
 
-const BASE_PORT: u16 = 9000;
-const BRAND: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x55, 0x04);
-const RECENT_MAX: usize = 8;
-const OPENSOURCE_ROOT: &str = "https://opensource.unisim.co.uk";
-const CHANGELOG_URL: &str = "https://changelog.unisim.co.uk";
-const OPENSOURCE_URL: &str = "https://opensource.unisim.co.uk/screens";
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-/// The other apps in this one's own catalogue group ("Geeky") on
-/// opensource.unisim.co.uk, as (name, path, blurb) so the menu reads like the web
-/// suite switcher — name plus its one-line description — rather than bare links.
-///
-/// ⚠️ These replaced two hardcoded "(soon)" placeholders, one of which advertised
-/// "Universal QR (soon)" while Universal QR had been live for months. Every path
-/// here was checked for a 200 before it went in: an app menu that offers things
-/// you cannot get is the same fault the download page was just cleaned of.
-const SIBLING_APPS: &[(&str, &str, &str)] = &[
-    ("Universal DIY", "diy", "Cut lists for simple butt-joint boxes"),
-    (
-        "Universal USB Detector",
-        "usb",
-        "Identify any USB device — version, speed & power",
-    ),
-    ("Universal Beam", "beam", "Send text straight between your devices"),
-];
+// The window chrome and helpers this host shares with the Windows one. See that
+// crate's docs for what deliberately stays forked (HostApp, RecentConn,
+// best_lan_ip) and why APP_VERSION must not move.
+use extender_host_ui::{
+    connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
+    paint_brand_strip, platform_display, platform_tag, sep_dot, style_navbar, DeviceKind,
+    BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL, OPENSOURCE_ROOT, OPENSOURCE_URL, RECENT_MAX,
+    SIBLING_APPS,
+};
 
-/// Recent user-visible changes, newest first — the `screens` entries from the
-/// suite changelog at changelog.unisim.co.uk, trimmed to a line each.
-///
-/// ⚠️ A SNAPSHOT, and deliberately so: the host is a desktop binary with no
-/// network fetch on the changelog path, so this cannot track the live feed the
-/// way the SDK's ChangelogMenu does in the web apps. "See all" links out to the
-/// real thing. It previously listed *features* ("Universal navbar with Actions &
-/// Profile menus"), which is not what a "what's new" menu is for.
-const CHANGELOG: &[&str] = &[
-    "• Windows installer — per-user, no admin prompt",
-    "• Encrypted connections over the LAN (Noise protocol)",
-    "• Nearby hosts appear automatically — tap, enter PIN, connect",
-    "• Click the connect QR to blow it up across the window",
-    "• Cast to a browser screen — no install on the receiver",
-];
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 
 #[derive(Clone, Serialize, Deserialize)]
 struct RecentConn {
@@ -374,7 +345,7 @@ impl HostApp {
         if self.running && self.address.is_some() {
             if self.combined_qr.is_none() {
                 if let Some(addr) = &self.address {
-                    let url = connect_url(addr, self.pin, self.wifi.as_ref());
+                    let url = connect_url(addr, self.pin, self.wifi.as_ref().map(crate::wifi::as_qr));
                     if let Some(image) = crate::qr::branded_qr_app(&url) {
                         self.combined_qr = Some(ctx.load_texture(
                             "combined_qr",
@@ -1082,108 +1053,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| e.to_string().into())
 }
 
-fn paint_brand_strip(ctx: &egui::Context) {
-    let screen = ctx.screen_rect();
-    let rect =
-        egui::Rect::from_min_max(screen.min, egui::pos2(screen.max.x, screen.min.y + 5.0));
-    let t = ctx.input(|i| i.time);
-    let pulse = 0.35 + 0.65 * (0.5 + 0.5 * (t * std::f64::consts::TAU / 2.4).sin());
-    let alpha = (pulse * 255.0) as u8;
-    let orange = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), alpha);
-    let clear = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), 0);
 
-    let (y0, y1) = (rect.top(), rect.bottom());
-    let (xl, xc, xr) = (rect.left(), rect.center().x, rect.right());
-    let v = |x: f32, y: f32, c: egui::Color32| egui::epaint::Vertex {
-        pos: egui::pos2(x, y),
-        uv: egui::epaint::WHITE_UV,
-        color: c,
-    };
-    let mut mesh = egui::Mesh::default();
-    mesh.vertices.extend([
-        v(xl, y0, clear),
-        v(xl, y1, clear),
-        v(xc, y0, orange),
-        v(xc, y1, orange),
-        v(xr, y0, clear),
-        v(xr, y1, clear),
-    ]);
-    mesh.indices.extend([0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5]);
 
-    let painter = ctx.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
-        egui::Id::new("brand_strip"),
-    ));
-    painter.add(egui::Shape::mesh(mesh));
-    ctx.request_repaint();
-}
 
-fn connect_url(host: &str, pin: u32, wifi: Option<&crate::wifi::WifiInfo>) -> String {
-    let (ip, port) = host.rsplit_once(':').unwrap_or((host, "9000"));
-    let mut s = format!(
-        "https://opensource.unisim.co.uk/screens/connect?host={}&port={}&pin={:04}",
-        pe(ip),
-        pe(port),
-        pin,
-    );
-    if let Some(wifi) = wifi {
-        s.push_str("#ssid=");
-        s.push_str(&pe(&wifi.ssid));
-        s.push_str("&auth=");
-        s.push_str(&pe(&wifi.auth));
-        if let Some(p) = &wifi.password {
-            s.push_str("&pass=");
-            s.push_str(&pe(p));
-        }
-    }
-    s
-}
 
-fn pe(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
 
-fn gen_pin() -> u32 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    1000 + (nanos % 9000)
-}
-
-/// A short room code for cross-network remote access. Six chars from an
-/// ambiguity-free alphabet (no 0/O, 1/I) so it's easy to read out over a call.
-/// Seeded from the clock — collisions are harmless (the rendezvous just pairs
-/// whoever shares a code), so no RNG dependency is pulled in. Mirrors the
-/// Windows host's `gen_room_code`.
-fn gen_room_code() -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars, no 0/O/1/I
-    let mut seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0u64, |d| d.as_nanos() as u64)
-        ^ (std::process::id() as u64).rotate_left(17);
-    let mut code = String::with_capacity(6);
-    for _ in 0..6 {
-        // xorshift step — plenty for a non-secret, human-readable pairing code.
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        code.push(ALPHABET[(seed % 32) as usize] as char);
-    }
-    code
-}
-
-fn first_free_port(start: u16) -> Option<(TcpListener, u16)> {
-    (start..start.saturating_add(50))
-        .find_map(|p| TcpListener::bind(("0.0.0.0", p)).ok().map(|l| (l, p)))
-}
 
 fn best_lan_ip() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -1191,261 +1065,11 @@ fn best_lan_ip() -> Option<String> {
     Some(socket.local_addr().ok()?.ip().to_string())
 }
 
-fn style_navbar(ui: &mut egui::Ui, dark: bool) {
-    let link = if dark {
-        egui::Color32::from_rgb(0xcb, 0xd5, 0xe1)
-    } else {
-        egui::Color32::from_rgb(0x37, 0x41, 0x51)
-    };
-    let hover = if dark {
-        egui::Color32::from_rgb(0xf8, 0xfa, 0xfc)
-    } else {
-        egui::Color32::from_rgb(0x0f, 0x17, 0x2a)
-    };
-    let tint = egui::Color32::from_rgba_unmultiplied(
-        BRAND.r(),
-        BRAND.g(),
-        BRAND.b(),
-        if dark { 46 } else { 26 },
-    );
-    let round = egui::Rounding::same(8.0);
 
-    let s = ui.style_mut();
-    s.spacing.button_padding = egui::vec2(10.0, 6.0);
-    s.spacing.item_spacing.x = 6.0;
-    s.visuals.menu_rounding = egui::Rounding::same(10.0);
-    if let Some(font) = s.text_styles.get_mut(&egui::TextStyle::Button) {
-        font.size = 14.0;
-    }
 
-    let w = &mut s.visuals.widgets;
-    for v in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
-        v.bg_stroke = egui::Stroke::NONE;
-        v.rounding = round;
-        v.expansion = 0.0;
-    }
-    w.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    w.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    w.inactive.fg_stroke.color = link;
-    for v in [&mut w.hovered, &mut w.active, &mut w.open] {
-        v.weak_bg_fill = tint;
-        v.bg_fill = tint;
-        v.fg_stroke.color = hover;
-    }
-}
 
-fn sep_dot(ui: &mut egui::Ui, dark: bool) {
-    let c = if dark {
-        egui::Color32::from_rgb(0x47, 0x55, 0x69)
-    } else {
-        egui::Color32::from_rgb(0xcb, 0xd5, 0xe1)
-    };
-    ui.label(egui::RichText::new("·").color(c).size(16.0));
-}
 
-fn platform_tag(p: ClientPlatform) -> &'static str {
-    match p {
-        ClientPlatform::Windows => "windows",
-        ClientPlatform::Macos => "macos",
-        ClientPlatform::Linux => "linux",
-        ClientPlatform::Android => "android",
-        ClientPlatform::Ios => "ios",
-        ClientPlatform::Unknown => "unknown",
-    }
-}
 
-fn platform_display(tag: &str) -> &str {
-    match tag {
-        "windows" => "Windows",
-        "macos" => "macOS",
-        "linux" => "Linux",
-        "android" => "Android",
-        "ios" => "iOS",
-        _ => "Unknown device",
-    }
-}
 
-#[derive(Clone, Copy)]
-enum DeviceKind {
-    Windows,
-    Mac,
-    Android,
-    Ios,
-    Other,
-}
 
-impl DeviceKind {
-    fn from_tag(tag: &str) -> Self {
-        match tag {
-            "windows" => Self::Windows,
-            "macos" => Self::Mac,
-            "android" => Self::Android,
-            "ios" => Self::Ios,
-            _ => Self::Other,
-        }
-    }
-}
 
-/// Draw the "Nearby" hosts as an orbit: this Mac at the centre with a soft glow
-/// + dashed ring, each discovered peer a node circling it (portal-style). The
-/// nodes rotate slowly; hovering the area pauses them so a node is easy to
-/// click. `centre_label` names the local machine ("This PC" / "This Mac").
-/// Returns the peer whose node was clicked this frame, if any. Mirrors the
-/// Windows host's `nearby_orbit`.
-fn nearby_orbit(
-    ui: &mut egui::Ui,
-    peers: &[crate::discovery::DiscoveredPeer],
-    centre_label: &str,
-) -> Option<crate::discovery::DiscoveredPeer> {
-    let width = ui.available_width();
-    let height = 210.0_f32;
-    let (rect, _resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    let centre = rect.center();
-    let radius = (height * 0.34).min(width * 0.3);
-
-    let dark = ui.visuals().dark_mode;
-    let ink = if dark { egui::Color32::from_gray(220) } else { egui::Color32::from_gray(40) };
-    let muted = if dark { egui::Color32::from_gray(130) } else { egui::Color32::from_gray(140) };
-    let card = ui.visuals().extreme_bg_color;
-
-    // Dashed orbit ring.
-    let ring_segments = 44;
-    for i in 0..ring_segments {
-        if i % 2 != 0 {
-            continue; // gaps make the dashes
-        }
-        let a0 = std::f32::consts::TAU * (i as f32) / (ring_segments as f32);
-        let a1 = std::f32::consts::TAU * (i as f32 + 1.0) / (ring_segments as f32);
-        painter.line_segment(
-            [
-                centre + radius * egui::vec2(a0.cos(), a0.sin()),
-                centre + radius * egui::vec2(a1.cos(), a1.sin()),
-            ],
-            egui::Stroke::new(1.2, muted.gamma_multiply(0.5)),
-        );
-    }
-
-    // Pulsing glow behind the centre.
-    let t = ui.input(|i| i.time) as f32;
-    let pulse = 0.5 + 0.5 * (t * 1.6).sin();
-    let glow = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), (26.0 + 20.0 * pulse) as u8);
-    painter.circle_filled(centre, 34.0 + 5.0 * pulse, glow);
-
-    // Centre node: this machine.
-    painter.circle_filled(centre, 26.0, card);
-    painter.circle_stroke(centre, 26.0, egui::Stroke::new(1.5, BRAND));
-    painter.text(centre - egui::vec2(0.0, 4.0), egui::Align2::CENTER_CENTER, "🖥", egui::FontId::proportional(20.0), ink);
-    painter.text(centre + egui::vec2(0.0, 15.0), egui::Align2::CENTER_CENTER, centre_label, egui::FontId::proportional(9.0), muted);
-
-    // Orbiting peer nodes. A slow global rotation, evenly spread; pause on hover
-    // so a moving node stays clickable.
-    let hovered_area = ui.rect_contains_pointer(rect);
-    let spin = if hovered_area { 0.0 } else { t * 0.35 }; // radians
-    let mut clicked = None;
-    let node_r = 22.0;
-
-    for (i, peer) in peers.iter().enumerate() {
-        let angle = spin + std::f32::consts::TAU * (i as f32) / (peers.len() as f32) - std::f32::consts::FRAC_PI_2;
-        let pos = centre + radius * egui::vec2(angle.cos(), angle.sin());
-        let node_rect = egui::Rect::from_center_size(pos, egui::vec2(node_r * 2.0, node_r * 2.0));
-        let id = ui.id().with(("orbit_peer", i));
-        let resp = ui.interact(node_rect, id, egui::Sense::click());
-        let hot = resp.hovered();
-        if hot {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-
-        painter.circle_filled(pos, node_r, card);
-        painter.circle_stroke(pos, node_r, egui::Stroke::new(if hot { 2.0 } else { 1.2 }, if hot { BRAND } else { muted }));
-        painter.text(pos - egui::vec2(0.0, 3.0), egui::Align2::CENTER_CENTER, "📡", egui::FontId::proportional(16.0), ink);
-
-        // Label pill under the node — the name, plus the address on hover.
-        let name = truncate_label(&peer.name, 16);
-        painter.text(
-            pos + egui::vec2(0.0, node_r + 9.0),
-            egui::Align2::CENTER_CENTER,
-            &name,
-            egui::FontId::proportional(11.0),
-            ink,
-        );
-        if hot {
-            painter.text(
-                pos + egui::vec2(0.0, node_r + 22.0),
-                egui::Align2::CENTER_CENTER,
-                format!("{}:{}  ·  click to connect", peer.addr, peer.port),
-                egui::FontId::proportional(9.5),
-                muted,
-            );
-            resp.clone().on_hover_text(format!("Connect to {} ({}:{})", peer.name, peer.addr, peer.port));
-        }
-        if resp.clicked() {
-            clicked = Some(peer.clone());
-        }
-    }
-
-    // Keep the animation going while nothing else is repainting.
-    if !hovered_area {
-        ui.ctx().request_repaint();
-    }
-    clicked
-}
-
-/// Truncate a label to `max` chars with an ellipsis, so a long machine name
-/// doesn't overrun an orbit node.
-fn truncate_label(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_owned()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
-}
-
-fn device_icon(ui: &mut egui::Ui, kind: DeviceKind, size: f32) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
-    let p = ui.painter();
-    let color = egui::Color32::from_rgb(55, 55, 70);
-    let stroke = egui::Stroke::new((size * 0.07).max(1.2), color);
-    let at = |fx: f32, fy: f32| rect.min + egui::vec2(fx * size, fy * size);
-    let r = |fx: f32, fy: f32, fw: f32, fh: f32| {
-        egui::Rect::from_min_size(at(fx, fy), egui::vec2(fw * size, fh * size))
-    };
-
-    match kind {
-        DeviceKind::Windows => {
-            let gap = 0.10;
-            let cell = (1.0 - gap) / 2.0;
-            for (cx, cy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
-                p.rect_filled(r(cx * (cell + gap), cy * (cell + gap), cell, cell), 1.0, color);
-            }
-        }
-        DeviceKind::Mac => {
-            p.rect_stroke(r(0.12, 0.10, 0.76, 0.52), 2.0, stroke);
-            p.rect_filled(r(0.45, 0.62, 0.10, 0.12), 0.0, color);
-            p.rect_filled(r(0.30, 0.74, 0.40, 0.06), 1.0, color);
-        }
-        DeviceKind::Android => {
-            p.line_segment([at(0.33, 0.12), at(0.40, 0.27)], stroke);
-            p.line_segment([at(0.67, 0.12), at(0.60, 0.27)], stroke);
-            p.rect_filled(
-                r(0.25, 0.27, 0.50, 0.46),
-                egui::Rounding { nw: size * 0.22, ne: size * 0.22, sw: 0.0, se: 0.0 },
-                color,
-            );
-            p.circle_filled(at(0.40, 0.41), size * 0.035, egui::Color32::WHITE);
-            p.circle_filled(at(0.60, 0.41), size * 0.035, egui::Color32::WHITE);
-        }
-        DeviceKind::Ios => {
-            p.rect_stroke(r(0.30, 0.10, 0.40, 0.80), size * 0.12, stroke);
-            p.line_segment([at(0.43, 0.82), at(0.57, 0.82)], stroke);
-        }
-        DeviceKind::Other => {
-            p.rect_stroke(r(0.15, 0.18, 0.70, 0.52), 2.0, stroke);
-            p.rect_filled(r(0.38, 0.74, 0.24, 0.06), 1.0, color);
-        }
-    }
-    response
-}
