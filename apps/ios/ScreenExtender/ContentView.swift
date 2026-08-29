@@ -5,6 +5,20 @@ enum Mode: String {
     case clicker, viewer, control, trackpad, secondScreen
 }
 
+/// Where a connection attempt has got to. Drives the full-screen feedback shown
+/// between tapping Connect and either landing in a mode or coming back home.
+enum ConnectPhase {
+    case idle, connecting, connected, failed
+}
+
+/// The least time "Connecting…" stays up. A host that refuses at once (wrong PIN,
+/// nothing listening) would otherwise flash the whole attempt past in a frame or
+/// two, which is what made a failure so easy to miss.
+private let minConnectingSeconds: TimeInterval = 1.2
+
+/// How long "Connected" is held before the mode's own UI takes over.
+private let connectedHoldSeconds: TimeInterval = 1.1
+
 /// A connection target decoded from a scanned QR or a deep link.
 struct ConnectPayload {
     var addr: String
@@ -85,7 +99,12 @@ struct ContentView: View {
     @State private var status = ""
     /// Address + PIN gathered from a scan/deep-link, waiting for a mode choice.
     @State private var pending: (addr: String, pin: Int)?
-    @State private var connecting = false
+    /// Where the current attempt is: idle (no feedback), connecting (the spinner),
+    /// connected (the tick, held for a beat), failed (the cross, until dismissed).
+    @State private var phase: ConnectPhase = .idle
+    /// Whether the last attempt asked to remember its mode, so "Try again" on the
+    /// failure screen can repeat it exactly without re-scanning or re-picking.
+    @State private var lastRememberMode = true
     /// Bumped whenever a connect attempt starts, is cancelled, or is superseded. A
     /// background connect stamps the value it began with and, when it returns, drops
     /// its result if the value has since moved on — so tapping Cancel (or starting a
@@ -103,15 +122,33 @@ struct ContentView: View {
         if let castCode {
             CastFlow(code: castCode, onExit: { self.castCode = nil })
         } else if let session {
-            connectedView(session)
-        } else if connecting {
-            ConnectingScreen(addr: currentAddr, onCancel: {
+            // The mode's UI is built straight away (so a stream starts decoding on
+            // its first keyframe), with the "Connected" confirmation laid over the
+            // top of it for its brief hold.
+            ZStack {
+                connectedView(session)
+                if phase == .connected {
+                    ConnectionStatusScreen(phase: .connected, addr: currentAddr, mode: mode)
+                }
+            }
+        } else if phase == .connecting {
+            ConnectionStatusScreen(phase: .connecting, addr: currentAddr, mode: mode, onCancel: {
                 // Abandon the in-flight attempt (its result is discarded when it
                 // returns) and drop back to the connect screen.
                 attempt += 1
-                connecting = false
+                phase = .idle
                 status = ""
             })
+        } else if phase == .failed {
+            // The failure stays on screen until the user picks — retry the very
+            // same attempt, or go back home.
+            ConnectionStatusScreen(
+                phase: .failed,
+                addr: currentAddr,
+                mode: mode,
+                onRetry: { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
+                onHome: { phase = .idle }
+            )
         } else if let (pAddr, pPin) = pending {
             ModePickerScreen(
                 addr: pAddr,
@@ -164,7 +201,8 @@ struct ContentView: View {
         mode = chosen
         currentAddr = addr
         currentPin = pin
-        connecting = true
+        lastRememberMode = rememberMode
+        phase = .connecting
         status = ""
         attempt += 1
         let myAttempt = attempt
@@ -174,9 +212,14 @@ struct ContentView: View {
         default: .mirror
         }
         let deviceName = ConnectionStore.effectiveDeviceName()
+        let startedAt = Date()
         DispatchQueue.global(qos: .userInitiated).async {
             let s = ExtenderSession.connect(addr: addr, mode: capture, pin: UInt32(pin),
                                             deviceName: deviceName)
+            // Hold "Connecting…" for a beat before showing the verdict, so both
+            // verdicts are legible however fast the answer came back.
+            let remaining = minConnectingSeconds - Date().timeIntervalSince(startedAt)
+            if remaining > 0 { Thread.sleep(forTimeInterval: remaining) }
             DispatchQueue.main.async {
                 // Cancelled or superseded while connecting → drop this session so a
                 // late-arriving connection never hijacks the UI (and its socket is
@@ -185,14 +228,22 @@ struct ContentView: View {
                     s?.close()
                     return
                 }
-                connecting = false
                 if s != nil {
                     ConnectionStore.remember(addr: addr,
                                             mode: rememberMode ? chosen.rawValue : "",
                                             pin: pin)
                 }
                 session = s
-                status = s == nil ? "connection failed" : ""
+                // The verdict is a screen of its own now, not a line of small text
+                // on the home page that an attempt could scroll straight past.
+                phase = s == nil ? .failed : .connected
+                guard s != nil else { return }
+                // "Connected" is a confirmation, not a resting state: hold it for a
+                // beat, then fall to idle, which uncovers the mode's own UI (the
+                // clicker's buttons, the trackpad, the stream) built underneath it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + connectedHoldSeconds) {
+                    if phase == .connected, myAttempt == attempt { phase = .idle }
+                }
             }
         }
     }
@@ -305,29 +356,117 @@ private struct ModeOption: View {
     }
 }
 
-// MARK: - Connecting spinner
+// MARK: - Connection feedback
 
-struct ConnectingScreen: View {
+/// The whole story of a connection attempt, full screen: the app breathing under a
+/// spinner while it tries, then a green tick ("Connected", held for a beat before
+/// the mode takes over) or a red cross ("Connection failed", which stays put until
+/// the user retries or goes home).
+///
+/// It is one screen for all three so a failure lands exactly where the eye already
+/// is. The old flow dropped straight back to the home page with "connection failed"
+/// as a line of small text under the saved hosts, which was easy to miss entirely —
+/// especially when a refused connection came back in a few milliseconds.
+///
+/// The handlers default to no-ops so each phase can pass only the ones it shows.
+struct ConnectionStatusScreen: View {
+    let phase: ConnectPhase
     let addr: String
+    let mode: Mode
     /// Backs out of a connection that's taking too long (e.g. the host is off the
-    /// network), instead of waiting out the connect timeout. Defaults to a no-op
-    /// so previews / other callers can omit it.
+    /// network), instead of waiting out the connect timeout.
     var onCancel: () -> Void = {}
+    /// Repeats the attempt that just failed, unchanged.
+    var onRetry: () -> Void = {}
+    /// Gives up and returns to the connect screen.
+    var onHome: () -> Void = {}
+
+    /// Drives the logo's breathe (connecting) and the badge's pop (the verdicts);
+    /// both are flipped on in `.onAppear` so the animation runs on entry.
+    @State private var pulsing = false
+    @State private var popped = false
 
     var body: some View {
-        VStack(spacing: 18) {
-            Image("AppLogo")
-                .resizable().scaledToFit()
-                .frame(width: 88, height: 88)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            ProgressView()
-            Text("Connecting…").font(.title3.weight(.semibold))
-            if !addr.isEmpty { Text(addr).font(.caption).foregroundStyle(.secondary) }
-            Button("Cancel", action: onCancel)
-                .buttonStyle(.bordered)
-                .padding(.top, 10)
+        VStack(spacing: 0) {
+            switch phase {
+            case .connecting:
+                // A slow breathe on the logo, so the wait reads as something in
+                // progress at a glance, before the spinner is even noticed.
+                Image("AppLogo")
+                    .resizable().scaledToFit()
+                    .frame(width: 88, height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .scaleEffect(pulsing ? 1.06 : 0.94)
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                               value: pulsing)
+                    .onAppear { pulsing = true }
+                Spacer().frame(height: 20)
+                ProgressView()
+            case .connected:
+                badge("checkmark", .green)
+            case .failed:
+                badge("xmark", .red)
+            case .idle:
+                EmptyView()
+            }
+
+            Spacer().frame(height: 16)
+            Text(title)
+                .font(.title2.bold())
+                .multilineTextAlignment(.center)
+            if !addr.isEmpty {
+                Spacer().frame(height: 4)
+                Text(addr).font(.caption).foregroundStyle(.secondary)
+            }
+            if phase == .connected {
+                Spacer().frame(height: 6)
+                Text("Opening \(mode.label)…").font(.subheadline).foregroundStyle(.secondary)
+            }
+            if phase == .failed {
+                Spacer().frame(height: 12)
+                Text("Check that the host app is running and showing its code, that the "
+                     + "PIN matches, and that both devices are on the same Wi-Fi.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Spacer().frame(height: 28)
+                Button("Try again", action: onRetry)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                Spacer().frame(height: 10)
+                Button("Back to home", action: onHome)
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+            }
+            if phase == .connecting {
+                Spacer().frame(height: 28)
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+            }
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
+    }
+
+    private var title: String {
+        switch phase {
+        case .connected: "Connected"
+        case .failed:    "Connection failed"
+        default:         "Connecting…"
+        }
+    }
+
+    /// The round tick / cross a verdict leads with; it pops in so the result reads
+    /// as something that just happened rather than a screen that was always there.
+    private func badge(_ symbol: String, _ tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 40, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 88, height: 88)
+            .background(tint, in: Circle())
+            .scaleEffect(popped ? 1 : 0.5)
+            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: popped)
+            .onAppear { popped = true }
     }
 }

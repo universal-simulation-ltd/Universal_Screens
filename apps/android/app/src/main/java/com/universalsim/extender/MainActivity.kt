@@ -12,6 +12,14 @@ import android.view.TextureView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +44,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -80,6 +89,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import androidx.compose.ui.viewinterop.AndroidView
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -87,6 +97,18 @@ import kotlin.concurrent.thread
 
 /** The three ways to use the app; they differ only in UI + whether they stream. */
 enum class Mode { FULL_CONTROL, VIEWER, CLICKER, TRACKPAD, SECOND_SCREEN }
+
+/** Where a connection attempt has got to. Drives the full-screen feedback shown
+ *  between tapping Connect and either landing in a mode or coming back home. */
+enum class ConnectPhase { IDLE, CONNECTING, CONNECTED, FAILED }
+
+/** The least time "Connecting…" stays up. A host that refuses at once (wrong PIN,
+ *  nothing listening) would otherwise flash the whole attempt past in a frame or
+ *  two, which is what made a failure so easy to miss. */
+private const val MIN_CONNECTING_MS = 1200L
+
+/** How long "Connected" is held before the mode's own UI takes over. */
+private const val CONNECTED_HOLD_MS = 1100L
 
 /** A connection target decoded from a scanned QR or a deep link (App Link). */
 data class ConnectPayload(
@@ -231,8 +253,12 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     var status by remember { mutableStateOf("") }
     // Credentials gathered (addr, pin) and awaiting a mode choice; null = not picking.
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
-    // True while a connection attempt is in flight (shows the Connecting screen).
-    var connecting by remember { mutableStateOf(false) }
+    // Where the current attempt is: IDLE (no feedback), CONNECTING (the spinner),
+    // CONNECTED (the tick, held for a beat), FAILED (the cross, until dismissed).
+    var phase by remember { mutableStateOf(ConnectPhase.IDLE) }
+    // Whether the last attempt asked to remember its mode, so "Try again" on the
+    // failure screen can repeat it exactly without re-scanning or re-picking.
+    var lastRememberMode by remember { mutableStateOf(true) }
     // Bumped whenever a connect attempt starts, is cancelled, or is superseded. A
     // background connect stamps the value it began with and, when it returns, drops
     // its result if the value has since moved on — so tapping Cancel (or starting a
@@ -268,7 +294,8 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
         mode = chosenMode
         currentAddr = addr
         currentPin = pin
-        connecting = true
+        lastRememberMode = rememberMode
+        phase = ConnectPhase.CONNECTING
         status = ""
         attempt += 1
         val myAttempt = attempt
@@ -282,10 +309,15 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
         // The screen this phone adds on the host is labelled with this name (parity
         // with the iOS client); read before the thread so it's off the gesture path.
         val deviceName = ConnectionStore.loadDeviceName(context)
+        val startedAt = System.currentTimeMillis()
         thread {
             // Width/height advertise the phone panel; the host mirrors at its own
             // native size, so exact values here are not critical.
             val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin, deviceName)
+            // Hold "Connecting…" for a beat before showing the verdict, so both
+            // verdicts are legible however fast the answer came back.
+            val remaining = MIN_CONNECTING_MS - (System.currentTimeMillis() - startedAt)
+            if (remaining > 0) Thread.sleep(remaining)
             runOnUi {
                 // Cancelled or superseded while connecting → drop this session so a
                 // late-arriving connection never hijacks the UI (and its socket is
@@ -294,15 +326,26 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     s?.close()
                     return@runOnUi
                 }
-                connecting = false
                 if (s != null) {
                     // Remember the host for quick reconnect; store the mode only if
                     // the user asked to. OS/name fill in once HostInfo arrives.
                     ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
                 }
                 session = s
-                status = if (s == null) "connection failed" else ""
+                // The verdict is a screen of its own now, not a line of small text
+                // on the home page that an attempt could scroll straight past.
+                phase = if (s != null) ConnectPhase.CONNECTED else ConnectPhase.FAILED
             }
+        }
+    }
+
+    // "Connected" is a confirmation, not a resting state: hold it for a beat, then
+    // fall to IDLE, which uncovers the mode's own UI (the clicker's buttons, the
+    // trackpad, the stream) already composed underneath it.
+    LaunchedEffect(phase) {
+        if (phase == ConnectPhase.CONNECTED) {
+            delay(CONNECTED_HOLD_MS)
+            if (phase == ConnectPhase.CONNECTED) phase = ConnectPhase.IDLE
         }
     }
 
@@ -352,43 +395,62 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                 }
             }
 
-            if (streaming) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    when (mode) {
-                        Mode.VIEWER, Mode.SECOND_SCREEN ->
-                            StreamScreen(live, currentAddr, forwardInput = false) { chrome = !chrome }
-                        Mode.FULL_CONTROL ->
-                            StreamScreen(live, currentAddr, forwardInput = true) { chrome = !chrome }
-                        else -> {}
+            // The mode's UI is composed straight away (so a stream starts decoding
+            // on its first keyframe), with the "Connected" confirmation laid over
+            // the top of it for its brief hold.
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (streaming) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when (mode) {
+                            Mode.VIEWER, Mode.SECOND_SCREEN ->
+                                StreamScreen(live, currentAddr, forwardInput = false) { chrome = !chrome }
+                            Mode.FULL_CONTROL ->
+                                StreamScreen(live, currentAddr, forwardInput = true) { chrome = !chrome }
+                            else -> {}
+                        }
+                        if (chrome) {
+                            Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                                topBar(true)
+                            }
+                        }
                     }
-                    if (chrome) {
-                        Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
-                            topBar(true)
+                } else {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        topBar(false)
+                        when (mode) {
+                            Mode.CLICKER -> ClickerScreen(live, currentAddr)
+                            Mode.TRACKPAD -> TrackpadScreen(live)
+                            else -> {}
                         }
                     }
                 }
-            } else {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    topBar(false)
-                    when (mode) {
-                        Mode.CLICKER -> ClickerScreen(live, currentAddr)
-                        Mode.TRACKPAD -> TrackpadScreen(live)
-                        else -> {}
-                    }
+                if (phase == ConnectPhase.CONNECTED) {
+                    ConnectionStatusScreen(ConnectPhase.CONNECTED, currentAddr, mode)
                 }
             }
         }
-        // Connecting: a dedicated spinner screen (don't flash the home page), with
+        // Connecting: a dedicated animated screen (don't flash the home page), with
         // a Cancel to back out if it's taking too long.
-        connecting -> ConnectingScreen(
+        phase == ConnectPhase.CONNECTING -> ConnectionStatusScreen(
+            phase = ConnectPhase.CONNECTING,
             addr = currentAddr,
+            mode = mode,
             onCancel = {
                 // Abandon the in-flight attempt (its result is discarded when it
                 // returns) and drop back to the connect screen.
                 attempt += 1
-                connecting = false
+                phase = ConnectPhase.IDLE
                 status = ""
             },
+        )
+        // Failed: the same full screen, saying so plainly, and it stays until the
+        // user picks — retry the very same attempt, or go back home.
+        phase == ConnectPhase.FAILED -> ConnectionStatusScreen(
+            phase = ConnectPhase.FAILED,
+            addr = currentAddr,
+            mode = mode,
+            onRetry = { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
+            onHome = { phase = ConnectPhase.IDLE },
         )
         // After address + PIN are gathered (scan or manual), pick what to do.
         pending != null -> {
@@ -448,31 +510,151 @@ private fun DisconnectButton(onClick: () -> Unit) {
     ) { Text("Disconnect") }
 }
 
-/** A full-screen "Connecting…" placeholder with the app logo + a spinner, shown
- *  while a session is being established so the user never bounces back home. The
- *  Cancel button lets them back out if the connection is taking too long (e.g. the
- *  host is off the network) instead of waiting out the connect timeout. */
+/**
+ * The whole story of a connection attempt, full screen: the app breathing under a
+ * spinner while it tries, then a green tick ("Connected", held for a beat before
+ * the mode takes over) or a red cross ("Connection failed", which stays put until
+ * the user retries or goes home).
+ *
+ * It is one screen for all three so a failure lands exactly where the eye already
+ * is. The old flow dropped straight back to the home page with "connection failed"
+ * as a line of small text under the saved hosts, which was easy to miss entirely —
+ * especially when a refused connection came back in a few milliseconds.
+ *
+ * [onCancel] backs out of a connect that's taking too long (e.g. the host is off
+ * the network) instead of waiting out the timeout; [onRetry] repeats the same
+ * attempt; [onHome] returns to the connect screen.
+ */
 @Composable
-fun ConnectingScreen(addr: String, onCancel: () -> Unit = {}) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Image(
-            painter = painterResource(R.drawable.app_icon),
-            contentDescription = null,
-            modifier = Modifier.size(88.dp).clip(RoundedCornerShape(20.dp)),
-        )
-        Spacer(Modifier.height(20.dp))
-        CircularProgressIndicator()
-        Spacer(Modifier.height(16.dp))
-        Text("Connecting…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        if (addr.isNotEmpty()) {
-            Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+fun ConnectionStatusScreen(
+    phase: ConnectPhase,
+    addr: String,
+    mode: Mode,
+    onCancel: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    onHome: () -> Unit = {},
+) {
+    // A Surface (rather than a bare Column) both paints the backdrop opaque and
+    // swallows touches, which matters for the "Connected" pass: the live mode UI
+    // is composed underneath it and must not be tappable through the overlay.
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            when (phase) {
+                ConnectPhase.CONNECTING -> {
+                    // A slow breathe on the logo, so the wait reads as something in
+                    // progress at a glance, before the spinner is even noticed.
+                    val pulse = rememberInfiniteTransition(label = "connecting")
+                    val scale by pulse.animateFloat(
+                        initialValue = 0.94f,
+                        targetValue = 1.06f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(900),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "logoPulse",
+                    )
+                    Image(
+                        painter = painterResource(R.drawable.app_icon),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(88.dp)
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .clip(RoundedCornerShape(20.dp)),
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    CircularProgressIndicator()
+                }
+                ConnectPhase.CONNECTED -> StatusBadge(
+                    glyph = "✓",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                )
+                ConnectPhase.FAILED -> StatusBadge(
+                    glyph = "✕",
+                    color = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                )
+                ConnectPhase.IDLE -> {}
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                when (phase) {
+                    ConnectPhase.CONNECTED -> "Connected"
+                    ConnectPhase.FAILED -> "Connection failed"
+                    else -> "Connecting…"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            if (addr.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    addr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (phase == ConnectPhase.CONNECTED) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Opening ${mode.label()}…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (phase == ConnectPhase.FAILED) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Check that the host app is running and showing its code, that the " +
+                        "PIN matches, and that both devices are on the same Wi-Fi.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
+            when (phase) {
+                ConnectPhase.CONNECTING -> OutlinedButton(onClick = onCancel) { Text("Cancel") }
+                ConnectPhase.FAILED -> {
+                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = onHome, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back to home")
+                    }
+                }
+                else -> {}
+            }
         }
-        Spacer(Modifier.height(28.dp))
-        OutlinedButton(onClick = onCancel) { Text("Cancel") }
+    }
+}
+
+/** The round tick / cross a result leads with; it pops in so the verdict registers
+ *  as something that just happened rather than a screen that was always there. */
+@Composable
+private fun StatusBadge(glyph: String, color: Color, contentColor: Color) {
+    var shown by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (shown) 1f else 0.5f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "badgePop",
+    )
+    LaunchedEffect(Unit) { shown = true }
+    Box(
+        modifier = Modifier
+            .size(88.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(color),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, fontSize = 44.sp, color = contentColor)
     }
 }
 

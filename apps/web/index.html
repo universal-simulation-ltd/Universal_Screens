@@ -216,6 +216,30 @@
   #stage { position: relative; flex: 1; min-height: 0; }
   #screen { width: 100%; height: 100%; display: block; background: #000; outline: none; touch-action: none; }
   #video-hint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #fff8; font-size: .95rem; text-align: center; padding: 2rem; pointer-events: none; }
+  /* ---- connection feedback (full screen, over everything) ----
+     The whole story of an attempt in one place: a spinner while it tries, then a
+     green tick or a red cross. It covers the page because the verdict used to be
+     a line in the session log — and on a failure the page dropped straight back
+     to the connect screen, taking the log with it, so there was nothing left to
+     read. */
+  #conn-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1.5rem; background: var(--bg); }
+  #conn-overlay[hidden] { display: none; }
+  .conn-card { width: 100%; max-width: 380px; text-align: center; }
+  #conn-mark { width: 88px; height: 88px; margin: 0 auto 1.2rem; display: grid; place-items: center; border-radius: 50%; font-size: 2.5rem; line-height: 1; color: #fff; }
+  #conn-mark.busy { border: 5px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent); animation: conn-spin 1s linear infinite; }
+  #conn-mark.ok  { background: #16a34a; animation: conn-pop .35s cubic-bezier(.2, 1.4, .4, 1); }
+  #conn-mark.bad { background: #dc2626; animation: conn-pop .35s cubic-bezier(.2, 1.4, .4, 1); }
+  @keyframes conn-spin { to { transform: rotate(360deg); } }
+  @keyframes conn-pop { from { transform: scale(.5); } to { transform: scale(1); } }
+  #conn-title { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
+  #conn-sub { margin: .35rem 0 0; color: var(--muted); font-size: .85rem; }
+  #conn-hint { margin: .9rem 0 0; color: var(--muted); font-size: .85rem; }
+  #conn-actions { margin-top: 1.5rem; display: flex; flex-direction: column; gap: .55rem; }
+  .conn-btn { font: inherit; padding: .62rem 1rem; border-radius: .6rem; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .conn-btn:hover { border-color: var(--accent); }
+  .conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  @media (prefers-reduced-motion: reduce) { #conn-mark { animation: none; } }
+
   #log { font: 11px/1.4 ui-monospace, monospace; color: #cfcfd6; background: #000; max-height: 6.5rem; overflow: auto; padding: .35rem .6rem; border-top: 1px solid #222; white-space: pre-wrap; }
   .ok { color: #4ade80; } .err { color: #f87171; } .dim { opacity: .65; }
 </style>
@@ -343,6 +367,23 @@
     </div>
     <div id="log"></div>
   </section>
+
+  <!-- Connection feedback: Connecting… → Connected (held for a beat, then the
+       session shows through) or Connection failed (stays until the user picks).
+       Painted by `client.js`; the mark is a spinner, a tick or a cross. -->
+  <div id="conn-overlay" hidden role="status" aria-live="polite">
+    <div class="conn-card">
+      <div id="conn-mark" class="busy"></div>
+      <h2 id="conn-title">Connecting…</h2>
+      <p id="conn-sub"></p>
+      <p id="conn-hint" hidden></p>
+      <div id="conn-actions">
+        <button type="button" id="conn-retry" class="conn-btn primary" hidden>Try again</button>
+        <button type="button" id="conn-cancel" class="conn-btn" hidden>Cancel</button>
+        <button type="button" id="conn-home" class="conn-btn" hidden>Back to home</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
     import { boot } from "./src/client.js";

@@ -4,6 +4,59 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-29 (a connection attempt now says what happened, on all three clients)
+
+**The complaint:** after tapping Connect it was too hard to see that the attempt
+had *failed*. It was true on every client, for the same reason on each — the
+verdict was a footnote next to the outcome it described:
+
+- **Android / iOS** dropped straight back to the home screen and set `status =
+  "connection failed"`, which renders as one line of small text *below* the saved
+  hosts. A refused connection (wrong PIN, nothing listening) returns in
+  milliseconds, so the whole attempt flashed past in a frame or two and the page
+  simply looked like nothing had happened.
+- **The browser client** was worse: it logged the error into the session log and
+  then `disconnect()` returned to the connect view, taking the log with it. The
+  only account of the failure was destroyed by the transition that followed it.
+
+**What shipped:** one full-screen "connection status" surface per client, telling
+the whole story of an attempt — **Connecting…** (a spinner; the logo breathes on
+the phones) → **Connected** (a green tick, held ~1.1 s, then the mode's own UI —
+the clicker's buttons, the trackpad, the stream) *or* **Connection failed** (a red
+cross, what to check, and **Try again** / **Back to home**, which stays put until
+the user picks).
+
+- ⚠️ **The minimum on the spinner (1.2 s) is load-bearing, not decoration.** It is
+  what makes a *fast* failure visible at all; without it the connecting screen and
+  the verdict both flash past. Both timings are named constants at the top of each
+  file (`MIN_CONNECTING_MS` / `minConnectingSeconds`, `CONNECTED_HOLD_MS` /
+  `connectedHoldSeconds`).
+- **"Connected" is an overlay, not a stage.** The mode's UI is composed
+  underneath it (Compose `Box`, SwiftUI `ZStack`, a fixed-position div on the web)
+  so a stream starts decoding on its first keyframe rather than 1.1 s late and
+  mid-GOP. On the phones the overlay is a `Surface` / an opaque background
+  precisely so it also swallows touches meant for the live UI beneath.
+- **Retry repeats the same attempt** (same addr, mode, PIN, and remembered-mode
+  flag) — no re-scan, no re-pick. Android/iOS keep `lastRememberMode` for it.
+- **Files:** `apps/android/.../MainActivity.kt` (`ConnectPhase` replaces the old
+  `connecting` boolean; `ConnectingScreen` → `ConnectionStatusScreen` +
+  `StatusBadge`), `apps/ios/ScreenExtender/ContentView.swift` (the same shape),
+  `apps/web/index.html` + `apps/web/src/client.js` (`#conn-overlay` and the
+  `connBegin`/`connSucceed`/`connFail` trio).
+- **Web extra:** a socket that opens and then closes seconds later is how a wrong
+  PIN ends, so a close while the overlay is still narrating the attempt is
+  reported as a failure ("…closed the connection — the PIN is the usual reason")
+  rather than as a session that quietly ended. A close *after* the overlay has
+  gone is still just the end of a session.
+
+**Verified:** the browser client was driven end to end in headless Chromium
+(Playwright) against a stub of the WASM shim — failure (nothing listening),
+Cancel, retry, a socket that opens then closes, success, and a normal Disconnect
+all land on the right screen and leave the page in the right state. **Android and
+iOS are reviewed-not-compiled**: this container has no Android SDK (dl.google.com
+is blocked by the egress proxy) and no Mac/Xcode, and CI builds neither app. Both
+need `./gradlew assembleDebug` / an Xcode build before release.
+
 ## Update — 2026-08-28 (the Linux second screen, and the X server that could test it)
 
 **Stage 2c: the phone is a second screen on Linux, not just a mirror.** That was

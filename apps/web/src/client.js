@@ -48,6 +48,93 @@ function log(msg, cls = "") {
 
 const status = (msg, cls = "") => { const el = $("connect-status"); el.textContent = msg; el.className = cls; };
 
+// ---- connection feedback (the full-screen overlay) --------------------------
+// One screen tells the whole story of an attempt: a spinner while it tries, then
+// a tick ("Connected", held for a beat before the session shows through) or a
+// cross ("Connection failed", which stays until the user retries or goes home).
+//
+// ⚠️ The minimum on the spinner is deliberate. A refused connection comes back in
+// milliseconds, so without it the attempt flashed past in a frame or two and the
+// page was simply back at the start with nothing to read — the failure was easy
+// to miss entirely, which is what this exists to fix.
+const MIN_CONNECTING_MS = 1200;
+const CONNECTED_HOLD_MS = 1100;
+
+/// Bumped per attempt. Every transition passes back the id it started with, so a
+/// socket callback from a cancelled or superseded attempt can't repaint a newer
+/// one (the same trick the phone clients use for a late connect result).
+let connAttempt = 0;
+let connStartedAt = 0;
+let connPhase = "idle";
+let onConnCancel = null;
+let onConnRetry = null;
+
+/// Paint the overlay for one phase. `actions` names the buttons to offer.
+function connPaint(phase, { title, sub, hint = "", actions = [] }) {
+  connPhase = phase;
+  const mark = $("conn-mark");
+  mark.className = phase === "connected" ? "ok" : phase === "failed" ? "bad" : "busy";
+  mark.textContent = phase === "connected" ? "✓" : phase === "failed" ? "✕" : "";
+  $("conn-title").textContent = title;
+  $("conn-sub").textContent = sub ?? "";
+  $("conn-hint").textContent = hint;
+  $("conn-hint").hidden = !hint;
+  for (const id of ["conn-retry", "conn-cancel", "conn-home"]) {
+    $(id).hidden = !actions.includes(id);
+  }
+  $("conn-overlay").hidden = false;
+}
+
+function connHide() {
+  connPhase = "idle";
+  $("conn-overlay").hidden = true;
+}
+
+/// True while the overlay is still narrating attempt `id` — i.e. a verdict for it
+/// is still worth showing (as opposed to a session that got going and later ended).
+const connBusy = (id) => id === connAttempt && (connPhase === "connecting" || connPhase === "connected");
+
+/// Start narrating an attempt. `label` is the host being dialled; `onCancel`
+/// backs out of one that's taking too long instead of waiting out the timeout.
+function connBegin(label, onCancel) {
+  connAttempt += 1;
+  connStartedAt = Date.now();
+  onConnCancel = onCancel;
+  onConnRetry = null;
+  connPaint("connecting", { title: "Connecting…", sub: label, actions: ["conn-cancel"] });
+  return connAttempt;
+}
+
+/// Run `fn` once the spinner has had its minimum beat, and only if `id` is still
+/// the attempt on screen.
+function connSettle(id, fn) {
+  if (id !== connAttempt) return;
+  const wait = Math.max(0, MIN_CONNECTING_MS - (Date.now() - connStartedAt));
+  setTimeout(() => { if (id === connAttempt) fn(); }, wait);
+}
+
+function connSucceed(id, sub) {
+  connSettle(id, () => {
+    connPaint("connected", { title: "Connected", sub });
+    // Held, not permanent: the session is already live underneath.
+    setTimeout(() => {
+      if (id === connAttempt && connPhase === "connected") connHide();
+    }, CONNECTED_HOLD_MS);
+  });
+}
+
+function connFail(id, sub, onRetry) {
+  connSettle(id, () => {
+    onConnRetry = onRetry;
+    connPaint("failed", {
+      title: "Connection failed",
+      sub,
+      hint: "Check that the host app is running and showing its code, that the PIN matches, and that both devices can reach each other.",
+      actions: ["conn-retry", "conn-home"],
+    });
+  });
+}
+
 // ---- connect screen --------------------------------------------------------
 
 function renderModes() {
@@ -156,6 +243,10 @@ async function connect(addr, mode, targetHost = null) {
   activeAddr = targetHost ?? addr;
 
   document.body.classList.add("in-session");
+  const attemptId = connBegin(targetHost ?? addr, () => { connHide(); disconnect(); });
+  // The socket opening is what counts as connected; a close before that (or in
+  // the moments after, which is how a wrong PIN ends) is a failed attempt.
+  let opened = false;
   $("host-label").textContent = `Connecting to ${targetHost ?? addr}…`;
   $("btn-lock").hidden = !(mode.video && mode.input);
   $("video-hint").style.display = mode.video ? "none" : "flex";
@@ -169,6 +260,7 @@ async function connect(addr, mode, targetHost = null) {
   input = new InputController(transport, renderer, canvas);
 
   transport.onOpen = () => {
+    opened = true;
     // A Nearby target isn't saved: saved rows reconnect by treating their addr
     // as the bridge address, which a retargeted ip:port is not. Nearby hosts
     // reappear live from discovery instead.
@@ -177,8 +269,25 @@ async function connect(addr, mode, targetHost = null) {
     $("host-label").textContent = targetHost ?? addr;
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
     logEncryption(transport);
+    connSucceed(attemptId, `${mode.label} — ${targetHost ?? addr}`);
   };
-  transport.onClose = () => { log("host disconnected", "dim"); disconnect(); };
+  transport.onClose = () => {
+    log("host disconnected", "dim");
+    // Tear down either way; the overlay decides whether this was an attempt that
+    // failed (say so, over the connect screen) or a session that ended (nothing
+    // to report — the user asked for it, or the host went away).
+    const failed = connBusy(attemptId);
+    disconnect();
+    if (failed) {
+      connFail(
+        attemptId,
+        opened
+          ? `${targetHost ?? addr} closed the connection — the PIN is the usual reason.`
+          : `Couldn't reach ${targetHost ?? addr}.`,
+        () => connect(addr, mode, targetHost),
+      );
+    }
+  };
   transport.onError = (e) => log(`error: ${e?.message ?? e} (is the bridge running?)`, "err");
   transport.onMessage = onMessage;
   transport.connect(pinValue());
@@ -196,6 +305,8 @@ async function connectRoom(code, mode) {
   activeAddr = `remote:${room}`;
 
   document.body.classList.add("in-session");
+  const attemptId = connBegin(`Remote ${room}`, () => { connHide(); disconnect(); });
+  let paired = false;
   $("host-label").textContent = `Remote ${room} — connecting…`;
   $("btn-lock").hidden = !(mode.video && mode.input);
   $("video-hint").style.display = mode.video ? "none" : "flex";
@@ -210,15 +321,39 @@ async function connectRoom(code, mode) {
   });
   input = new InputController(transport, renderer, canvas);
 
-  transport.onWaiting = () => { $("host-label").textContent = `Remote ${room} — waiting for the host…`; log("in the room — waiting for the host to come online", "dim"); };
+  transport.onWaiting = () => {
+    $("host-label").textContent = `Remote ${room} — waiting for the host…`;
+    log("in the room — waiting for the host to come online", "dim");
+    // Still connecting, but say what it is waiting for rather than spinning mute.
+    if (connBusy(attemptId)) {
+      connPaint("connecting", {
+        title: "Connecting…",
+        sub: `Remote ${room} — waiting for the host to come online`,
+        actions: ["conn-cancel"],
+      });
+    }
+  };
   transport.onPaired = () => {
+    paired = true;
     sendHelloAndAttach(mode);
     $("host-label").textContent = `Remote ${room}`;
     log(`paired over the cloud relay — ${mode.label} (may be slower than LAN)`, "ok");
     logEncryption(transport);
+    connSucceed(attemptId, `${mode.label} — remote ${room}`);
   };
   transport.onPeerLeft = () => { log("host left the room", "dim"); disconnect(); };
-  transport.onClose = () => { log("relay closed", "dim"); disconnect(); };
+  transport.onClose = () => {
+    log("relay closed", "dim");
+    const failed = connBusy(attemptId);
+    disconnect();
+    if (failed) {
+      connFail(
+        attemptId,
+        paired ? `The remote host closed the connection.` : `Couldn't join room ${room}.`,
+        () => connectRoom(room, mode),
+      );
+    }
+  };
   transport.onError = (e) => log(`relay error: ${e?.message ?? e}`, "err");
   transport.onMessage = onMessage;
   transport.connect(pinValue());
@@ -283,6 +418,10 @@ function onMessage(m) {
 }
 
 function disconnect() {
+  // A session that ends while its "Connected" tick is still up (the host went
+  // away in that first second) has nothing left to confirm — drop the overlay.
+  // A failure repaints it straight after, so this never eats a verdict.
+  if (connPhase === "connected") connHide();
   input?.detach();
   decoder?.close();
   transport?.close();
@@ -394,6 +533,13 @@ export function boot() {
   const remoteParam = new URLSearchParams(location.search).get("remote")
     ?? new URLSearchParams(location.hash.slice(1)).get("remote");
   if (remoteParam) $("room-code").value = remoteParam.toUpperCase();
+
+  // The connection overlay's three buttons. Cancel/Retry act on whatever the
+  // live attempt registered; "Back to home" just uncovers the connect screen,
+  // which a failed attempt has already been torn down to.
+  $("conn-cancel").addEventListener("click", () => onConnCancel?.());
+  $("conn-retry").addEventListener("click", () => { connHide(); onConnRetry?.(); });
+  $("conn-home").addEventListener("click", connHide);
 
   $("btn-disconnect").addEventListener("click", disconnect);
   $("btn-fullscreen").addEventListener("click", () => {
