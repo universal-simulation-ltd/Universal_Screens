@@ -673,6 +673,7 @@ fun ConnectScreen(
     var showHidden by remember { mutableStateOf(false) }
     var joinStatus by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     // "Cast to a browser": inline manual code entry under Advanced (the QR /
     // deep-link path skips this and casts straight away).
     var castDraft by remember { mutableStateOf("") }
@@ -859,7 +860,14 @@ fun ConnectScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            // About this app — last row of Advanced, the same place it sits in
+            // every other app in the suite (and in the desktop hosts' Actions
+            // menu). See AboutApp.kt for why the content is shared and the
+            // markup is not.
+            TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
         }
+        if (showAbout) AboutAppDialog(onDismiss = { showAbout = false })
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
 

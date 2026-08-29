@@ -112,6 +112,7 @@ struct ConnectView: View {
     @State private var saved: [SavedConnection] = ConnectionStore.load()
     @State private var showHidden = false
     @State private var showAdvanced = false
+    @State private var showAbout = false
     @State private var showScanner = false
     // "Cast to a browser": inline manual code entry under Advanced (the QR /
     // deep-link path skips this and casts straight away).
@@ -436,10 +437,25 @@ struct ConnectView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+
+                    // About this app — last row of Advanced, the same place it
+                    // sits in every other app in the suite (and in the desktop
+                    // hosts' Actions menu). See AboutView.swift for why the
+                    // content is shared and the markup is not.
+                    Divider()
+                    Button {
+                        showAbout = true
+                    } label: {
+                        Label("About this app", systemImage: "info.circle")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
                 }
                 .padding(14)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
+        .sheet(isPresented: $showAbout) { AboutView() }
     }
 }
