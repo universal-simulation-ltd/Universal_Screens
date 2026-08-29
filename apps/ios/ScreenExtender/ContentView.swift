@@ -405,7 +405,7 @@ struct ConnectionStatusScreen: View {
             case .connected:
                 badge("checkmark", .green)
             case .failed:
-                badge("xmark", .red)
+                FailureMark()
             case .idle:
                 EmptyView()
             }
@@ -430,7 +430,7 @@ struct ConnectionStatusScreen: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 Spacer().frame(height: 28)
-                Button("Try again", action: onRetry)
+                Button("Retry", action: onRetry)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 Spacer().frame(height: 10)
@@ -457,8 +457,9 @@ struct ConnectionStatusScreen: View {
         }
     }
 
-    /// The round tick / cross a verdict leads with; it pops in so the result reads
-    /// as something that just happened rather than a screen that was always there.
+    /// The round tick a success leads with; it pops in so the result reads as
+    /// something that just happened rather than a screen that was always there.
+    /// (A failure gets `FailureMark` instead — it has a sequence to play.)
     private func badge(_ symbol: String, _ tint: Color) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 40, weight: .bold))
@@ -468,5 +469,82 @@ struct ConnectionStatusScreen: View {
             .scaleEffect(popped ? 1 : 0.5)
             .animation(.spring(response: 0.35, dampingFraction: 0.55), value: popped)
             .onAppear { popped = true }
+    }
+}
+
+/// The two diagonals of a cross, as one path so `trim` draws them in sequence —
+/// first stroke, then second — rather than both creeping out together.
+private struct CrossStrokes: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let i = rect.width * 0.30
+        p.move(to: CGPoint(x: rect.minX + i, y: rect.minY + i))
+        p.addLine(to: CGPoint(x: rect.maxX - i, y: rect.maxY - i))
+        p.move(to: CGPoint(x: rect.maxX - i, y: rect.minY + i))
+        p.addLine(to: CGPoint(x: rect.minX + i, y: rect.maxY - i))
+        return p
+    }
+}
+
+/// A failure is PLAYED, not just labelled: the badge lands and shakes its head,
+/// the cross draws itself stroke by stroke, and one ring leaves the badge and
+/// dies — a signal sent out that nothing answered.
+///
+/// Reduce Motion gets the same final picture with nothing moving: the cross fully
+/// drawn, no shake, no ring. That is a setting about vestibular comfort, so the
+/// answer is to arrive instantly, not to play a gentler version.
+private struct FailureMark: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drawn: CGFloat = 0
+    @State private var ring: CGFloat = 0
+    @State private var popped = false
+
+    var body: some View {
+        ZStack {
+            Circle().fill(.red)
+            Circle()
+                .stroke(.red.opacity(0.6), lineWidth: 2)
+                .scaleEffect(1 + ring * 1.1)
+                .opacity(1 - ring)
+                .opacity(reduceMotion ? 0 : 1)
+            CrossStrokes()
+                .trim(from: 0, to: drawn)
+                .stroke(.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .padding(20)
+        }
+        .frame(width: 88, height: 88)
+        .scaleEffect(popped ? 1 : 0.5)
+        .modifier(HeadShake(active: !reduceMotion))
+        .onAppear {
+            guard !reduceMotion else { drawn = 1; popped = true; return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) { popped = true }
+            withAnimation(.easeOut(duration: 0.36).delay(0.2)) { drawn = 1 }
+            withAnimation(.easeOut(duration: 0.9).delay(0.28)) { ring = 1 }
+        }
+    }
+}
+
+/// The "no" gesture: two decaying sideways swings once the badge has landed.
+/// A keyframe track rather than chained `withAnimation` calls, because the pop
+/// and the shake would otherwise be two animations contending for `offset`.
+private struct HeadShake: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.keyframeAnimator(initialValue: 0.0, repeating: false) { view, x in
+                view.offset(x: x)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(0, duration: 0.32)
+                    CubicKeyframe(-6, duration: 0.09)
+                    CubicKeyframe(6, duration: 0.09)
+                    CubicKeyframe(-4, duration: 0.09)
+                    CubicKeyframe(0, duration: 0.09)
+                }
+            }
+        } else {
+            content
+        }
     }
 }

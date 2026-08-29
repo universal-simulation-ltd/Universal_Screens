@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.graphics.SurfaceTexture
 import android.view.HapticFeedbackConstants
 import android.view.Surface
@@ -12,6 +13,7 @@ import android.view.TextureView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -20,6 +22,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -74,6 +77,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.changedToDown
@@ -90,6 +95,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -573,11 +579,7 @@ fun ConnectionStatusScreen(
                     color = MaterialTheme.colorScheme.tertiary,
                     contentColor = MaterialTheme.colorScheme.onTertiary,
                 )
-                ConnectPhase.FAILED -> StatusBadge(
-                    glyph = "✕",
-                    color = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                )
+                ConnectPhase.FAILED -> FailureMark()
                 ConnectPhase.IDLE -> {}
             }
 
@@ -623,7 +625,7 @@ fun ConnectionStatusScreen(
             when (phase) {
                 ConnectPhase.CONNECTING -> OutlinedButton(onClick = onCancel) { Text("Cancel") }
                 ConnectPhase.FAILED -> {
-                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
                     Spacer(Modifier.height(10.dp))
                     OutlinedButton(onClick = onHome, modifier = Modifier.fillMaxWidth()) {
                         Text("Back to home")
@@ -635,8 +637,9 @@ fun ConnectionStatusScreen(
     }
 }
 
-/** The round tick / cross a result leads with; it pops in so the verdict registers
- *  as something that just happened rather than a screen that was always there. */
+/** The round tick a success leads with; it pops in so the verdict registers as
+ *  something that just happened rather than a screen that was always there.
+ *  (A failure gets [FailureMark] instead — it has a sequence to play.) */
 @Composable
 private fun StatusBadge(glyph: String, color: Color, contentColor: Color) {
     var shown by remember { mutableStateOf(false) }
@@ -655,6 +658,86 @@ private fun StatusBadge(glyph: String, color: Color, contentColor: Color) {
         contentAlignment = Alignment.Center,
     ) {
         Text(glyph, fontSize = 44.sp, color = contentColor)
+    }
+}
+
+/**
+ * A failure is PLAYED, not just labelled: the badge lands and shakes its head,
+ * the cross draws itself stroke by stroke, and one ring leaves the badge and
+ * dies — a signal sent out that nothing answered.
+ *
+ * With animations switched off system-wide the same final picture arrives at
+ * once: cross fully drawn, no shake, no ring. Compose has no "reduce motion"
+ * flag, so the signal is `ANIMATOR_DURATION_SCALE == 0` — what the developer
+ * options toggle and the accessibility "remove animations" setting both write.
+ */
+@Composable
+private fun FailureMark() {
+    val context = LocalContext.current
+    val animate = remember {
+        Settings.Global.getFloat(
+            context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+        ) != 0f
+    }
+    val error = MaterialTheme.colorScheme.error
+    val onError = MaterialTheme.colorScheme.onError
+
+    // One Animatable per strand of the sequence, run from a single effect so the
+    // timings read in order. `drawn` spans BOTH diagonals (0-1 first, 1-2 second),
+    // which is what makes them draw one after the other rather than together.
+    val pop = remember { Animatable(if (animate) 0.5f else 1f) }
+    val drawn = remember { Animatable(if (animate) 0f else 2f) }
+    val ring = remember { Animatable(if (animate) 0f else 1f) }
+    val shake = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        if (!animate) return@LaunchedEffect
+        launch { pop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy)) }
+        launch {
+            delay(200)
+            drawn.animateTo(2f, tween(360))
+        }
+        launch {
+            delay(280)
+            ring.animateTo(1f, tween(900))
+        }
+        launch {
+            delay(320)
+            // The "no" gesture: two decaying swings, in device-independent px so
+            // it is the same throw on every screen density.
+            for (x in listOf(-6f, 6f, -4f, 0f)) shake.animateTo(x, tween(90))
+        }
+    }
+
+    Canvas(
+        modifier = Modifier
+            .size(88.dp)
+            .graphicsLayer {
+                scaleX = pop.value
+                scaleY = pop.value
+                translationX = shake.value * density
+            },
+    ) {
+        val r = size.minDimension / 2f
+        drawCircle(color = error, radius = r)
+        if (ring.value < 1f) {
+            drawCircle(
+                color = error.copy(alpha = 0.6f * (1f - ring.value)),
+                radius = r * (1f + ring.value * 1.1f),
+                style = Stroke(width = 2.dp.toPx()),
+            )
+        }
+        // Each diagonal runs corner to corner of the inset square; `drawn` picks
+        // how much of each is on screen.
+        val i = size.width * 0.30f
+        val legWidth = 6.dp.toPx()
+        fun leg(from: Offset, to: Offset, t: Float) {
+            if (t <= 0f) return
+            val end = Offset(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
+            drawLine(onError, from, end, strokeWidth = legWidth, cap = StrokeCap.Round)
+        }
+        leg(Offset(i, i), Offset(size.width - i, size.height - i), drawn.value.coerceIn(0f, 1f))
+        leg(Offset(size.width - i, i), Offset(i, size.height - i), (drawn.value - 1f).coerceIn(0f, 1f))
     }
 }
 

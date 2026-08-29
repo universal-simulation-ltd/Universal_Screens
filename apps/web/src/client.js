@@ -74,7 +74,16 @@ function connPaint(phase, { title, sub, hint = "", actions = [] }) {
   connPhase = phase;
   const mark = $("conn-mark");
   mark.className = phase === "connected" ? "ok" : phase === "failed" ? "bad" : "busy";
-  mark.textContent = phase === "connected" ? "✓" : phase === "failed" ? "✕" : "";
+  // The cross is drawn rather than typed: a glyph can't animate stroke by stroke.
+  // Rewriting the content each paint is also what restarts the animation, so a
+  // retry that fails again plays the sequence a second time.
+  if (phase === "failed") {
+    mark.innerHTML =
+      '<svg class="conn-x" viewBox="0 0 48 48" aria-hidden="true">' +
+      '<line x1="16" y1="16" x2="32" y2="32" /><line x1="32" y1="16" x2="16" y2="32" /></svg>';
+  } else {
+    mark.textContent = phase === "connected" ? "✓" : "";
+  }
   $("conn-title").textContent = title;
   $("conn-sub").textContent = sub ?? "";
   $("conn-hint").textContent = hint;

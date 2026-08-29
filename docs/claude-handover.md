@@ -4,6 +4,56 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-29 (a failed connection now plays a failure, on all three clients)
+
+**Shipped.** James asked for the failure to be shown "full screen with an
+animation that connection failed | Retry or Cancel". The full-screen surface
+already existed (`fa83d51`); what was missing was the animation — a 0.35s scale
+pop on a static glyph, which reads as an icon appearing, not as something
+failing.
+
+**The sequence, identical in intent on web, iOS and Android:** the badge lands
+and **shakes its head**, the **cross draws itself stroke by stroke**, and one
+**ring leaves the badge and dies** — a signal sent out that nothing answered.
+About 0.9s, one-shot; the screen then holds until the user picks.
+
+**Labels:** "Try again" → **Retry**. **"Back to home" stays** — James's call when
+asked, because "Cancel" is already the *connecting* phase's button (abandon the
+attempt in flight) and reusing it would give one word two jobs on one surface.
+
+⚠️ **Found while verifying: `prefers-reduced-motion` has NEVER worked on this
+overlay.** The rule was `#conn-mark { animation: none }` inside the media query,
+but the states it needed to override are `#conn-mark.ok` / `.bad` — id **plus**
+class, which outranks id alone, so the pop always played. It has been dead since
+the overlay shipped and no one could have seen it by reading the file; it turned
+up only because the reduced-motion run was *measured* and still showed a ±6px
+shake. Match the specificity of what you are overriding. **The spinner is
+deliberately left spinning** under Reduce Motion — it is the only signal the
+attempt is still alive, and freezing it reads as a hang.
+
+**Verified by measurement, not by eye** (`scripts/`-less, harness in the session
+scratchpad): headless Chromium drives the *real* connect path — address
+`127.0.0.1:9`, nothing listening, so the socket is genuinely refused — while a
+`requestAnimationFrame` loop samples the badge transform, both strokes'
+`stroke-dashoffset`, and the ring pseudo-element every frame. 13 assertions, all
+passing: cross starts hidden and finishes drawn, draws gradually (25 distinct
+offsets, not one step), badge travels both ways past ±3px, pops in from below
+0.7 scale, ring expands past 1.6× and fades to 0, everything settles to x=0
+scale=1 — and under `reducedMotion: "reduce"` no shake, cross already drawn, ring
+`display:none`.
+
+⚠️ **The first run reported "badge pops in from small — FAIL", and it was the
+harness, not the code.** The sampler started after `waitForSelector`, by which
+time the ~330ms pop was over. Start the watcher *before* the gesture. A short
+animation is invisible to anything sampled after the fact.
+
+**Build state:** iOS built and **installed on iPhone JPM** (launch refused — the
+phone was locked; open it by hand). Android **compiles** (`assembleDebug`, APK
+produced) but **no Android device is attached**, so its animation is reviewed and
+type-checked, not seen. ⚠️ Note both SDKs are present on this Mac — Xcode 26.6
+and `~/Library/Android/sdk` with a working `gradlew` — despite several handover
+entries claiming otherwise.
+
 ## Update — 2026-08-29 (iOS verified on device: the About screen and the icon)
 
 **No code change — this closes an open question.** The iOS client was rebuilt

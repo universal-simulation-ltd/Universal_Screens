@@ -225,12 +225,43 @@
   #conn-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1.5rem; background: var(--bg); }
   #conn-overlay[hidden] { display: none; }
   .conn-card { width: 100%; max-width: 380px; text-align: center; }
-  #conn-mark { width: 88px; height: 88px; margin: 0 auto 1.2rem; display: grid; place-items: center; border-radius: 50%; font-size: 2.5rem; line-height: 1; color: #fff; }
+  #conn-mark { position: relative; width: 88px; height: 88px; margin: 0 auto 1.2rem; display: grid; place-items: center; border-radius: 50%; font-size: 2.5rem; line-height: 1; color: #fff; }
   #conn-mark.busy { border: 5px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent); animation: conn-spin 1s linear infinite; }
   #conn-mark.ok  { background: #16a34a; animation: conn-pop .35s cubic-bezier(.2, 1.4, .4, 1); }
-  #conn-mark.bad { background: #dc2626; animation: conn-pop .35s cubic-bezier(.2, 1.4, .4, 1); }
+  /* A failure is PLAYED, not just labelled: the badge lands and shakes its head,
+     the cross draws itself stroke by stroke, and one ring leaves the badge and
+     dies — a signal sent out that nothing answered. Pop and shake share the one
+     `transform`, so they are one keyframe timeline rather than two animations
+     fighting over the property. */
+  #conn-mark.bad { background: #dc2626; animation: conn-bad .85s cubic-bezier(.2, 1.4, .4, 1) both; }
+  #conn-mark.bad::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid #dc2626; animation: conn-ping .9s .28s ease-out both;
+  }
+  .conn-x { width: 48px; height: 48px; overflow: visible; }
+  /* 22.7 is the length of each 16×16 diagonal (√512), rounded up so the dash
+     fully hides the line before it is drawn. */
+  .conn-x line {
+    stroke: #fff; stroke-width: 5; stroke-linecap: round;
+    stroke-dasharray: 23; stroke-dashoffset: 23;
+    animation: conn-draw .2s ease-out forwards;
+  }
+  .conn-x line:nth-child(1) { animation-delay: .2s; }
+  .conn-x line:nth-child(2) { animation-delay: .36s; }
   @keyframes conn-spin { to { transform: rotate(360deg); } }
   @keyframes conn-pop { from { transform: scale(.5); } to { transform: scale(1); } }
+  @keyframes conn-draw { to { stroke-dashoffset: 0; } }
+  @keyframes conn-ping { from { transform: scale(1); opacity: .6; } to { transform: scale(2.1); opacity: 0; } }
+  @keyframes conn-bad {
+    0%   { transform: scale(.5)  translateX(0); }
+    24%  { transform: scale(1.06) translateX(0); }
+    38%  { transform: scale(1)   translateX(0); }
+    52%  { transform: scale(1)   translateX(-6px); }
+    66%  { transform: scale(1)   translateX(6px); }
+    80%  { transform: scale(1)   translateX(-4px); }
+    92%  { transform: scale(1)   translateX(3px); }
+    100% { transform: scale(1)   translateX(0); }
+  }
   #conn-title { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
   #conn-sub { margin: .35rem 0 0; color: var(--muted); font-size: .85rem; }
   #conn-hint { margin: .9rem 0 0; color: var(--muted); font-size: .85rem; }
@@ -238,7 +269,20 @@
   .conn-btn { font: inherit; padding: .62rem 1rem; border-radius: .6rem; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
   .conn-btn:hover { border-color: var(--accent); }
   .conn-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  @media (prefers-reduced-motion: reduce) { #conn-mark { animation: none; } }
+  /* ⚠️ Selector, not shorthand: this block used to read `#conn-mark { animation:
+     none }`, which NEVER applied — `#conn-mark.ok` / `.bad` carry a class as well
+     as the id, so they outrank it and kept their animation. Reduce Motion has
+     been ignored on this overlay for as long as the overlay has existed; it was
+     only caught by measuring the reduced-motion run rather than trusting the
+     rule. Match the specificity of what is being overridden. */
+  @media (prefers-reduced-motion: reduce) {
+    /* The spinner keeps turning: it is the only thing telling the user the
+       attempt is still alive, and stopping it leaves a frozen ring that reads as
+       a hang. Reduce Motion is about decorative movement, and this isn't. */
+    #conn-mark.ok, #conn-mark.bad { animation: none; }
+    #conn-mark.bad::after { display: none; }
+    .conn-x line { animation: none; stroke-dashoffset: 0; }
+  }
 
   #log { font: 11px/1.4 ui-monospace, monospace; color: #cfcfd6; background: #000; max-height: 6.5rem; overflow: auto; padding: .35rem .6rem; border-top: 1px solid #222; white-space: pre-wrap; }
   .ok { color: #4ade80; } .err { color: #f87171; } .dim { opacity: .65; }
@@ -378,7 +422,7 @@
       <p id="conn-sub"></p>
       <p id="conn-hint" hidden></p>
       <div id="conn-actions">
-        <button type="button" id="conn-retry" class="conn-btn primary" hidden>Try again</button>
+        <button type="button" id="conn-retry" class="conn-btn primary" hidden>Retry</button>
         <button type="button" id="conn-cancel" class="conn-btn" hidden>Cancel</button>
         <button type="button" id="conn-home" class="conn-btn" hidden>Back to home</button>
       </div>
