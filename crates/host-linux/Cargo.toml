@@ -17,6 +17,11 @@ extender-transport.workspace = true
 # Shared LAN peer discovery (UDP multicast beacon/listener + mDNS), wrapped by the
 # same thin egui adapter the other two hosts use.
 extender-discovery.workspace = true
+# ⚠️ NOT the shared window chrome — this host keeps its own lean layout on
+# purpose (see the host-ui crate docs). It takes ONE thing: `about_panel`, so
+# "About this app" cannot say different things on Linux and on Windows. That is
+# the whole reason a claim about the product lives in a shared crate.
+extender-host-ui.workspace = true
 serde = { version = "1", features = ["derive"] }
 # QR rendering + logo compositing (the connect / get-the-app codes).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

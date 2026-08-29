@@ -18,10 +18,15 @@
 //! compiled — hoisting it here would silently make every host's About box
 //! report *host-ui's* version instead of its own. It stays defined in each host.
 //!
-//! ⚠️ The Linux host is **not** a consumer. `host-linux/src/gui.rs` shares only
-//! ~28 lines with these two: it shipped a deliberately lean window rather than
-//! a third copy of this one. Wiring it in would mean growing it to match, which
-//! is the opposite of the point.
+//! ⚠️ The Linux host is **not** a consumer of the *chrome*. `host-linux/src/gui.rs`
+//! shares only ~28 lines with these two: it shipped a deliberately lean window
+//! rather than a third copy of this one. Wiring that in would mean growing it to
+//! match, which is the opposite of the point.
+//!
+//! It does take **one** thing, from 2026-08-29: [`about_panel`]. The distinction
+//! is worth holding onto — layout may differ per platform, but a *claim about
+//! the product* (where your screen goes, the licence, the version) must not, and
+//! three hand-written About boxes is exactly how it would end up doing so.
 
 use std::net::TcpListener;
 
@@ -214,6 +219,77 @@ pub fn style_navbar(ui: &mut egui::Ui, dark: bool) {
         v.bg_fill = tint;
         v.fg_stroke.color = hover;
     }
+}
+
+/// The repository behind every surface of this app.
+pub const REPO_URL: &str = "https://github.com/universal-simulation-ltd/Universal_Screens";
+/// Where "Report a problem" goes.
+pub const ISSUES_URL: &str = "https://github.com/universal-simulation-ltd/Universal_Screens/issues";
+/// Where "Contact us" goes.
+pub const SUPPORT_URL: &str = "https://unisim.co.uk/#contact";
+
+/// "About this app" — the same answer the web apps give, given here.
+///
+/// Every other app in the suite got this on 2026-08-29 as the SDK's
+/// `<AboutAppDialog>`, reached through an Advanced section of the Actions menu.
+/// Universal Screens cannot use that component — the SDK is React and this is
+/// egui — so the *content* is ported rather than the code: what the app does,
+/// what happens to your screen, that it is open source and where the code is,
+/// which build you are running, and who to contact.
+///
+/// ⚠️ **`version` is a parameter and must stay one.** See the crate note: the
+/// hosts' `APP_VERSION` is `env!("CARGO_PKG_VERSION")`, which resolves against
+/// the crate being compiled. Reading it in here would make every host report
+/// *host-ui's* version instead of its own.
+///
+/// ⚠️ **The privacy paragraph is deliberately not the suite's local-first
+/// line.** "Your screen never leaves this computer" would be a lie about an app
+/// whose entire purpose is putting your screen on another device. What is true,
+/// and what this says, is that it goes to the device you paired with and to
+/// nobody else — see `crates/transport/src/lib.rs` for the Noise tunnel that
+/// makes the PIN encryption rather than a gate.
+pub fn about_panel(ui: &mut egui::Ui, version: &str) {
+    ui.set_max_width(340.0);
+    ui.label(egui::RichText::new("Universal Screens").strong().size(15.0));
+    ui.small("Use a phone or another computer as a second screen, remote control or clicker");
+    ui.add_space(8.0);
+
+    about_heading(ui, "Your screen");
+    ui.label(
+        "It goes to the device you paired with, and to nobody else. The connection \
+         is encrypted end to end with your PIN as the key, so neither your network \
+         nor the relay behind a remote code can read what is on it.",
+    );
+    ui.small("Full detail, including what is NOT locked down, is under the 🔒 button.");
+    ui.add_space(8.0);
+
+    about_heading(ui, "Open source");
+    ui.label("Free and open source under the MIT licence — every line of it public.");
+    ui.horizontal(|ui| {
+        ui.hyperlink_to("View the source ↗", REPO_URL);
+        ui.hyperlink_to("Report a problem ↗", ISSUES_URL);
+    });
+    ui.add_space(8.0);
+
+    about_heading(ui, "Version");
+    ui.label(egui::RichText::new(format!("v{version}")).strong());
+    ui.hyperlink_to("What's new ↗", CHANGELOG_URL);
+    ui.add_space(8.0);
+
+    about_heading(ui, "Support");
+    ui.label("Questions, or something not working as it should?");
+    ui.hyperlink_to("Contact us ↗", SUPPORT_URL);
+}
+
+/// The small uppercase section label the About panel is built from — the same
+/// rhythm as the web dialog's headings.
+fn about_heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text.to_uppercase())
+            .size(10.5)
+            .strong()
+            .color(ui.visuals().weak_text_color()),
+    );
 }
 
 pub fn paint_brand_strip(ctx: &egui::Context) {

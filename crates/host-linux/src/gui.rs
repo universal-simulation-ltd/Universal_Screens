@@ -13,6 +13,13 @@
 //! don't: an up-front `/dev/uinput` permission check. Without it the first
 //! symptom of a missing udev rule is a phone that connects, says "connected",
 //! and moves no slides.
+//!
+//! ⚠️ **It now takes exactly ONE thing from `host-ui`: `about_panel`** (added
+//! 2026-08-29 with the suite-wide "About this app"). That is not the adoption
+//! described above and does not start it — the chrome is still this file's own.
+//! The panel is shared because it makes *claims about the product* (what
+//! happens to your screen, the licence, the version), and a claim that can
+//! drift between platforms is worse than a little duplication of layout.
 
 use std::net::{TcpListener, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use eframe::egui;
+
+use extender_host_ui::about_panel;
 
 use crate::inject::{self, UinputStatus};
 use crate::{capture, firewall, wifi, HostEvent};
@@ -204,6 +213,21 @@ impl eframe::App for HostApp {
                             self.dark_mode = Some(dark);
                         }
                         ui.label(egui::RichText::new(format!("v{APP_VERSION}")).weak());
+                        // Advanced ▸ About this app — the category every app in
+                        // the suite gained on 2026-08-29. This window has no
+                        // Actions menu to hang it off (it is deliberately lean;
+                        // see the host-ui crate docs), so it lives beside the
+                        // version, which is what a reader here is already
+                        // looking at. Same shared panel as the other two hosts.
+                        //
+                        // ⚠️ APP_VERSION is passed IN — see host-ui.
+                        ui.menu_button("⚙", |ui| {
+                            ui.menu_button("ℹ  About this app", |ui| {
+                                about_panel(ui, APP_VERSION);
+                            });
+                        })
+                        .response
+                        .on_hover_text("Advanced");
                     });
                 });
                 ui.label(

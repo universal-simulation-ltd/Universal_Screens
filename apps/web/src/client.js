@@ -364,6 +364,28 @@ export function boot() {
     l.hidden = !open;
     t.classList.toggle("open", open);
   });
+
+  // Advanced ▸ About this app. Every other app in the suite got this on
+  // 2026-08-29 through the SDK; this client cannot use that component (React),
+  // so the same category and the same content are built here — see index.html.
+  $("advanced-toggle").addEventListener("click", () => {
+    const t = $("advanced-toggle"), l = $("advanced-list");
+    const open = l.hidden;
+    l.hidden = !open;
+    t.classList.toggle("open", open);
+    t.setAttribute("aria-expanded", String(open));
+  });
+  const about = $("about-backdrop");
+  const closeAbout = () => about.classList.remove("open");
+  $("about-open").addEventListener("click", () => about.classList.add("open"));
+  $("about-close").addEventListener("click", closeAbout);
+  // Click-outside and Escape, the two ways every dialog in the suite closes.
+  // The listener is on the backdrop and checks the target, so a click INSIDE
+  // the card doesn't dismiss the thing you opened to read.
+  about.addEventListener("click", (e) => { if (e.target === about) closeAbout(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && about.classList.contains("open")) closeAbout();
+  });
   // Remote (across networks): connect by the host's room code, in Remote control.
   const roomConnect = () => connectRoom($("room-code").value, MODES[0]);
   $("room-connect").addEventListener("click", roomConnect);

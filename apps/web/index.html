@@ -151,6 +151,38 @@
   .footer { margin-top: 1.5rem; text-align: center; }
   .link-btn { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; text-decoration: underline; cursor: pointer; }
 
+  /* ---- Advanced ▸ About this app ----
+     Every other app in the suite got this on 2026-08-29 through the SDK's
+     <AdvancedMenu> / <AboutAppDialog>. This client cannot use them — the SDK is
+     React and this page is hand-written — so the CONTENT is ported and the
+     markup is local. Keep the two in step by what they SAY, not by how they
+     are built. */
+  #advanced-toggle { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .4rem; }
+  #advanced-toggle .chev { transition: transform .15s; }
+  #advanced-toggle.open .chev { transform: rotate(90deg); }
+  #advanced-list { margin-top: .35rem; }
+  #advanced-list button { background: none; border: none; color: var(--text); font: inherit; font-size: .84rem; cursor: pointer; padding: .35rem .5rem; border-radius: .4rem; }
+  #advanced-list button:hover { background: var(--card); }
+
+  #about-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+  #about-backdrop.open { display: flex; }
+  #about-card {
+    position: relative; width: 100%; max-width: 460px; max-height: calc(100vh - 2rem);
+    overflow-y: auto; background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 1.35rem 1.5rem;
+    text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  #about-card h2 { margin: 0; font-size: 1.05rem; letter-spacing: -.01em; }
+  #about-card .about-site { display: inline-block; margin-top: .15rem; font-size: .78rem; color: var(--muted); text-decoration: none; }
+  #about-card h3 { margin: 1.05rem 0 .3rem; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  #about-card p { margin: 0; font-size: .82rem; line-height: 1.5; }
+  #about-card a.about-link { display: inline-block; margin-top: .25rem; margin-right: 1rem; font-size: .82rem; font-weight: 600; color: var(--accent); text-decoration: none; }
+  #about-card a.about-link:hover { text-decoration: underline; }
+  #about-card .about-note { font-size: .74rem; color: var(--muted); margin-top: .3rem; }
+  #about-version { display: inline-block; padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--line); font-size: .74rem; font-weight: 700; color: var(--accent); }
+  #about-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; border: 0; border-radius: .5rem; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+  #about-close:hover { color: var(--text); }
+
   /* ---- session view (full screen) ---- */
   #session-view { display: none; width: 100%; height: 100%; flex-direction: column; background: #000; }
   body.in-session #connect-view { display: none; }
@@ -243,9 +275,55 @@
 
     <div id="connect-status"></div>
     <div class="footer">
-      <button id="selftest" class="link-btn">Run decode self-test</button>
+      <button type="button" id="selftest" class="link-btn">Run decode self-test</button>
+      <!-- Advanced — the suite's category, in the place the web apps put it.
+           More goes in here later; About is always its last row. -->
+      <div style="margin-top:.75rem">
+        <button type="button" id="advanced-toggle" aria-haspopup="true" aria-expanded="false">
+          <span class="chev" aria-hidden="true">▶</span> Advanced
+        </button>
+        <div id="advanced-list" hidden>
+          <button type="button" id="about-open">ℹ About this app</button>
+        </div>
+      </div>
     </div>
   </main>
+
+  <!-- About this app. The content mirrors the SDK's <AboutAppDialog>, which
+       every other app in the suite shows; see the CSS block above for why this
+       one is hand-written rather than imported. -->
+  <div id="about-backdrop" role="presentation">
+    <div id="about-card" role="dialog" aria-modal="true" aria-label="About Universal Screens">
+      <button type="button" id="about-close" aria-label="Close">✕</button>
+      <h2>Universal Screens</h2>
+      <a class="about-site" href="https://opensource.unisim.co.uk/screens" target="_blank" rel="noopener noreferrer">opensource.unisim.co.uk/screens</a>
+
+      <h3>What it does</h3>
+      <p>Use a phone or another computer as a second screen, remote control or presentation clicker.</p>
+
+      <h3>Your screen</h3>
+      <!-- ⚠️ NOT the suite's "never leaves this computer" line. This app exists
+           to put your screen on another device, so that claim would be a lie.
+           What is true is where it goes and who can read it on the way — see
+           crates/transport/src/lib.rs for the Noise tunnel that makes the PIN
+           encryption rather than just a gate. -->
+      <p>It goes to the device you paired with, and to nobody else. The connection is encrypted end to end with your PIN as the key, so neither your network nor the relay behind a remote code can read what is on it.</p>
+      <p class="about-note">Nothing is uploaded to UNI·SIM, and there is no account.</p>
+
+      <h3>Open source</h3>
+      <p>Free and open source under the MIT licence — every line of it public, for anyone to read or run themselves.</p>
+      <a class="about-link" href="https://github.com/universal-simulation-ltd/Universal_Screens" target="_blank" rel="noopener noreferrer">View the source ↗</a>
+      <a class="about-link" href="https://github.com/universal-simulation-ltd/Universal_Screens/issues" target="_blank" rel="noopener noreferrer">Report a problem ↗</a>
+
+      <h3>Version</h3>
+      <p><span id="about-version">v0.2.0</span></p>
+      <a class="about-link" href="https://changelog.unisim.co.uk" target="_blank" rel="noopener noreferrer">What's new ↗</a>
+
+      <h3>Support</h3>
+      <p>Questions, or something not working as it should?</p>
+      <a class="about-link" href="https://unisim.co.uk/#contact" target="_blank" rel="noopener noreferrer">Contact us ↗</a>
+    </div>
+  </div>
 
   <section id="session-view">
     <div class="topbar">

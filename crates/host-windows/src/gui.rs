@@ -26,7 +26,7 @@ use crate::{serve_loop, HostEvent};
 // crate's docs for what deliberately stays forked (HostApp, RecentConn,
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
-    connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
+    about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, style_navbar, DeviceKind,
     BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL, OPENSOURCE_ROOT, OPENSOURCE_URL, RECENT_MAX,
     SIBLING_APPS,
@@ -729,6 +729,20 @@ impl HostApp {
                     self.recent.lock().unwrap().clear();
                     ui.close_menu();
                 }
+                ui.separator();
+                // Advanced — the same category the web apps gained on
+                // 2026-08-29, in the same place in the same menu, holding the
+                // same "About this app". The panel itself is shared (host-ui),
+                // so the two hosts cannot drift apart on what the app claims.
+                //
+                // ⚠️ APP_VERSION is passed IN. It is env!("CARGO_PKG_VERSION"),
+                // which resolves against the crate being compiled — read inside
+                // host-ui it would report host-ui's version, not this host's.
+                ui.menu_button("⚙  Advanced", |ui| {
+                    ui.menu_button("ℹ  About this app", |ui| {
+                        about_panel(ui, APP_VERSION);
+                    });
+                });
             });
 
             // Right side: Profile (settings) and the UNI·SIM changelog mark.
