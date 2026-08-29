@@ -5,9 +5,12 @@ clicker**, mirroring the Android app. It drives the shared Rust core through the
 ABI in `crates/mobile-ffi` (`extender_ffi.h`).
 
 > **Status: builds, installs and runs on a real iPhone.** Last confirmed
-> **2026-08-24** on an iPhone 15 Pro — built, signed (team ZH9C5TS86A, automatic
-> provisioning), installed with `devicectl`, launched, and observed completing the
-> handshake against `extender-host-macos`:
+> **2026-08-29** on iPhone JPM (an iPhone 15 Pro) — built, installed and launched
+> with the flow below, and the owner confirmed the **Orange tile icon** and
+> **Advanced ▸ About this app** on the device. Before that, **2026-08-24** —
+> built, signed (team ZH9C5TS86A, automatic provisioning), installed with
+> `devicectl`, launched, and observed completing the handshake against
+> `extender-host-macos`:
 >
 > ```
 > client 192.168.4.39 hello: 1920x1080, mode ControlOnly, platform Ios, device "iPhone"
@@ -36,6 +39,16 @@ ABI in `crates/mobile-ffi` (`extender_ffi.h`).
 > ```
 >
 > If the second date is newer than the first, rebuild before you build the app.
+>
+> ⚠️ **Compare against those crates, not `crates/`.** The prose above says "a
+> `crates/` change" and that reading cries wolf: on **2026-08-29** the framework
+> (28 Aug) looked stale against a `crates/` log showing changes the same day, but
+> every commit in the gap was **host-only** — `host-linux`, `host-macos`,
+> `host-ui`, `host-windows` and icon assets, none of which the mobile framework
+> compiles from. The shared crates had last moved on 26 Aug, *before* the build,
+> so it was current and the app went to the phone in two minutes instead of a
+> Rust release build. The command is right; only widen it if `mobile-ffi` grows a
+> new dependency.
 
 ## What's here
 
@@ -126,10 +139,15 @@ carries `ios-arm64` and `ios-arm64-simulator`, with no x86_64 slice.
 
 ## Remaining work
 
-- **Compile + on-device test** — the whole Swift app is an unbuilt scaffold (no
-  Xcode/Mac here). The VideoToolbox path (`VideoDecoder` Annex-B → AVCC, format
-  description from parameter sets, sample-buffer enqueue) especially needs a real
-  build + a live stream to validate and tune (frame pacing, error recovery).
+- **The VideoToolbox path is the unverified part** — `VideoDecoder` (Annex-B →
+  AVCC, format description from parameter sets, sample-buffer enqueue) still
+  wants a live stream to validate and tune (frame pacing, error recovery). The
+  clicker path is exercised on device; the decode path is not.
+
+  ⚠️ This section used to open "the whole Swift app is an unbuilt scaffold (no
+  Xcode/Mac here)" — untrue since June 2026 and flatly contradicted by the status
+  block at the top of this file. Two contradicting claims in one README is worse
+  than either alone: it leaves the reader to guess which half rotted.
 
 The C ABI (`extender-mobile-ffi`) is at parity with `crates/android-jni`: the
 `Snapshot` / `HostInfo` / `WindowList` events and the `ScanDeck` / `ListWindows` /

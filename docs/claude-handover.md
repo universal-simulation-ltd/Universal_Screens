@@ -4,6 +4,31 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-29 (iOS verified on device: the About screen and the icon)
+
+**No code change — this closes an open question.** The iOS client was rebuilt
+from `159d80e` and installed on **iPhone JPM** (iPhone 15 Pro), and the owner
+confirmed on the device: the **Orange gradient tile** on the home screen, and
+**Advanced ▸ About this app**. Both had shipped unseen — the icon in `159d80e`,
+the About screen in `5e3a85e` — so "iOS About is UNVERIFIED, it needs a Mac" is
+now off the backlog. The full clicker path is exercised on device; the
+**VideoToolbox decode path is still the unverified part**.
+
+⚠️ **The README's xcframework staleness check cries wolf as written, and it cost
+me a moment's doubt before it cost nothing.** Its prose says to suspect the
+framework after "a `crates/` change", but the framework only compiles from the
+**shared** crates. Today `crates/` had moved hours earlier while the framework
+was from the previous day — and every commit in the gap was host-only
+(`host-linux`, `host-macos`, `host-ui`, `host-windows`, icon assets). The shared
+crates last moved 26 Aug, *before* the build, so nothing needed rebuilding and
+the app reached the phone in two minutes rather than a Rust release build. The
+README's own command is already scoped correctly (`crates/transport crates/core
+crates/protocol`); the surrounding prose was the bug and is now corrected there.
+
+Also worth keeping: `xcodegen generate` produced **no diff** against the
+committed pbxproj, which is the cheap way to confirm `159d80e`'s regeneration
+actually holds rather than assuming it.
+
 ## Update — 2026-08-29 (a connection attempt now says what happened, on all three clients)
 
 **The complaint:** after tapping Connect it was too hard to see that the attempt
