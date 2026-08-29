@@ -316,6 +316,10 @@
       <a class="about-link" href="https://github.com/universal-simulation-ltd/Universal_Screens/issues" target="_blank" rel="noopener noreferrer">Report a problem ↗</a>
 
       <h3>Version</h3>
+      <!-- ⚠️ Hand-kept in step with the workspace `version` in Cargo.toml. This
+           page has no build step to inject it (it is served as-is, by the host
+           and by serve.mjs), so a version bump has to touch this line too. The
+           hosts read theirs from env!("CARGO_PKG_VERSION") and cannot drift. -->
       <p><span id="about-version">v0.2.0</span></p>
       <a class="about-link" href="https://changelog.unisim.co.uk" target="_blank" rel="noopener noreferrer">What's new ↗</a>
 

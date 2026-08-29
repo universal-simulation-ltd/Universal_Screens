@@ -808,10 +808,21 @@ impl HostApp {
                         ui.label(egui::RichText::new("What's protected").strong());
                         ui.label("• A 4-digit pairing PIN is required to connect — scanning the QR fills it in automatically.");
                         ui.label("• The host only accepts connections while this window is open; close it to stop.");
+                        // ⚠️ CORRECTED 2026-08-29. These two bullets said
+                        // "Traffic is sent unencrypted over your local network
+                        // (no TLS)" and "the PIN is a basic gate, not
+                        // encryption". That was written 2026-06-17 and stopped
+                        // being true on 2026-08-26, when the Noise tunnel
+                        // landed (crates/transport) and made the PIN the
+                        // pre-shared key. The copy understated the app rather
+                        // than overstating it, which is why nothing caught it —
+                        // but it flatly contradicted the new About panel two
+                        // items along in the same menu.
+                        ui.label("• The connection is encrypted end to end, with your PIN as the key — nobody else on the network can read the screen or the keystrokes.");
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new("Not fully locked down").strong());
-                        ui.label("• Traffic is sent unencrypted over your local network (no TLS). Only use it on networks you trust.");
-                        ui.label("• The PIN is a basic gate, not encryption: anyone on the same network who has the PIN (or sees the QR) can control this PC.");
+                        ui.label("• The PIN is what the encryption is built on, so anyone who has it (or sees the QR) can connect and control this PC.");
+                        ui.label("• An old client that predates the encryption can still connect in plaintext; the host logs a warning when one does.");
                         ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no login or per-device approval.");
                         ui.label("• The host listens on all network interfaces on its port.");
                         ui.add_space(6.0);
