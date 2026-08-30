@@ -4,6 +4,82 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-30 (the About dialog keeps its head, and a tap no longer zooms iOS in)
+
+**Shipped.** Two changes to `apps/web/index.html`, both in the browser client's
+own CSS. Nothing in `src/`, `crates/` or the hosts was touched, and no test
+reads `index.html`.
+
+### 1. The About dialog was ONE scroll container, so its own title scrolled away
+
+`#about-card` was a single box — `max-height: calc(100vh - 2rem); overflow-y:
+auto` — with `#about-close` absolutely positioned *inside* it. So on any screen
+shorter than the content, scrolling to read the Support section carried the
+heading **and the ✕** off the top, and the only way to shut the dialog was to
+scroll back up first.
+
+It is now a flex column: `#about-head` (title + site link) is pinned, a new
+`#about-body` is the only scroller, and the ✕ stays put because the card no
+longer moves.
+
+**Measured, before and after, against the pre-change file served side by side:**
+
+| viewport | before: `#about-close` after scrolling to the bottom | after |
+|---|---|---|
+| 844×390 (phone landscape) | top **−189**, `elementFromPoint` → `null` | top **27**, → `button#about-close` |
+| 320×568 | top **−151**, `elementFromPoint` → `null` | top **27**, → `button#about-close` |
+| 390×844 | fits; no scroll either way | fits; no scroll either way |
+
+So at **390×844 portrait this never bit** — the card is 647px of a 844px
+viewport. It bit in landscape, on a small phone, and it would bite the moment
+the About copy grows by a paragraph.
+
+⚠️ **`100vh` was the wrong unit, not just a tight one.** It is the LARGE
+viewport, which is taller than the window whenever mobile Safari's toolbars are
+showing — i.e. most of the time. The card is now `min(100%, 100svh)`: `100%` is
+the backdrop minus its padding, `100svh` is the small viewport, and the shorter
+of the two is the one that fits.
+
+The backdrop's padding also carries `env(safe-area-inset-*)` now, so the card
+clears the Dynamic Island and the home indicator — the page asks for
+`viewport-fit=cover`, so nothing else was reserving them.
+
+**The z-index was already right** and needed nothing: `#about-backdrop` and
+`#conn-overlay` were put on 1100 when the suite bar landed, and both are direct
+children of `<body>`, siblings of the `position: sticky; z-index: 1000` bar, so
+the two share the root stacking context and 1100 genuinely wins. Confirmed by
+hit-test rather than by reading it.
+
+### 2. Every field was 15px, which is one pixel short of not zooming iOS
+
+`body` sets `font: 15px/1.5` and `.field input` is `font: inherit`, so **Bridge
+host:port**, **PIN** and **Host code** all computed to 15px — under the 16px
+floor at which iOS Safari zooms the page in on focus and never zooms back out.
+A new `@media (pointer: coarse)` block floors `input`/`textarea`/`select` at
+`max(16px, 1em)`. Measured: 16px at 390×844 with a coarse pointer, still 15px
+at 1440×900, so the desktop's denser scale is untouched.
+
+No `!important`, unlike the React apps in the suite: there is no utility layer
+and no SDK control with an inline font-size on this page, and `:not()` takes the
+specificity of its argument, so the eight attribute selectors already outrank
+`.field input`.
+
+⚠️ **NOT fixed with `maximum-scale=1` / `user-scalable=no`.** Pinch-zoom is an
+accessibility feature; the meta stays `width=device-width, initial-scale=1,
+viewport-fit=cover`.
+
+### Test state (unchanged by this, and worth knowing)
+
+- `room-caps.test.mjs` — **passes** (6/6).
+- `secure.test.mjs` — **fails, and was already failing**:
+  `TypeError: protocol.Handshake is not a constructor`, from a stale gitignored
+  `apps/web/pkg/` that predates a WASM export. Rebuild `pkg/` to clear it.
+- `room.test.mjs` — needs the rendezvous Worker (`npx wrangler dev --port 8788`
+  in `opensource-portal`); not runnable standalone.
+- None of the three loads `index.html`, so none of them covers the above. It was
+  verified by driving the built page in Playwright at 390×844 with touch
+  emulation and hit-testing with `document.elementFromPoint`.
+
 ## Update — 2026-08-30 (the browser client wears the suite bar and footer)
 
 **Shipped.** `apps/web/index.html` — the browser client's landing page — now
