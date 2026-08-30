@@ -4,6 +4,91 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-08-30 (the browser client wears the suite bar and footer)
+
+**Shipped.** `apps/web/index.html` — the browser client's landing page — now
+carries the **Universal Apps bar** and the **suite footer**, so it reads as a
+member of the suite rather than an unbranded tool page. Nothing else changed:
+the connect flow, the session view and the connection overlay are untouched.
+
+**Why it is hand-written, and what was tried first.** The suite already has a
+NON-React rendering of this bar — `opensource-portal/public/suite-switcher.js`,
+1,165 lines whose own header names Universal Screens as one of the three pages
+it exists for. It could not be reused here, and the reason is the ORIGIN, not
+React: its product rows default to `href="/<id>"`, its marks fall back to
+`/images/apps/<id>.svg`, its changelog trigger loads `/unisim-icon.png`, and its
+profile pill reads the `universal-suite-auth` cookie scoped to `.unisim.co.uk`.
+Every one of those is a 404 or a dead link on the origin this page is actually
+served from — plain `http://` on a LAN, from `serve.mjs` or the host, because a
+browser blocks `ws://` from an `https://` page. Making it origin-aware means
+editing the portal repo. Copying it here would make a THIRD copy of the bar, most
+of it (session cookie, changelog fetch, profile panel) inert on a LAN.
+
+So the bar is ~110 lines of CSS and markup in `index.html`, and **every value in
+it is copied from a named SDK constant**, cited in the stylesheet, so the next
+diff against the SDK is checkable rather than a matter of taste:
+`UniversalBar.tsx` (the 4px strip, its gradient, its 2400ms pulse),
+`barTheme.ts` `BAR.light` / `BAR.dark` (surface, border, text, muted, buttons),
+`UniversalAppsNavBar.tsx` (`headerOuterStyle`, `headerInnerStyle`,
+`mobileHeaderInnerStyle`, `productIdentityStyle`, `productNameStyle`,
+`brandClaimStyle`, `brandClaimPctStyle`, `inlineRightClusterStyle`,
+`stickyWrapperStyle`), and `brand.ts` `BRAND.orangeText`. The product mark is
+the generated catalogue one (`app-marks/marks.mjs`), inlined.
+
+⚠️ **What is deliberately NOT there.** The real bar's right cluster is a profile
+pill and a changelog panel, and both need the SDK's Supabase session, which this
+page has no client for and no cookie access to. A pill greeting nobody and a
+panel that cannot fetch are dead controls, so neither shipped. The bar carries
+the identity, the centred `100% Open Source & Free` claim (→ the GitHub org),
+a **Universal Apps** pill (→ opensource.unisim.co.uk) and a **GitHub** button
+(→ this repo). All five links in the chrome resolve; there are zero `<button>`s.
+There is no suite-switcher dropdown either — a fourth copy of the app catalogue
+is the thing that drifts, and one link to the portal reaches the same place.
+
+**Three things that had to move with it:**
+- `body` became a **column** (bar · card · footer). It was a centring ROW whose
+  only child was the card; the card keeps `margin: 0 auto` and is still centred.
+  `#session-view` swapped `height: 100%` for `flex: 1; min-height: 0`, and
+  `body.in-session` hides both bits of chrome — measured, the session view still
+  fills the viewport exactly (1440×900 and 390×664, stage unchanged).
+- ⚠️ **`#about-backdrop` and `#conn-overlay` went from z-index 50/60 to 1100.**
+  The SDK bar carries an inline `z-index: 1000`, so at 50 the About dialog would
+  have dimmed the page while the navbar stayed lit on top of the backdrop —
+  which reads as a rendering bug, not a layer mistake. 1100 is what the rest of
+  the suite settled on. Verified with `elementFromPoint` over the bar.
+- **No gap under the bar.** Measured: the head's bottom edge and the connect
+  card's box top are both at y=63 — the 1px stroke is the only separator, and
+  the card's 2rem padding is its own and predates the bar. Universal Converter,
+  screenshotted beside it at the same widths, still has the dead ~16px band.
+
+**Light first, dark as a second pass.** The light column is the design; the dark
+block is `BAR.dark` verbatim, because this page honours `prefers-color-scheme`
+and a hard-white bar over its dark body would look broken. The claim's `100%`
+is `#c2410c` in light (5.18:1) and **`#fb923c` in dark** — orange-700 measures
+3.45:1 on slate-900 and fails, so the rule inverts.
+
+**Safe area:** the bar takes `padding-top: env(safe-area-inset-top)` onto itself
+and paints its surface behind it, which is `stickyWrapperStyle`'s "-0 + inset"
+case (there is no page wrapper here reserving the inset). ⚠️ Note the iOS and
+Android apps are **fully native** (SwiftUI / Compose) and do not render this
+page, so no native target was affected.
+
+**Verified by looking, at 390×844 with touch emulation, at 1440×900, and at
+360×760**, light and dark, against Universal Converter's live bar at the same
+widths: same 4px strip, same 59px bar, same `#e2e8f0` stroke, same 15px/600
+name, same centred claim, same 38px right-hand cluster, same 16px/20px insets.
+The bar sticks on scroll, the footer lands on the viewport bottom, there is no
+horizontal overflow at 360px, and `prefers-reduced-motion` stops the strip
+pulsing (it never did before — the SDK's `UniversalBar` respects it).
+
+**Tests:** `room-caps.test.mjs` and `verify-wasm.mjs` pass. `room.test.mjs`
+needs the rendezvous Worker (`wrangler dev` in opensource-portal) and
+`secure.test.mjs` fails on `protocol.Handshake is not a constructor` — the
+gitignored `apps/web/pkg/` is from 2026-06-27 and predates that export, exactly
+the stale-`pkg/` trap the README warns about. Neither loads `index.html`, so
+neither is a regression here; rebuild `pkg/` with `wasm-pack` before trusting
+`secure.test.mjs` again.
+
 ## Update — 2026-08-29 (a failed connection now plays a failure, on all three clients)
 
 **Shipped.** James asked for the failure to be shown "full screen with an

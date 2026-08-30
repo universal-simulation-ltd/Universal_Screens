@@ -19,15 +19,202 @@
     :root { --bg: #0f0f12; --card: #1b1b20; --text: #f4f4f6; --muted: #9a9aa6; --line: #2b2b33; }
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html { height: 100%; }
+  /* A column: suite bar, then the connect card, then the footer. It used to be
+     a centring ROW with the card as its only child — the card keeps its own
+     `margin: 0 auto` so it is still centred, and `body.in-session` collapses
+     the chrome and lets the session view take the whole height. */
   body {
-    margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    margin: 0; min-height: 100%; font: 15px/1.5 system-ui, -apple-system, sans-serif;
     background: var(--bg); color: var(--text);
-    display: flex; justify-content: center; align-items: flex-start;
+    display: flex; flex-direction: column;
   }
 
   /* ---- connect view (centered narrow card, like the phone app) ---- */
-  #connect-view { width: 100%; max-width: 460px; padding: 2rem 1.25rem 3rem; }
+  /* `flex: 1 0 auto` is what pins the footer to the bottom of a short page
+     without it ever overlapping the card on a tall one. The 2rem top padding is
+     the card's own rhythm and predates the bar — nothing is inserted BETWEEN
+     the bar's bottom stroke and this, so the stroke is the only separator. */
+  #connect-view { width: 100%; max-width: 460px; margin: 0 auto; flex: 1 0 auto; padding: 2rem 1.25rem 3rem; }
+
+  /* ══ Suite chrome — the Universal Apps bar and the suite footer ═══════════
+     Every other Universal App renders `UniversalAppsNavBar` from `@unisim/sdk`.
+     This page is not React and has no bundler, so it cannot. It also cannot
+     reuse `opensource-portal/public/suite-switcher.js` (the suite's existing
+     non-React rendering of the same bar): that file is written for pages served
+     FROM opensource.unisim.co.uk — its product rows default to `href="/<id>"`,
+     its marks fall back to `/images/apps/<id>.svg`, its changelog trigger loads
+     `/unisim-icon.png`, and its profile pill reads the `.unisim.co.uk` SSO
+     cookie. This client is served over plain http:// from `serve.mjs` or the
+     host on a LAN (a browser blocks ws:// from an https:// page — see
+     README.md), so on that origin every one of those is a 404 or a dead link.
+
+     So the bar below is hand-written, and every value in it is COPIED from a
+     named SDK constant rather than eyeballed, so the next diff is checkable:
+       · `UniversalBar.tsx`            — the 4px strip, its gradient and pulse
+       · `barTheme.ts` BAR.light/.dark — surface, border, text, muted, buttons
+       · `UniversalAppsNavBar.tsx`     — headerOuterStyle, headerInnerStyle,
+                                         mobileHeaderInnerStyle, leftStyle,
+                                         productIdentityStyle, productNameStyle,
+                                         brandClaimStyle, brandClaimPctStyle,
+                                         inlineRightClusterStyle, stickyWrapper
+       · `brand.ts` BRAND.orangeText   — #c2410c, the claim's accent
+
+     ⚠️ WHAT IS DELIBERATELY MISSING. The real bar's right cluster is a profile
+     pill and a changelog panel, and both need the SDK's Supabase session, which
+     this page has no client for and no cookie access to. A pill that greets
+     nobody and a panel that cannot fetch are dead controls, so neither is here.
+     What is here is three real links: the portal, this repo, and the org.
+
+     ⚠️ NO GAP under the bar. Its own 1px bottom stroke is the separator; the
+     connect card's 2rem top padding is the card's own and predates this. */
+  .un-bar {
+    /* stickyWrapperStyle. There is no page wrapper reserving the inset here, so
+       the bar simply TAKES it (the SDK's "-0 + inset" case) and paints its own
+       surface behind it — otherwise the strip above the island is transparent.
+       On the desktop web `env(safe-area-inset-top)` is 0 and this is a no-op. */
+    position: sticky; top: 0; z-index: 1000;
+    background: #ffffff;
+    padding-top: env(safe-area-inset-top, 0px);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #0f172a;
+  }
+  /* UniversalBar.tsx: 4px, transparent → #e05504 → transparent, 2400ms pulse. */
+  .un-strip {
+    height: 4px; width: 100%;
+    background: linear-gradient(90deg, transparent 0%, #e05504 50%, transparent 100%);
+    animation: un-strip-pulse 2400ms ease-in-out infinite;
+  }
+  @keyframes un-strip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* headerOuterStyle — BAR.light.surface + a 1px BAR.light.border rule. */
+  .un-head { position: relative; background: #ffffff; border-bottom: 1px solid #e2e8f0; }
+  /* headerInnerStyle, with inlineRightClusterStyle's 20px right padding rather
+     than its 60px: the SDK reserves that only because its changelog cluster is
+     absolutely positioned at right:12. Ours is a normal flex child. */
+  .un-inner {
+    display: flex; align-items: center; justify-content: flex-start; gap: 8px;
+    padding: 10px 20px; margin: 0 auto; min-height: 56px;
+    max-width: 1280px; box-sizing: border-box;
+  }
+  /* mobileHeaderInnerStyle. */
+  @media (max-width: 767px) { .un-inner { gap: 6px; padding: 10px 16px; } }
+
+  /* leftStyle + productIdentityStyle. `overflow: hidden` is what lets the name
+     ellipsize instead of colliding with the right cluster. */
+  .un-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; overflow: hidden; }
+  /* The catalogue mark, 24px — the size the live apps' identity rows land on.
+     It is the identity, not a control: no home link, because this page IS home
+     and a reload would throw away a half-typed address (the SDK says as much of
+     `productHomeHref`, and Universal Video dropped it for the same reason). */
+  .un-logo { width: 24px; height: 24px; display: block; flex-shrink: 0; }
+  /* productNameStyle. */
+  .un-name {
+    font-size: 15px; font-weight: 600; color: #0f172a; white-space: nowrap;
+    letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+
+  /* brandClaimStyle — absolutely centred, so the left cluster's width can't
+     move it. Dropped below 1024px, where there is no room for it. */
+  .un-claim {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 13px; font-weight: 500; color: #475569;
+    white-space: nowrap; letter-spacing: .01em; text-decoration: none; user-select: none;
+  }
+  /* brandClaimPctStyle — BRAND.orangeText, NOT orangeDeep: 13px text on a white
+     bar answers to WCAG AA's 4.5:1, and #e05504 measures 3.84:1. */
+  .un-claim .pct { color: #c2410c; font-weight: 700; }
+  @media (max-width: 1023px) { .un-claim { display: none; } }
+
+  /* inlineRightClusterStyle. */
+  .un-right { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  /* The SDK's pill geometry (UserProfile pillTriggerStyle) minus the avatar, so
+     it keeps the 38px row height the whole cluster is built on. */
+  /* ⚠️ NO `gap` here. pillTriggerStyle's 7px separates its label from its
+     avatar; this pill has no avatar, and on an inline-flex box the gap lands
+     between the label span and the anonymous text beside it — so "Universal
+     Apps" rendered with a word space PLUS 5px and read as a double space. */
+  .un-pill {
+    display: inline-flex; align-items: center; height: 38px; padding: 0 13px;
+    border-radius: 999px; border: 1px solid #e2e8f0; background: #ffffff; color: #334155;
+    font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+    white-space: nowrap; text-decoration: none;
+    transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), border-color 150ms cubic-bezier(0.16,1,0.3,1);
+  }
+  .un-pill:hover { background: #f8fafc; border-color: #cbd5e1; }
+  /* un-icon-btn: 38×38, radius 10, no chrome until hover. */
+  .un-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border-radius: 10px; border: none;
+    background: transparent; color: #475569; padding: 0; text-decoration: none;
+    transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), color 150ms cubic-bezier(0.16,1,0.3,1);
+  }
+  .un-icon-btn:hover { background: #f8fafc; color: #0f172a; }
+  .un-icon-btn svg { width: 20px; height: 20px; display: block; }
+  /* Below the SDK's own 768px breakpoint the portal pill loses its wording —
+     the identity on the left is already naming the product. */
+  @media (max-width: 767px) { .un-pill { padding: 0 11px; } .un-pill .long { display: none; } }
+
+  /* ---- suite footer: the sibling apps' bar, without Tailwind ----
+     Universal_Converter/src/App.tsx and Universal_Images/src/App.tsx render
+     exactly this: a border-t rule, "With ♥ from UNISIM.co.uk", and the app's
+     own repo on the right. */
+  .un-foot { flex: none; border-top: 1px solid #e2e8f0; background: #ffffff; }
+  .un-foot-inner {
+    max-width: 1280px; margin: 0 auto; padding: 16px 20px;
+    display: flex; flex-direction: row; align-items: center; gap: 16px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 12px; line-height: 1.4; color: #64748b;
+  }
+  @media (max-width: 767px) { .un-foot-inner { padding: 16px; gap: 12px; } }
+  .un-foot a { color: #334155; text-decoration: none; }
+  .un-foot a:hover { color: #c2410c; text-decoration: underline; text-underline-offset: 2px; }
+  /* `font-variant-emoji: text` keeps U+2665 a GLYPH rather than the red emoji
+     some platforms substitute — the substituted one ignores `color`, so the
+     heart came out red beside orange chrome. Unsupported browsers fall back to
+     exactly what the React apps render. */
+  .un-foot .heart { color: #e05504; font-variant-emoji: text; }
+  .un-foot-gh {
+    margin-left: auto; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px; color: #475569 !important;
+  }
+  .un-foot-gh:hover { color: #0f172a !important; text-decoration: none !important; }
+  .un-foot-gh svg { width: 20px; height: 20px; display: block; }
+  @media (max-width: 639px) { .un-foot-gh .long { display: none; } }
+  /* The visually-hidden "love" the ♥ stands in for — sr-only, as in the apps. */
+  .un-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  /* Dark mode is a SECOND pass, not the design: light is the default above and
+     every value here is BAR.dark from the same `barTheme.ts` table. This page
+     honours `prefers-color-scheme`, so a hard-white bar over its dark body
+     would read as a rendering fault. */
+  @media (prefers-color-scheme: dark) {
+    .un-bar { background: #0f172a; color: #f1f5f9; }
+    .un-head { background: #0f172a; border-bottom-color: #1e293b; }
+    .un-name { color: #f1f5f9; }
+    .un-claim { color: #94a3b8; }
+    /* ⚠️ NOT #c2410c here. Orange 700 measures 3.45:1 on slate-900 and fails;
+       orange 400 is 7.89:1. The rule inverts with the background — darkening
+       the orange to "fix" a dark surface makes it worse. */
+    .un-claim .pct { color: #fb923c; }
+    .un-pill { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+    .un-pill:hover { background: #334155; border-color: #475569; }
+    .un-icon-btn { color: #94a3b8; }
+    .un-icon-btn:hover { background: #1e293b; color: #f1f5f9; }
+    .un-foot { background: #0f172a; border-top-color: #1e293b; }
+    .un-foot-inner { color: #94a3b8; }
+    .un-foot a { color: #cbd5e1; }
+    .un-foot a:hover { color: #fb923c; }
+    .un-foot .heart { color: #fb923c; }
+    .un-foot-gh { color: #94a3b8 !important; }
+    .un-foot-gh:hover { color: #f1f5f9 !important; }
+  }
+  @media (prefers-reduced-motion: reduce) { .un-strip { animation: none; } }
+
+  /* The streaming session owns the whole viewport — the suite chrome is page
+     furniture and has no business over a full-screen remote desktop. */
+  body.in-session .un-bar, body.in-session .un-foot { display: none; }
+
   .brand { text-align: center; margin-bottom: 1.75rem; }
   .brand svg { width: 64px; height: 64px; }
   /* SVG presentation attributes can't read CSS var()s — paint via CSS instead.
@@ -164,7 +351,11 @@
   #advanced-list button { background: none; border: none; color: var(--text); font: inherit; font-size: .84rem; cursor: pointer; padding: .35rem .5rem; border-radius: .4rem; }
   #advanced-list button:hover { background: var(--card); }
 
-  #about-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+  /* ⚠️ 1100, not 50. The suite bar carries the SDK's z-index of 1000, and
+     Tailwind's scale stops at 50 — so every app that hit this settled on 1100.
+     At 50 this backdrop dimmed the page while the bar stayed lit on top of it,
+     which reads as a rendering bug rather than a layer mistake. */
+  #about-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; padding: 1rem; z-index: 1100; }
   #about-backdrop.open { display: flex; }
   #about-card {
     position: relative; width: 100%; max-width: 460px; max-height: calc(100vh - 2rem);
@@ -184,9 +375,12 @@
   #about-close:hover { color: var(--text); }
 
   /* ---- session view (full screen) ---- */
-  #session-view { display: none; width: 100%; height: 100%; flex-direction: column; background: #000; }
+  /* `flex: 1` rather than `height: 100%`: body is a column now, so the session
+     view takes whatever the hidden chrome leaves — which, in session, is all of
+     it. `min-height: 0` keeps #stage's own flex:1 able to shrink. */
+  #session-view { display: none; width: 100%; flex: 1; min-height: 0; flex-direction: column; background: #000; }
   body.in-session #connect-view { display: none; }
-  body.in-session { align-items: stretch; }
+  body.in-session { height: 100%; }
   body.in-session #session-view { display: flex; }
   /* The top bar overlays the streaming canvas (like the iPhone client) rather
      than sitting above it, so the video gets the full height by default. It's a
@@ -222,7 +416,10 @@
      a line in the session log — and on a failure the page dropped straight back
      to the connect screen, taking the log with it, so there was nothing left to
      read. */
-  #conn-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1.5rem; background: var(--bg); }
+  /* 1100 for the same reason as #about-backdrop — it must cover the suite bar's
+     inline z-index of 1000, or "Connection failed" is shown with the navbar
+     sitting brightly on top of it. */
+  #conn-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 1.5rem; background: var(--bg); }
   #conn-overlay[hidden] { display: none; }
   .conn-card { width: 100%; max-width: 380px; text-align: center; }
   #conn-mark { position: relative; width: 88px; height: 88px; margin: 0 auto 1.2rem; display: grid; place-items: center; border-radius: 50%; font-size: 2.5rem; line-height: 1; color: #fff; }
@@ -289,6 +486,55 @@
 </style>
 </head>
 <body>
+  <!-- The Universal Apps bar. See the ".un-bar" block in the stylesheet for
+       which SDK constant each measurement comes from, and for why the profile
+       pill and the changelog panel are not here. -->
+  <div class="un-bar">
+    <div class="un-strip" aria-hidden="true"></div>
+    <header class="un-head">
+      <div class="un-inner">
+        <div class="un-identity">
+          <!-- The catalogue mark for Universal Screens, verbatim from the
+               generated brand set (universal-platform/scripts/app-marks).
+               A phone driving the desktop — the second surface is the one with
+               the pointer on it. -->
+          <svg class="un-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Universal Screens">
+            <defs>
+              <linearGradient id="un-screens-tile" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#fe8c01"/>
+                <stop offset="1" stop-color="#e05504"/>
+              </linearGradient>
+            </defs>
+            <rect width="64" height="64" rx="14" fill="url(#un-screens-tile)"/>
+            <rect x="6" y="11" width="33" height="24" rx="4" fill="none" stroke-width="4.4" stroke="#fed7aa"/>
+            <g fill="none" stroke-width="4.4" stroke-linecap="round" stroke="#ffffff">
+              <rect x="37" y="23" width="18" height="29" rx="5"/>
+              <path d="M43 47h6"/>
+            </g>
+            <path d="M42.73 30v8.84l2.18-2.18 1.63 3.26 1.63-.82-1.63-3.26h2.72z" fill="#ffffff"/>
+          </svg>
+          <span class="un-name">Universal Screens</span>
+        </div>
+
+        <a class="un-claim" href="https://github.com/universal-simulation-ltd" target="_blank" rel="noopener noreferrer">
+          <span class="pct">100%</span><span>Open Source &amp; Free</span>
+        </a>
+
+        <div class="un-right">
+          <a class="un-pill" href="https://opensource.unisim.co.uk" target="_blank" rel="noopener noreferrer"
+             title="All the Universal Apps"><span><span class="long">Universal </span>Apps ↗</span></a>
+          <a class="un-icon-btn" href="https://github.com/universal-simulation-ltd/Universal_Screens"
+             target="_blank" rel="noopener noreferrer"
+             aria-label="Universal Screens on GitHub" title="View source on GitHub">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.09 3.29 9.4 7.86 10.92.57.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.69-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.95.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39.98 0 1.97.13 2.89.39 2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.39-5.26 5.68.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .3.21.66.79.55 4.57-1.52 7.86-5.83 7.86-10.92C23.5 5.65 18.35.5 12 .5z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+  </div>
+
   <main id="connect-view">
     <div class="brand">
       <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -356,6 +602,26 @@
       </div>
     </div>
   </main>
+
+  <!-- The suite footer, same wording and same shape as Universal Converter's
+       and Universal Images' — a border-t rule, the UNISIM line, and this repo
+       on the right. -->
+  <footer class="un-foot">
+    <div class="un-foot-inner">
+      <span>
+        With <span class="heart" aria-hidden="true">&hearts;</span><span class="un-sr">love</span>
+        from <a href="https://www.unisim.co.uk" target="_blank" rel="noopener noreferrer">UNISIM.co.uk</a>
+      </span>
+      <a class="un-foot-gh" href="https://github.com/universal-simulation-ltd/Universal_Screens"
+         target="_blank" rel="noopener noreferrer"
+         aria-label="Universal Screens on GitHub" title="View source on GitHub">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.09 3.29 9.4 7.86 10.92.57.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.69-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.95.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39.98 0 1.97.13 2.89.39 2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.39-5.26 5.68.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .3.21.66.79.55 4.57-1.52 7.86-5.83 7.86-10.92C23.5 5.65 18.35.5 12 .5z"/>
+        </svg>
+        <span class="long">GitHub</span>
+      </a>
+    </div>
+  </footer>
 
   <!-- About this app. The content mirrors the SDK's <AboutAppDialog>, which
        every other app in the suite shows; see the CSS block above for why this
