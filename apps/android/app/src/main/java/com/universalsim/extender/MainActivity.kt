@@ -356,127 +356,143 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     }
 
     val live = session
-    when {
-        // "Cast to a browser" takes over the whole UI while active.
-        castCode != null -> CastFlow(code = castCode!!, onExit = { castCode = null })
-        live != null -> {
-            // In the streaming modes, tapping the video hides the top bar so the
-            // picture can fill the screen; tap again to bring it back.
-            val streaming =
-                mode == Mode.VIEWER || mode == Mode.FULL_CONTROL || mode == Mode.SECOND_SCREEN
-            var chrome by remember(live) { mutableStateOf(true) }
 
-            // Top bar (current mode + Disconnect). For streaming modes it floats as
-            // a translucent gradient overlay over the video (matching the iPhone /
-            // web viewer) so the picture keeps the full height; for the control
-            // modes (Clicker / Trackpad) it sits above the content in normal flow.
-            val topBar: @Composable (Boolean) -> Unit = { overlay ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (overlay)
-                                Modifier.background(
-                                    Brush.verticalGradient(
-                                        listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent),
-                                    ),
+    // The Universal Apps bar sits above the pre-session screens (landing, mode
+    // picker, connect feedback) and NOT over a live session or a cast.
+    //
+    // ⚠️ This mirrors the browser client's `body.in-session { display: none }`
+    // rule, and for the same reason it gives: a streaming session owns the whole
+    // viewport and suite chrome has no business over a full-screen remote
+    // desktop. Those screens draw their own top bar (mode chip + Disconnect),
+    // which the streaming modes hide on tap, and CastFlow takes over entirely.
+    val showSuiteBar = castCode == null && live == null
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (showSuiteBar) SuiteBar()
+        Box(modifier = Modifier.weight(1f)) {
+            when {
+                // "Cast to a browser" takes over the whole UI while active.
+                castCode != null -> CastFlow(code = castCode!!, onExit = { castCode = null })
+                live != null -> {
+                    // In the streaming modes, tapping the video hides the top bar so the
+                    // picture can fill the screen; tap again to bring it back.
+                    val streaming =
+                        mode == Mode.VIEWER || mode == Mode.FULL_CONTROL || mode == Mode.SECOND_SCREEN
+                    var chrome by remember(live) { mutableStateOf(true) }
+
+                    // Top bar (current mode + Disconnect). For streaming modes it floats as
+                    // a translucent gradient overlay over the video (matching the iPhone /
+                    // web viewer) so the picture keeps the full height; for the control
+                    // modes (Clicker / Trackpad) it sits above the content in normal flow.
+                    val topBar: @Composable (Boolean) -> Unit = { overlay ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (overlay)
+                                        Modifier.background(
+                                            Brush.verticalGradient(
+                                                listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent),
+                                            ),
+                                        )
+                                    else Modifier,
                                 )
-                            else Modifier,
-                        )
-                        .statusBarsPadding()
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Tap the mode chip to go back and pick a different one for this host.
-                    ModeChip(mode, onClick = {
-                        live.close()
-                        session = null
-                        pending = currentAddr to currentPin
-                    })
-                    DisconnectButton(onClick = {
-                        live.close()
-                        session = null
-                    })
-                }
-            }
-
-            // The mode's UI is composed straight away (so a stream starts decoding
-            // on its first keyframe), with the "Connected" confirmation laid over
-            // the top of it for its brief hold.
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (streaming) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        when (mode) {
-                            Mode.VIEWER, Mode.SECOND_SCREEN ->
-                                StreamScreen(live, currentAddr, forwardInput = false) { chrome = !chrome }
-                            Mode.FULL_CONTROL ->
-                                StreamScreen(live, currentAddr, forwardInput = true) { chrome = !chrome }
-                            else -> {}
+                                .statusBarsPadding()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Tap the mode chip to go back and pick a different one for this host.
+                            ModeChip(mode, onClick = {
+                                live.close()
+                                session = null
+                                pending = currentAddr to currentPin
+                            })
+                            DisconnectButton(onClick = {
+                                live.close()
+                                session = null
+                            })
                         }
-                        if (chrome) {
-                            Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
-                                topBar(true)
+                    }
+
+                    // The mode's UI is composed straight away (so a stream starts decoding
+                    // on its first keyframe), with the "Connected" confirmation laid over
+                    // the top of it for its brief hold.
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (streaming) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                when (mode) {
+                                    Mode.VIEWER, Mode.SECOND_SCREEN ->
+                                        StreamScreen(live, currentAddr, forwardInput = false) { chrome = !chrome }
+                                    Mode.FULL_CONTROL ->
+                                        StreamScreen(live, currentAddr, forwardInput = true) { chrome = !chrome }
+                                    else -> {}
+                                }
+                                if (chrome) {
+                                    Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                                        topBar(true)
+                                    }
+                                }
+                            }
+                        } else {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                topBar(false)
+                                when (mode) {
+                                    Mode.CLICKER -> ClickerScreen(live, currentAddr)
+                                    Mode.TRACKPAD -> TrackpadScreen(live)
+                                    else -> {}
+                                }
                             }
                         }
-                    }
-                } else {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        topBar(false)
-                        when (mode) {
-                            Mode.CLICKER -> ClickerScreen(live, currentAddr)
-                            Mode.TRACKPAD -> TrackpadScreen(live)
-                            else -> {}
+                        if (phase == ConnectPhase.CONNECTED) {
+                            ConnectionStatusScreen(ConnectPhase.CONNECTED, currentAddr, mode)
                         }
                     }
                 }
-                if (phase == ConnectPhase.CONNECTED) {
-                    ConnectionStatusScreen(ConnectPhase.CONNECTED, currentAddr, mode)
+                // Connecting: a dedicated animated screen (don't flash the home page), with
+                // a Cancel to back out if it's taking too long.
+                phase == ConnectPhase.CONNECTING -> ConnectionStatusScreen(
+                    phase = ConnectPhase.CONNECTING,
+                    addr = currentAddr,
+                    mode = mode,
+                    onCancel = {
+                        // Abandon the in-flight attempt (its result is discarded when it
+                        // returns) and drop back to the connect screen.
+                        attempt += 1
+                        phase = ConnectPhase.IDLE
+                        status = ""
+                    },
+                )
+                // Failed: the same full screen, saying so plainly, and it stays until the
+                // user picks — retry the very same attempt, or go back home.
+                phase == ConnectPhase.FAILED -> ConnectionStatusScreen(
+                    phase = ConnectPhase.FAILED,
+                    addr = currentAddr,
+                    mode = mode,
+                    onRetry = { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
+                    onHome = { phase = ConnectPhase.IDLE },
+                )
+                // After address + PIN are gathered (scan or manual), pick what to do.
+                pending != null -> {
+                    val (pAddr, pPin) = pending!!
+                    ModePickerScreen(
+                        addr = pAddr,
+                        onPick = { chosen, rememberMode ->
+                            pending = null
+                            doConnect(pAddr, chosen, pPin, rememberMode)
+                        },
+                        onBack = { pending = null },
+                    )
+                }
+                else -> {
+                    ConnectScreen(
+                        status = status,
+                        onPrepare = { addr, pin -> pending = addr to pin },
+                        onConnect = { addr, m, pin -> doConnect(addr, m, pin, true) },
+                        onCast = { code -> castCode = code },
+                    )
                 }
             }
-        }
-        // Connecting: a dedicated animated screen (don't flash the home page), with
-        // a Cancel to back out if it's taking too long.
-        phase == ConnectPhase.CONNECTING -> ConnectionStatusScreen(
-            phase = ConnectPhase.CONNECTING,
-            addr = currentAddr,
-            mode = mode,
-            onCancel = {
-                // Abandon the in-flight attempt (its result is discarded when it
-                // returns) and drop back to the connect screen.
-                attempt += 1
-                phase = ConnectPhase.IDLE
-                status = ""
-            },
-        )
-        // Failed: the same full screen, saying so plainly, and it stays until the
-        // user picks — retry the very same attempt, or go back home.
-        phase == ConnectPhase.FAILED -> ConnectionStatusScreen(
-            phase = ConnectPhase.FAILED,
-            addr = currentAddr,
-            mode = mode,
-            onRetry = { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
-            onHome = { phase = ConnectPhase.IDLE },
-        )
-        // After address + PIN are gathered (scan or manual), pick what to do.
-        pending != null -> {
-            val (pAddr, pPin) = pending!!
-            ModePickerScreen(
-                addr = pAddr,
-                onPick = { chosen, rememberMode ->
-                    pending = null
-                    doConnect(pAddr, chosen, pPin, rememberMode)
-                },
-                onBack = { pending = null },
-            )
-        }
-        else -> {
-            ConnectScreen(
-                status = status,
-                onPrepare = { addr, pin -> pending = addr to pin },
-                onConnect = { addr, m, pin -> doConnect(addr, m, pin, true) },
-                onCast = { code -> castCode = code },
-            )
         }
     }
 }

@@ -115,7 +115,27 @@ struct ContentView: View {
     @State private var castCode: String?
 
     var body: some View {
-        content.onOpenURL { url in handleDeepLink(url) }
+        chrome.onOpenURL { url in handleDeepLink(url) }
+    }
+
+    /// The Universal Apps bar above the pre-session screens (connect, mode
+    /// picker, connect feedback) and NOT over a live session or a cast.
+    ///
+    /// ⚠️ Mirrors the browser client's `body.in-session { display: none }` rule,
+    /// and the Android client's `showSuiteBar`, for the reason all three give: a
+    /// streaming session owns the whole viewport and suite chrome has no
+    /// business over a full-screen remote desktop. Those screens draw their own
+    /// header (mode chip + Disconnect) and CastFlow takes over entirely.
+    @ViewBuilder private var chrome: some View {
+        if castCode == nil && session == nil {
+            VStack(spacing: 0) {
+                SuiteBar()
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            content
+        }
     }
 
     @ViewBuilder private var content: some View {

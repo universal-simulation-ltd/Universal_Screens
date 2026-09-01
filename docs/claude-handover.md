@@ -4,6 +4,84 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-09-01 (the native clients wear the suite bar — and the first cut copied the wrong one)
+
+**Shipped, pushed. Verified on the Nothing Phone AND in the iOS simulator
+(iPhone 17 Pro), light and dark.** James: Screens is "missing the universal
+navbar at the top as per the other apps".
+
+### Why it was missing
+
+Every other Universal app's mobile build is a **Capacitor webview of its React
+site**, so it gets the bar from the SDK (`UniversalAppsNavBar.tsx`) for free.
+Screens is the suite's **only hand-written native mobile client** — Kotlin/
+Compose and SwiftUI — so there was nothing to inherit. Its **browser** client
+already had one (`9a85a57`, hand-built as `.un-bar` in `apps/web/index.html`);
+only the two native clients were bare.
+
+### ⚠️ The first cut was wrong, and the mistake is worth keeping
+
+It copied `apps/web/index.html`. **That is a DIFFERENT BAR.** The web one is
+the open-source landing page's: a one-line "Universal Screens" in slate, a
+"Universal Apps ↗" pill and a GitHub button. The bar the app must match — the
+one sitting next to it on the home screen — is `UniversalAppsNavBar`:
+
+| | web `.un-bar` | app bar (what to match) |
+|---|---|---|
+| identity | "Universal Screens", one line, slate | **two-line lockup**: `UNIVERSAL` eyebrow over `Screens` in the accent |
+| after it | nothing | **switcher chevron** |
+| right | "Universal Apps ↗" pill + GitHub | profile pill + **suite globe** |
+
+James caught it from the screenshot. Both files now carry a ⚠️ naming the trap.
+**If you touch these, compare against Universal PDF on a real device** — that is
+how the second cut was measured (420dpi ⇒ 24dp mark, 26dp globe).
+
+### What each piece is
+
+- Eyebrow `UNIVERSAL`: 9px/700/0.09em in `BAR.muted`. ⚠️ **UNIVERSAL, not
+  UNI SIM** — owner's correction, 2026-08-30. UNI·SIM is the company.
+- Product word: 15px/600/-0.01em in **`claimAccent`**, which is `#c2410c` light
+  and `#fb923c` dark. ⚠️ Not one value: #c2410c is 3.5:1 on the dark surface and
+  fails AA. The rule inverts with the background.
+- ⚠️ **The globe is the CHANGELOG**, not a link to the company. Established by
+  tapping it in Universal PDF on the device — it opens the "Nouveautés" panel.
+  A native panel means shipping a changelog reader, so both clients open
+  `changelog.unisim.co.uk`. (That tap also confirmed this session's
+  `2026.09.01.15` entry is live.)
+- **No profile pill.** Screens has no account system.
+- Colours are the SUITE's (`barTheme.ts` BAR), deliberately NOT
+  `MaterialTheme.colorScheme` / `Theme.swift`. The bar matches the bar in PDF,
+  not the app it is bolted to. Both files say so.
+
+### Where it is not drawn
+
+`showSuiteBar = castCode == null && live == null` (Android) and the `chrome`
+wrapper (iOS). ⚠️ Mirrors the web client's `body.in-session { display: none }`,
+for the reason all three now give: a streaming session owns the whole viewport.
+Those screens draw their own header and CastFlow takes over entirely.
+
+### Landmines
+
+⚠️ **The iOS project is XcodeGen.** A new `.swift` under `ScreenExtender/` is
+NOT in the build until you run `xcodegen generate` in `apps/ios` — `sources` is
+the folder, but the checked-in `.pbxproj` is generated. It added 4 lines here.
+Asset-catalogue additions need no regeneration.
+
+⚠️ Building iOS from a Bash tool call works:
+`xcodebuild -project ScreenExtender.xcodeproj -scheme ScreenExtender
+-destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug
+CODE_SIGNING_ALLOWED=NO build`, then `simctl install/launch`. ⚠️ Take the app
+from `ls -dt ~/Library/Developer/Xcode/DerivedData/ScreenExtender-*/Build/
+Products/Debug-iphonesimulator/ScreenExtender.app | head -1` — there are two
+DerivedData dirs for this project and the stale one installs an old build.
+
+⚠️ `Modifier.weight` is a `RowScope`/`ColumnScope` extension. Importing
+`androidx.compose.foundation.layout.weight` compiles to "Cannot access
+'weight': it is internal" — do not add that import.
+
+⚠️ Forcing the phone's theme to check both: `adb shell cmd uimode night yes|no`,
+and **put it back to `auto`** afterwards.
+
 ## Update — 2026-09-01 (the Android launcher icon: three days stale AND in a white circle)
 
 **Shipped, pushed.** `Universal_Screens` (this repo) and

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0D65B0868127697F33DBDD3F /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17AC50A50AEA18D66558B793 /* ContentView.swift */; };
+		24B96F93C3F87B3E3111AAA4 /* SuiteBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7FA233BCC4289F5D5760925 /* SuiteBar.swift */; };
 		3ED1634971B6DCBB5DA3AD3C /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAC1B91E7180AE554A02446 /* TrackpadView.swift */; };
 		3FA888C8DE891836DFA9D0E0 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */; };
 		5BFDD788B2516A371DC5965F /* HidKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4353D077316F6FF60AD9ACD /* HidKeys.swift */; };
@@ -41,6 +42,7 @@
 		7411DAA5AF0E8FE23AD2D7E7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88BAE13F8414308703A542A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
+		A7FA233BCC4289F5D5760925 /* SuiteBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuiteBar.swift; sourceTree = "<group>"; };
 		B9B298B73D48FD9A0DDFAE02 /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
 		D04A28F1E51CAC96CD177E43 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		D4353D077316F6FF60AD9ACD /* HidKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HidKeys.swift; sourceTree = "<group>"; };
@@ -96,6 +98,7 @@
 				1B8BED806807742A5BAE3EFD /* RoomSession.swift */,
 				60256A7FA4730057F55D6DA5 /* ScreenExtenderApp.swift */,
 				8B0294A9C457DA3B4C8C21B2 /* StreamView.swift */,
+				A7FA233BCC4289F5D5760925 /* SuiteBar.swift */,
 				D04A28F1E51CAC96CD177E43 /* Theme.swift */,
 				EBAC1B91E7180AE554A02446 /* TrackpadView.swift */,
 				4CD875701149E094733F7FEA /* VideoDecoder.swift */,
@@ -197,6 +200,7 @@
 				AD959579904733AD7E9A0C6A /* RoomSession.swift in Sources */,
 				B8B6EF6783DDD2BC8421A914 /* ScreenExtenderApp.swift in Sources */,
 				3FA888C8DE891836DFA9D0E0 /* StreamView.swift in Sources */,
+				24B96F93C3F87B3E3111AAA4 /* SuiteBar.swift in Sources */,
 				8483FBFC5EA0715A9069E4E9 /* Theme.swift in Sources */,
 				3ED1634971B6DCBB5DA3AD3C /* TrackpadView.swift in Sources */,
 				79072F52C5AB085B7D794250 /* VideoDecoder.swift in Sources */,
