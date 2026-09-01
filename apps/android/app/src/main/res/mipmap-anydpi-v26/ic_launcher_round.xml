@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GENERATED FILE — do not edit by hand.
+     Source: backoffice/universal-platform/scripts/app-marks/marks.mjs
+     Regenerate: node scripts/app-marks/native-icons.mjs (from backoffice/universal-platform) -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_tile"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>

@@ -4,6 +4,81 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-09-01 (the Android launcher icon: three days stale AND in a white circle)
+
+**Shipped, pushed.** `Universal_Screens` (this repo) and
+`backoffice/universal-platform@c581d81`. James's report was "the icon isn't up
+to date" on his Nothing Phone. It was three separate things.
+
+### 1. The phone was running a build from 10 July
+
+Predating both icon commits. Rebuilt from HEAD and installed.
+
+⚠️ **`adb install -r` failed INSTALL_FAILED_UPDATE_INCOMPATIBLE** — the July APK
+was signed with a different machine's debug keystore, so it had to be
+uninstalled. Back up `shared_prefs/connections.xml` first (`run-as` works, the
+build is debuggable) and restore it after; it is the saved-hosts list and the
+only state the app keeps. `files/` and `databases/` hold nothing but
+`profileInstalled`.
+
+### 2. Every Screens raster was still the RETIRED DARK TILE
+
+Not a design choice — a stale render. `desktop-icons.mjs` hardcoded the `brand`
+colourway (navy tile `#0f172a`, orange mark) until
+`universal-platform@390849f` on **2026-08-29** made `CANONICAL = 'orange'`
+(gradient `#fe8c01`→`#e05504`, white mark). Screens' PNGs were written by
+`3f6ee8d` on **2026-08-28** — one day earlier — so they were the last `brand`
+artefacts in the suite. Regenerated: Windows/macOS/Linux, the Android drawable,
+both iOS assets and the installer seal.
+
+⚠️ The files got ~8x bigger (`app_icon.png` 14 KB → 114 KB). Expected: a flat
+navy fill compresses to almost nothing and a gradient does not. Dimensions are
+unchanged — checked, not assumed.
+
+### 3. ⚠️ The launcher icon was never ADAPTIVE, so Android drew it in a white circle
+
+The real find, and it long predates the colourway. `native-icons.mjs` probed
+`android/app/src/main/res` only. **Screens' Gradle project is at
+`apps/android/`**, so it was skipped for the entire Android block and reported
+as *"no android/ directory"* — which reads like an app with no Android build.
+With no `mipmap-anydpi-v26/`, every launcher since Android 8 falls back to
+legacy handling: it shrinks the tile and mats it on white. Screenshotted beside
+Universal PDF/QR/Family, which fill the mask edge to edge.
+
+This is the SAME fault `findIosSet` carries a ⚠️ about for this same app. The
+iOS half was fixed 2026-08-29 (`159d80e`, "iOS: the app builds again, and wears
+the Orange tile"); the Android half was not. Now `findAndroidRes`.
+
+`AndroidManifest.xml` moves `android:icon`/`android:roundIcon` to
+`@mipmap/ic_launcher` / `@mipmap/ic_launcher_round`. **`@drawable/app_icon`
+stays** — four `painterResource(R.drawable.app_icon)` call sites and
+`portrait_capture.xml` draw it as in-app artwork; only the launcher entry moved.
+
+⚠️ The generator's splash block is now gated on `hasLaunchTheme`, because
+`splashThemeV31()` inherits `Theme.SplashScreen` from
+`androidx.core:core-splashscreen` — which this app does not depend on. Ungated,
+the icons land and the app stops compiling on resource linking.
+
+### Verified on the device
+
+Rebuilt, installed, launched: launcher entry is a full-bleed orange gradient
+with the white mark, indistinguishable in treatment from PDF/QR/Family; app
+starts with no crash and no `Resources$NotFound`; the saved host survived.
+The generator is idempotent on the scaffolded apps — re-running for QR, PDF and
+Family writes no Android file.
+
+### Landmines for the next session
+
+⚠️ **`./gradlew` fails with a bare `25.0.2` and nothing else.** The only JDK in
+`java_home` here is 25 and Gradle 8.7 rejects it. Build with
+`JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`
+(that JBR is 21). `adb` is not on PATH either —
+`~/Library/Android/sdk/platform-tools/adb`.
+
+⚠️ A regeneration run also rewrote `Universal_PDF`'s iOS icon by 356 bytes on a
+196 KB file — cross-machine Chromium antialiasing drift, not a change. Reverted
+rather than committed into a repo another session was working in.
+
 ## Update — 2026-08-30 (the About dialog keeps its head, and a tap no longer zooms iOS in)
 
 **Shipped.** Two changes to `apps/web/index.html`, both in the browser client's
