@@ -181,3 +181,9 @@ can't speak Noise on a browser's behalf) is still accepted as plaintext and logg
 The **browser client** leg is therefore not yet end-to-end encrypted (it relies on
 `wss://` to the cloud rendezvous); requiring encryption from every non-loopback peer
 is a follow-up once every client has shipped this build.
+
+## Licence
+
+[AGPL-3.0-or-later](LICENSE), with an added permission for app-store
+distribution. Use it, change it, share it — and if you run a changed copy and
+let other people use it over a network, offer them your source.

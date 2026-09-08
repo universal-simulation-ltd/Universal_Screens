@@ -80,7 +80,7 @@ fun AboutAppDialog(onDismiss: () -> Unit) {
                 )
 
                 Section("Open source")
-                Text("Free and open source under the MIT licence — every line of it public, for anyone to read or run themselves.")
+                Text("Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.")
                 Link("View the source ↗", REPO_URL, uriHandler::openUri)
                 Link("Report a problem ↗", ISSUES_URL, uriHandler::openUri)
 

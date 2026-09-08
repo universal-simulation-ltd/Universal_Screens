@@ -49,7 +49,7 @@ struct AboutView: View {
                         .foregroundStyle(.secondary)
 
                     section("Open source")
-                    Text("Free and open source under the MIT licence — every line of it public, for anyone to read or run themselves.")
+                    Text("Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.")
                     link("View the source ↗", Self.repoURL)
                     link("Report a problem ↗", Self.issuesURL)
 
