@@ -511,6 +511,7 @@ export function boot() {
     const open = l.hidden;
     l.hidden = !open;
     t.classList.toggle("open", open);
+    t.setAttribute("aria-expanded", String(open));
   });
 
   // Advanced ▸ About this app. Every other app in the suite got this on
