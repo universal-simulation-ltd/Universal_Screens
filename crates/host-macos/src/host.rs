@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use apple_cf::dispatch_queue::dispatch_async_and_wait;
 use apple_cf::iosurface::IOSurface;
 use apple_cf::raw;
 use core_graphics::display::CGDisplay;
@@ -199,15 +200,24 @@ fn serve_video(
             })
     };
 
+    // Deliver capture callbacks on our own *serial* queue so teardown can drain
+    // it. ScreenCaptureKit can run one more `did_output_sample_buffer` after
+    // `stop_capture()` returns, but the handler closure (which owns `tx` and an
+    // encoder handle) is freed when `sc` drops — a late callback would then
+    // use-after-free the channel and segfault. Same fix as the CLI host (4da06f6).
+    let capture_queue =
+        DispatchQueue::new("uk.co.unisim.screens.capture", DispatchQoS::UserInteractive);
+
     let mut sc = SCStream::new_with_delegate(&filter, &config, delegate);
     {
         let encoder = encoder.clone();
         let frame_no = frame_no.clone();
-        sc.add_output_handler(
+        sc.add_output_handler_with_queue(
             move |sample: CMSampleBuffer, _ty: SCStreamOutputType| {
                 capture_and_encode(&sample, &encoder, &frame_no, &tx);
             },
             SCStreamOutputType::Screen,
+            Some(&capture_queue),
         );
     }
 
@@ -217,6 +227,11 @@ fn serve_video(
     sc.start_capture()?;
     let result = stream_to_client(stream, &rx, width, height, &dead);
     let _ = sc.stop_capture();
+    // Barrier: an empty block on the serial capture queue can only run once
+    // every already-queued sample callback has finished, so after this returns
+    // nothing can touch `tx` (or the closure) — safe to drop `sc` and the
+    // channel without the use-after-free that crashed the host on disconnect.
+    dispatch_async_and_wait(&capture_queue, || {});
     let _ = input_thread.join();
     result
 }
