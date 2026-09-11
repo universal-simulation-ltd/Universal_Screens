@@ -13,3 +13,6 @@ extender-discovery.workspace = true
 # hosts' exactly — a mismatched egui here would not unify and the types would
 # silently stop being the same types.
 eframe = { version = "0.29", features = ["persistence"] }
+# The pairing PIN is the Noise pre-shared key, so it comes from the OS RNG — see
+# `gen_pin`. Already in the lockfile via extender-transport.
+getrandom = "0.2"

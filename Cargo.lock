@@ -1462,6 +1462,7 @@ dependencies = [
  "eframe",
  "extender-discovery",
  "extender-protocol",
+ "getrandom 0.2.17",
 ]
 
 [[package]]

@@ -27,9 +27,9 @@ use crate::{serve_loop, HostEvent};
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
     about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
-    paint_brand_strip, platform_display, platform_tag, sep_dot, style_navbar, DeviceKind,
-    BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL, OPENSOURCE_ROOT, OPENSOURCE_URL, RECENT_MAX,
-    SIBLING_APPS,
+    paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
+    DeviceKind, OwnPinChange, OwnPinEditor, BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL,
+    OPENSOURCE_ROOT, OPENSOURCE_URL, OWN_PIN_KEY, RECENT_MAX, SIBLING_APPS,
 };
 
 /// This app's version, surfaced in the changelog popup.
@@ -80,8 +80,13 @@ struct HostApp {
     auto_connect: bool,
     /// Theme override: None = follow the OS, Some(true) = dark, Some(false) = light.
     dark_mode: Option<bool>,
-    /// 4-digit pairing code a client must present to connect (persisted).
+    /// 4-digit pairing code a client must present to connect — your own, or
+    /// this start's random one.
     pin: u32,
+    /// "Use my own PIN": kept across restarts when set; `None` (the default)
+    /// means a fresh PIN every start. See host-ui's `OwnPinEditor`.
+    own_pin: Option<u32>,
+    own_pin_editor: OwnPinEditor,
     /// Reveal the "This PC: …" detail (toggled by clicking the OS icon).
     show_pc_info: bool,
     /// Last theme we painted the title bar for (re-applied on change).
@@ -144,11 +149,14 @@ impl HostApp {
         let storage = cc.storage;
         let recent: Vec<RecentConn> =
             storage.and_then(|s| eframe::get_value(s, "recent")).unwrap_or_default();
-        // Reuse the stored PIN, or mint one on first run.
-        let mut pin: u32 = storage.and_then(|s| eframe::get_value(s, "pin_code")).unwrap_or(0);
-        if pin == 0 {
-            pin = gen_pin();
-        }
+        // Your own PIN if you set one (Actions ▸ Use my own PIN), otherwise a
+        // fresh one every start. ⚠️ The random PIN is deliberately no longer
+        // saved: it was, as "pin_code", which kept a PIN that had been seen or
+        // shared working forever. Old settings files still carry that key; it
+        // is simply not read.
+        let own_pin: Option<u32> =
+            storage.and_then(|s| eframe::get_value::<Option<u32>>(s, OWN_PIN_KEY)).flatten();
+        let pin = startup_pin(own_pin);
         // Always-on LAN listener: nearby hosts appear even before this PC starts
         // serving, so a PC → PC / PC → Mac connection needs no QR scan.
         let discovered_peers = Arc::new(Mutex::new(Vec::new()));
@@ -162,6 +170,8 @@ impl HostApp {
         );
         Self {
             pin,
+            own_pin,
+            own_pin_editor: OwnPinEditor::default(),
             show_pc_info: false,
             caption_dark: None,
             auto_connect: storage
@@ -326,6 +336,26 @@ impl HostApp {
         // And advertise over DNS-SD so the phone apps' host browsers (Android
         // NSD / iOS Bonjour) list this PC under their own "Nearby".
         self.mdns_ad = crate::discovery::advertise_mdns(&host_name(), port).ok();
+    }
+
+    /// Apply a change from the "Use my own PIN" editor, restarting a running
+    /// listener so the new PIN is the one enforced.
+    fn apply_own_pin(&mut self, change: OwnPinChange, ctx: &egui::Context) {
+        match change {
+            OwnPinChange::Set(pin) => {
+                self.own_pin = Some(pin);
+                self.pin = pin;
+            }
+            // Turning it off changes the PIN now, rather than leaving the one
+            // you chose working until the next start.
+            OwnPinChange::Cleared => {
+                self.own_pin = None;
+                self.pin = gen_pin();
+            }
+        }
+        if self.running {
+            self.start(ctx);
+        }
     }
 
     fn stop(&mut self) {
@@ -703,11 +733,20 @@ impl HostApp {
                 ui.separator();
                 if ui.button("🔁  Regenerate PIN").clicked() {
                     self.pin = gen_pin();
+                    // A regenerated PIN is a random one, so it stops being "your
+                    // own" — otherwise the old one would come back next start.
+                    self.own_pin = None;
                     if self.running {
                         self.start(ctx); // restart so the new PIN is enforced
                     }
                     ui.close_menu();
                 }
+                ui.menu_button("🔑  Use my own PIN", |ui| {
+                    if let Some(change) = self.own_pin_editor.ui(ui, self.own_pin) {
+                        self.apply_own_pin(change, ctx);
+                        ui.close_menu();
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.label("Port");
                     ui.add(
@@ -807,6 +846,7 @@ impl HostApp {
                         ui.separator();
                         ui.label(egui::RichText::new("What's protected").strong());
                         ui.label("• A 4-digit pairing PIN is required to connect — scanning the QR fills it in automatically.");
+                        ui.label("• The PIN changes every time the host starts, unless you choose your own in the Actions menu.");
                         ui.label("• The host only accepts connections while this window is open; close it to stop.");
                         // ⚠️ CORRECTED 2026-08-29. These two bullets said
                         // "Traffic is sent unencrypted over your local network
@@ -823,6 +863,7 @@ impl HostApp {
                         ui.label(egui::RichText::new("Not fully locked down").strong());
                         ui.label("• The PIN is what the encryption is built on, so anyone who has it (or sees the QR) can connect and control this PC.");
                         ui.label("• An old client that predates the encryption can still connect in plaintext; the host logs a warning when one does.");
+                        ui.label("• A PIN you chose keeps working until you change it, for anyone who has learned it.");
                         ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no login or per-device approval.");
                         ui.label("• The host listens on all network interfaces on its port.");
                         ui.add_space(6.0);
@@ -881,7 +922,7 @@ impl eframe::App for HostApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "auto_connect", &self.auto_connect);
         eframe::set_value(storage, "dark_mode", &self.dark_mode);
-        eframe::set_value(storage, "pin_code", &self.pin);
+        eframe::set_value(storage, OWN_PIN_KEY, &self.own_pin);
         eframe::set_value(storage, "port", &self.port);
         eframe::set_value(storage, "recent", &*self.recent.lock().unwrap());
     }

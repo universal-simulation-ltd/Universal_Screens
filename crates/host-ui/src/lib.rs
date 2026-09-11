@@ -23,10 +23,14 @@
 //! rather than a third copy of this one. Wiring that in would mean growing it to
 //! match, which is the opposite of the point.
 //!
-//! It does take **one** thing, from 2026-08-29: [`about_panel`]. The distinction
-//! is worth holding onto — layout may differ per platform, but a *claim about
-//! the product* (where your screen goes, the licence, the version) must not, and
-//! three hand-written About boxes is exactly how it would end up doing so.
+//! It does take [`about_panel`] (2026-08-29), and the PIN — [`gen_pin`],
+//! [`startup_pin`] and [`OwnPinEditor`] (2026-09-11). The distinction is worth
+//! holding onto — layout may differ per platform, but a *claim about the
+//! product* (where your screen goes, the licence, the version) must not, and
+//! three hand-written About boxes is exactly how it would end up doing so. The
+//! PIN is the same kind of thing: it is the encryption key, so how it is made
+//! and when it changes must not differ by platform. Linux carried its own
+//! clock-seeded copy of `gen_pin` until then.
 
 use std::net::TcpListener;
 
@@ -88,6 +92,7 @@ pub const SIBLING_APPS: &[(&str, &str, &str)] = &[
 /// real thing. It previously listed *features* ("Universal navbar with Actions &
 /// Profile menus"), which is not what a "what's new" menu is for.
 pub const CHANGELOG: &[&str] = &[
+    "• Choose your own PIN, so saved devices reconnect after a restart",
     "• Windows installer — per-user, no admin prompt",
     "• Encrypted connections over the LAN (Noise protocol)",
     "• Nearby hosts appear automatically — tap, enter PIN, connect",
@@ -107,11 +112,127 @@ pub fn pe(s: &str) -> String {
     out
 }
 
+/// A 4-digit pairing PIN (1000–9999) from the operating system's random source.
+///
+/// ⚠️ **Not the clock.** This used to be `1000 + subsec_nanos() % 9000`, which
+/// looks random and is not: macOS's clock ticks in microseconds, so
+/// `subsec_nanos()` is always a multiple of 1,000 and the PIN could only ever be
+/// 1000, 2000 … 9000 — nine values, measured over 100,000 draws on 2026-09-11.
+/// Windows' clock ticks in 100 ns, which leaves ninety. The PIN is the Noise
+/// pre-shared key (`crates/transport`), so that was the whole of the secret.
 pub fn gen_pin() -> u32 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    1000 + (nanos % 9000)
+    let mut bytes = [0u8; 4];
+    // No fallback on purpose: anything predictable here reintroduces the bug above.
+    getrandom::getrandom(&mut bytes).expect("the OS random number generator is unavailable");
+    1000 + u32::from_le_bytes(bytes) % 9000
+}
+
+/// The eframe storage key for "Use my own PIN". One key for all three hosts.
+pub const OWN_PIN_KEY: &str = "own_pin";
+
+/// Parse the PIN typed into "Use my own PIN": exactly four digits.
+///
+/// ⚠️ `0000` is refused. On the wire `pin == 0` means "no pairing" — each host's
+/// check is `expected_pin != 0 && …` — so saving it would quietly switch the PIN
+/// check off while the window said a PIN was set.
+pub fn parse_own_pin(text: &str) -> Result<u32, &'static str> {
+    let text = text.trim();
+    if text.len() != 4 || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Enter exactly four digits.");
+    }
+    match text.parse::<u32>() {
+        Ok(0) => Err("0000 would switch the PIN off — choose another."),
+        Ok(pin) => Ok(pin),
+        Err(_) => Err("Enter exactly four digits."),
+    }
+}
+
+/// The PIN a host starts with: your own when you've set one, otherwise a fresh
+/// random one. A stored value no client could type (0, or over four digits) is
+/// ignored rather than trusted.
+pub fn startup_pin(own: Option<u32>) -> u32 {
+    own.filter(|pin| (1..=9999).contains(pin)).unwrap_or_else(gen_pin)
+}
+
+/// What the user did in [`OwnPinEditor`]. The host applies it: it owns the
+/// running PIN, and has to restart its listener for a new one to be enforced.
+pub enum OwnPinChange {
+    /// Keep this PIN across restarts.
+    Set(u32),
+    /// Back to the default: a fresh PIN every start, starting now.
+    Cleared,
+}
+
+/// "Use my own PIN" — the opt-in that keeps one PIN across restarts.
+///
+/// **Off by default, deliberately.** With it off the host picks a new PIN each
+/// time it starts, so a PIN that was seen or shared stops working at the next
+/// start. With it on, a device that saved this host reconnects after a restart —
+/// and so can anyone else who ever learned the PIN, until it is changed. The
+/// panel says so, because that trade is the user's to make.
+///
+/// The PIN itself is never drawn here: the main window's reveal-on-click is the
+/// one place it is shown, and this menu may be on a screen being mirrored.
+#[derive(Default)]
+pub struct OwnPinEditor {
+    draft: String,
+    error: Option<&'static str>,
+}
+
+impl OwnPinEditor {
+    /// Draw the editor. `own` is the saved PIN (`None` = off).
+    pub fn ui(&mut self, ui: &mut egui::Ui, own: Option<u32>) -> Option<OwnPinChange> {
+        let mut change = None;
+        ui.set_max_width(300.0);
+        ui.label(
+            egui::RichText::new(if own.is_some() {
+                "On — this host keeps the PIN you chose"
+            } else {
+                "Off — a new PIN every time the host starts"
+            })
+            .strong(),
+        );
+        ui.small(
+            "Choose a PIN to keep, so a device that saved this host can reconnect \
+             after a restart without you being here to read the new one.",
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut self.draft)
+                    .hint_text("4 digits")
+                    .char_limit(4)
+                    .desired_width(64.0),
+            );
+            self.draft.retain(|c| c.is_ascii_digit());
+            let label = if own.is_some() { "Change" } else { "Use this PIN" };
+            let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(label).clicked() || entered {
+                match parse_own_pin(&self.draft) {
+                    Ok(pin) => {
+                        change = Some(OwnPinChange::Set(pin));
+                        self.draft.clear();
+                        self.error = None;
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+        });
+        if let Some(e) = self.error {
+            let red = ui.visuals().error_fg_color;
+            ui.colored_label(red, e);
+        }
+        if own.is_some() && ui.button("Turn off, and change the PIN now").clicked() {
+            change = Some(OwnPinChange::Cleared);
+            self.error = None;
+        }
+        ui.add_space(4.0);
+        ui.small(
+            "Anyone who learns it can connect until you change it, and wrong guesses \
+             aren't rate-limited — so not 1234, and not a year.",
+        );
+        change
+    }
 }
 
 /// A short room code for cross-network remote access. Six chars from an
@@ -546,6 +667,47 @@ mod tests {
     fn pe_encodes_reserved_keeps_unreserved() {
         assert_eq!(pe("a b/c?d=e&f"), "a%20b%2Fc%3Fd%3De%26f");
         assert_eq!(pe("Safe-1._~"), "Safe-1._~");
+    }
+
+    /// The regression: a clock-seeded PIN took 9 values on macOS (µs clock) and
+    /// 90 on Windows (100 ns). 2,000 draws from 9,000 PINs should give ~1,800
+    /// distinct values; the clock version gave 9.
+    #[test]
+    fn gen_pin_is_four_digits_and_not_clock_quantised() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..2000 {
+            let pin = gen_pin();
+            assert!((1000..10000).contains(&pin), "{pin}");
+            seen.insert(pin);
+        }
+        assert!(seen.len() > 1000, "only {} distinct PINs in 2000 draws", seen.len());
+    }
+
+    #[test]
+    fn own_pin_takes_exactly_four_digits() {
+        assert_eq!(parse_own_pin("2468"), Ok(2468));
+        // Leading zeros are a real PIN; the URL and the clients pad to four.
+        assert_eq!(parse_own_pin(" 0042 "), Ok(42));
+        for bad in ["", "123", "12345", "12a4", "-123", "+123", "１２３４"] {
+            assert!(parse_own_pin(bad).is_err(), "{bad:?} was accepted");
+        }
+    }
+
+    /// `pin == 0` is "no pairing" on the wire, so accepting 0000 would switch the
+    /// host's PIN check off while the window said a PIN was set.
+    #[test]
+    fn own_pin_refuses_0000() {
+        assert!(parse_own_pin("0000").is_err());
+    }
+
+    #[test]
+    fn startup_pin_uses_own_pin_else_a_fresh_one() {
+        assert_eq!(startup_pin(Some(2468)), 2468);
+        assert_eq!(startup_pin(Some(42)), 42);
+        for stored in [None, Some(0), Some(10_000), Some(u32::MAX)] {
+            let pin = startup_pin(stored);
+            assert!((1000..10000).contains(&pin), "{stored:?} -> {pin}");
+        }
     }
 
     #[test]

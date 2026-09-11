@@ -4,6 +4,68 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-09-11 ("Use my own PIN" — and the random PIN only ever had nine values on a Mac)
+
+**Pushed through branch `own-pin` so CI could compile the Linux and Windows
+hosts, which the Mac cannot (`x11rb`; `ring` wants MSVC), then merged to `main`.**
+James set the Mac host up, walked away, and couldn't connect from his phone
+because he didn't know the PIN. He asked for a "set PIN" option, **off by
+default for security**.
+
+**What shipped** — one implementation in `host-ui`, used by all three hosts:
+`OwnPinEditor` (the panel), `parse_own_pin`, `startup_pin` and `OWN_PIN_KEY`.
+macOS and Windows show it as **Actions ▸ 🔑 Use my own PIN**. Linux has no
+Actions menu, so it's under **⚙**.
+
+- **Off (the default):** a fresh PIN every time the host starts. ⚠️ **This is a
+  behaviour change on macOS and Windows.** Both saved the random PIN as
+  `pin_code` and reused it forever, so a PIN that had been seen or shared never
+  stopped working. Old settings files still hold that key; nothing reads it now.
+  Linux already made a new PIN on every start.
+- **On:** the PIN you typed, saved as `own_pin` and used on every start. Saved
+  phone connections already store the PIN (`ConnectionStore` on iOS and
+  Android), so **no client change was needed**.
+- `0000` is refused. `pin == 0` means "no pairing" on the wire, so saving it
+  would switch the check off while the window said a PIN was set.
+- **Regenerate PIN** turns your own PIN off. Otherwise the old one would come
+  back at the next start.
+- **Turning your own PIN off changes the PIN at once**, rather than leaving it
+  working until the next start.
+- The editor never shows the PIN digits, because the screen it's on may be
+  being mirrored. The main window's click-to-reveal is still the one place
+  that shows the PIN.
+
+### ⚠️ `gen_pin` had 9 possible values on macOS and 90 on Windows
+
+It was `1000 + subsec_nanos() % 9000`. macOS's clock ticks in microseconds, so
+`subsec_nanos()` is always a multiple of 1,000. **100,000 draws on the Mac gave
+exactly {1000, 2000, … 9000}**, and the PIN saved on this Mac was one of them. Windows ticks in
+100 ns, which leaves 90 values. The PIN is the Noise pre-shared key, so the
+encryption's whole secret could be guessed in seconds. It now comes from the OS
+random number generator (`getrandom`, already in the lockfile via `transport`).
+The Linux host's own clock-seeded copy is deleted, and Linux now uses the
+shared one.
+
+`gen_pin_is_four_digits_and_not_clock_quantised` fails on the old code: 2,000
+draws must give more than 1,000 distinct PINs, and the old code gave 9.
+
+### Not verified / left open
+
+- **The panel has never been looked at.** The Mac's screen was locked all
+  session (`CGSSessionScreenIsLocked=Yes`, and `screencapture` came back black).
+  So this change is compiled and unit-tested, but nobody has seen it on screen.
+- **Wrong PINs still aren't rate-limited.** A fixed PIN you chose, with no
+  lockout, can be guessed online: there are only 10,000. The panel and the 🔒
+  Security popup say so. A per-host backoff after failed handshakes is the
+  obvious next step. A wrong PIN fails in `transport::accept` (AEAD), not at the
+  hello check.
+- The PIN reaches disk through eframe's own save: on exit, or every 30 s while
+  the window is repainting. It does not save the moment you press the button.
+- The Mac host running now is the pre-change build, still on its old saved PIN. **It was
+  deliberately NOT relaunched:** James is away from the Mac, a relaunch would
+  make a new PIN, and a rebuilt ad-hoc binary probably has to be granted Screen
+  Recording again.
+
 ## Update — 2026-09-01 (the native clients wear the suite bar — and the first cut copied the wrong one)
 
 **Shipped, pushed. Verified on the Nothing Phone AND in the iOS simulator

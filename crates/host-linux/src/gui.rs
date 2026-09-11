@@ -14,12 +14,16 @@
 //! symptom of a missing udev rule is a phone that connects, says "connected",
 //! and moves no slides.
 //!
-//! ⚠️ **It now takes exactly ONE thing from `host-ui`: `about_panel`** (added
-//! 2026-08-29 with the suite-wide "About this app"). That is not the adoption
+//! ⚠️ **It takes exactly TWO things from `host-ui`: `about_panel`** (added
+//! 2026-08-29 with the suite-wide "About this app") **and the PIN** —
+//! `startup_pin` and `OwnPinEditor` (2026-09-11). That is not the adoption
 //! described above and does not start it — the chrome is still this file's own.
 //! The panel is shared because it makes *claims about the product* (what
 //! happens to your screen, the licence, the version), and a claim that can
-//! drift between platforms is worse than a little duplication of layout.
+//! drift between platforms is worse than a little duplication of layout. The
+//! PIN is shared because it is the encryption key: this file had its own
+//! clock-seeded `gen_pin`, one of three, and the other two gave 9 and 90
+//! possible PINs.
 
 use std::net::{TcpListener, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +33,7 @@ use std::thread;
 
 use eframe::egui;
 
-use extender_host_ui::about_panel;
+use extender_host_ui::{about_panel, startup_pin, OwnPinChange, OwnPinEditor, OWN_PIN_KEY};
 
 use crate::inject::{self, UinputStatus};
 use crate::{capture, firewall, wifi, HostEvent};
@@ -69,8 +73,12 @@ struct HostApp {
     /// The bound port and the LAN address a phone should dial.
     port: u16,
     ip: Option<String>,
-    /// The 4-digit pairing PIN, regenerated each time the host starts.
+    /// The 4-digit pairing PIN: your own, or regenerated each time the host starts.
     pin: u32,
+    /// "Use my own PIN": kept across restarts when set; `None` (the default)
+    /// means a fresh PIN every start. See host-ui's `OwnPinEditor`.
+    own_pin: Option<u32>,
+    own_pin_editor: OwnPinEditor,
     /// Latest lifecycle line from the accept loop.
     status: String,
     events: Option<Receiver<String>>,
@@ -93,6 +101,8 @@ struct HostApp {
 impl HostApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let storage = cc.storage;
+        let own_pin: Option<u32> =
+            storage.and_then(|s| eframe::get_value::<Option<u32>>(s, OWN_PIN_KEY)).flatten();
         Self {
             dark_mode: storage
                 .and_then(|s| eframe::get_value(s, "dark_mode"))
@@ -101,7 +111,9 @@ impl HostApp {
             stop: Arc::new(AtomicBool::new(false)),
             port: BASE_PORT,
             ip: best_lan_ip(),
-            pin: gen_pin(),
+            pin: startup_pin(own_pin),
+            own_pin,
+            own_pin_editor: OwnPinEditor::default(),
             status: "Not started".to_owned(),
             events: None,
             uinput: inject::uinput_status(),
@@ -121,7 +133,7 @@ impl HostApp {
             return;
         };
         self.port = port;
-        self.pin = gen_pin();
+        self.pin = startup_pin(self.own_pin);
         self.ip = best_lan_ip();
         self.uinput = inject::uinput_status();
         self.capture = capture::status();
@@ -155,6 +167,22 @@ impl HostApp {
         self.status = "Waiting for a client…".to_owned();
     }
 
+    /// Apply a change from the "Use my own PIN" editor. The PIN is fixed for the
+    /// life of one listener, so a running host restarts to enforce it.
+    fn apply_own_pin(&mut self, change: OwnPinChange, ctx: &egui::Context) {
+        self.own_pin = match change {
+            OwnPinChange::Set(pin) => Some(pin),
+            OwnPinChange::Cleared => None,
+        };
+        if self.running {
+            // Stop first: start() here doesn't, and would bind a second port.
+            self.stop();
+            self.start(ctx);
+        } else {
+            self.pin = startup_pin(self.own_pin);
+        }
+    }
+
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         // Withdraw the mDNS advertisement rather than leaving a phone browsing
@@ -186,6 +214,7 @@ impl HostApp {
 impl eframe::App for HostApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "dark_mode", &self.dark_mode);
+        eframe::set_value(storage, OWN_PIN_KEY, &self.own_pin);
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -224,6 +253,15 @@ impl eframe::App for HostApp {
                         ui.menu_button("⚙", |ui| {
                             ui.menu_button("ℹ  About this app", |ui| {
                                 about_panel(ui, APP_VERSION);
+                            });
+                            // This lean window's only settings menu, so "Use my
+                            // own PIN" lives here rather than under Actions as on
+                            // the other two hosts. Same shared editor.
+                            ui.menu_button("🔑  Use my own PIN", |ui| {
+                                if let Some(change) = self.own_pin_editor.ui(ui, self.own_pin) {
+                                    self.apply_own_pin(change, ctx);
+                                    ui.close_menu();
+                                }
                             });
                         })
                         .response
@@ -528,16 +566,6 @@ fn pe(s: &str) -> String {
     out
 }
 
-/// A 4-digit pairing PIN, seeded from the clock (not a secret in the crypto
-/// sense — it keys the Noise handshake, which is what actually protects the
-/// session).
-fn gen_pin() -> u32 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    1000 + (nanos % 9000)
-}
-
 /// Bind the first free port at or after `start`, so the host "just works" even
 /// when the default port is taken.
 fn first_free_port(start: u16) -> Option<(TcpListener, u16)> {
@@ -623,14 +651,6 @@ mod tests {
     fn percent_encoding_leaves_unreserved_characters_alone() {
         assert_eq!(pe("abc-123_x.y~z"), "abc-123_x.y~z");
         assert_eq!(pe("a b&c"), "a%20b%26c");
-    }
-
-    #[test]
-    fn pin_is_always_four_digits() {
-        for _ in 0..50 {
-            let pin = gen_pin();
-            assert!((1000..10000).contains(&pin), "{pin}");
-        }
     }
 
     #[test]
