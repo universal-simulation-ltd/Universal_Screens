@@ -117,7 +117,7 @@ pub(crate) fn serve_session(
 
     match mode {
         CaptureMode::ControlOnly => {
-            receive_and_inject(stream, bounds);
+            receive_and_inject(stream, bounds, 1.0);
             Ok(())
         }
         _ => serve_video(stream, id, size, bounds),
@@ -130,7 +130,7 @@ pub(crate) fn serve_control_only(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
     let (_, _, bounds) = primary_display()?;
-    receive_and_inject(stream, bounds);
+    receive_and_inject(stream, bounds, 1.0);
     Ok(())
 }
 
@@ -222,7 +222,9 @@ fn serve_video(
     }
 
     let input_stream = stream.try_clone()?;
-    let input_thread = thread::spawn(move || receive_and_inject(input_stream, bounds));
+    // Remote control sends relative motion in stream pixels; convert to points.
+    let rel_scale = bounds.2 / f64::from(width);
+    let input_thread = thread::spawn(move || receive_and_inject(input_stream, bounds, rel_scale));
 
     sc.start_capture()?;
     let result = stream_to_client(stream, &rx, width, height, &dead);
@@ -237,18 +239,42 @@ fn serve_video(
 }
 
 /// Read input events from the client and inject them until the client disconnects.
-fn receive_and_inject(mut stream: Conn, bounds: Bounds) {
-    let mut cursor = (bounds.0, bounds.1);
+///
+/// `rel_scale` converts the client's relative motion into points: 1.0 for the
+/// trackpad (no video), and points-per-stream-pixel in a video session, where
+/// Remote control sends its motion in the stream's pixels (a Retina capture has
+/// two per point, so unscaled the pointer would run twice as far as the finger).
+fn receive_and_inject(mut stream: Conn, bounds: Bounds, rel_scale: f64) {
+    let mut cursor = current_cursor(bounds);
     // Track whether the left button is held so moves can be posted as drags —
     // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
     // held-button move otherwise wouldn't select text / drag windows.
     let mut left_down = false;
     while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
-        inject(input, bounds, &mut cursor, &mut left_down);
+        inject(input, bounds, rel_scale, &mut cursor, &mut left_down);
     }
 }
 
-fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64), left_down: &mut bool) {
+/// Where the real pointer is, if it's on this display, so relative motion carries
+/// on from it rather than jumping to the display's top-left corner; else the
+/// display's centre.
+fn current_cursor(bounds: Bounds) -> (f64, f64) {
+    let (x, y, w, h) = bounds;
+    CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .ok()
+        .and_then(|source| CGEvent::new(source).ok())
+        .map(|event| event.location())
+        .filter(|p| p.x >= x && p.x < x + w && p.y >= y && p.y < y + h)
+        .map_or((x + w / 2.0, y + h / 2.0), |p| (p.x, p.y))
+}
+
+fn inject(
+    input: Input,
+    bounds: Bounds,
+    rel_scale: f64,
+    cursor: &mut (f64, f64),
+    left_down: &mut bool,
+) {
     let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
         return;
     };
@@ -262,8 +288,9 @@ fn inject(input: Input, bounds: Bounds, cursor: &mut (f64, f64), left_down: &mut
             post_mouse(source, move_type(*left_down), *cursor, CGMouseButton::Left);
         }
         Input::MouseMoveRelative { dx, dy } => {
-            cursor.0 = (cursor.0 + f64::from(dx)).clamp(bounds.0, bounds.0 + bounds.2 - 1.0);
-            cursor.1 = (cursor.1 + f64::from(dy)).clamp(bounds.1, bounds.1 + bounds.3 - 1.0);
+            let (dx, dy) = (f64::from(dx) * rel_scale, f64::from(dy) * rel_scale);
+            cursor.0 = (cursor.0 + dx).clamp(bounds.0, bounds.0 + bounds.2 - 1.0);
+            cursor.1 = (cursor.1 + dy).clamp(bounds.1, bounds.1 + bounds.3 - 1.0);
             post_mouse(source, move_type(*left_down), *cursor, CGMouseButton::Left);
         }
         Input::MouseButton { button, pressed } => {

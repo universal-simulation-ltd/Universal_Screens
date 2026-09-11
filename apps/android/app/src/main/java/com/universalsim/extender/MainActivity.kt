@@ -28,6 +28,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -69,6 +70,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,19 +84,21 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.changedToDown
-import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.navigationBarsPadding
 import kotlin.math.abs
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView
@@ -1459,10 +1464,11 @@ private fun PreviewTile(bitmap: ImageBitmap?, dim: Boolean, label: String) {
 }
 
 /**
- * Streams the host's screen via MediaCodec into a TextureView (transformable, so
- * pinch-zoom + pan work). When [forwardInput] is true (Remote control), touches
- * are forwarded as absolute pointer input normalized to the video area. In Mirror
- * they drive pinch-zoom + drag-to-pan, and a tap toggles the top bar.
+ * Streams the host's screen via MediaCodec into a TextureView, letterboxed to the
+ * host's aspect ratio. In Mirror, pinch zooms, a drag pans (when zoomed) and a tap
+ * toggles the top bar. In Remote control ([forwardInput]) the screen becomes a
+ * trackpad laid over the picture, with Left/Right buttons along the bottom — see
+ * [RemoteControlLayer].
  */
 @Composable
 fun StreamScreen(
@@ -1475,36 +1481,20 @@ fun StreamScreen(
     // The host's screen aspect ratio (width/height), learned from StreamStart, so
     // we can letterbox instead of stretching.
     var videoAspect by remember { mutableStateOf<Float?>(null) }
-    // Mirror zoom/pan.
+    // The stream's size in pixels, also from StreamStart: Remote control turns a
+    // finger's travel across the picture into that many host pixels.
+    var videoSize by remember { mutableStateOf(IntSize.Zero) }
+    // The picture's on-screen size before zoom, and the whole area it sits in.
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    // Zoom/pan. Mirror's own gesture drives it; in Remote control the layer does.
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    // Size the video area to the host's aspect ratio (centred → letterboxed) once
-    // known; touch input is normalised to that area so remote control maps right.
+    // Size the video area to the host's aspect ratio (centred → letterboxed) once known.
     var viewModifier =
-        if (videoAspect != null) Modifier.aspectRatio(videoAspect!!) else Modifier.fillMaxSize()
-    viewModifier = if (forwardInput) {
-        viewModifier.pointerInput(session) {
-            val w = size.width.toFloat()
-            val h = size.height.toFloat()
-            awaitPointerEventScope {
-                while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull() ?: continue
-                    val nx = (change.position.x / w).coerceIn(0f, 1f)
-                    val ny = (change.position.y / h).coerceIn(0f, 1f)
-                    val phase = when {
-                        change.changedToDown() -> TouchPhase.BEGAN
-                        change.changedToUp() -> TouchPhase.ENDED
-                        else -> TouchPhase.MOVED
-                    }
-                    session.sendTouch(0, phase, nx, ny)
-                    change.consume()
-                }
-            }
-        }
-    } else {
-        // Mirror: pinch to zoom, drag to pan (when zoomed), tap toggles the bar.
-        viewModifier
+        (if (videoAspect != null) Modifier.aspectRatio(videoAspect!!) else Modifier.fillMaxSize())
+            .onSizeChanged { viewSize = it }
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -1512,6 +1502,9 @@ fun StreamScreen(
                 translationY = offset.y
                 clip = true
             }
+    if (!forwardInput) {
+        // Mirror: pinch to zoom, drag to pan (when zoomed), tap toggles the bar.
+        viewModifier = viewModifier
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown()
@@ -1542,7 +1535,10 @@ fun StreamScreen(
             }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black).onSizeChanged { containerSize = it },
+        contentAlignment = Alignment.Center,
+    ) {
         AndroidView(modifier = viewModifier, factory = { ctx ->
             TextureView(ctx).apply {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -1552,8 +1548,11 @@ fun StreamScreen(
                         val surface = Surface(st)
                         session.startPump(object : ExtenderSession.FrameSink {
                             override fun onStart(width: Int, height: Int, codec: Int, csd: ByteArray) {
-                                if (height > 0) {
-                                    runOnUi { videoAspect = width.toFloat() / height.toFloat() }
+                                if (width > 0 && height > 0) {
+                                    runOnUi {
+                                        videoAspect = width.toFloat() / height.toFloat()
+                                        videoSize = IntSize(width, height)
+                                    }
                                 }
                                 decoder = VideoDecoder(width, height, codec, csd, surface)
                             }
@@ -1587,25 +1586,297 @@ fun StreamScreen(
         })
 
         if (forwardInput) {
-            // Taps are forwarded as control, so the bar can't be toggled by tapping
-            // the screen. This dim, always-present handle does it: press and hold to
-            // show/hide the bar. Its own touches are consumed (no stray host click).
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .size(48.dp)
-                    .pointerInput(Unit) { detectTapGestures(onLongPress = { onToggleChrome() }) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.app_icon),
-                    contentDescription = "Press and hold to show or hide the controls",
-                    modifier = Modifier.size(44.dp),
-                    alpha = 0.4f,
-                )
+            RemoteControlLayer(
+                session = session,
+                videoSize = videoSize,
+                viewSize = viewSize,
+                containerSize = containerSize,
+                scale = scale,
+                onTransform = { s, o -> scale = s; offset = o },
+                currentOffset = { offset },
+                onToggleChrome = onToggleChrome,
+            )
+        }
+    }
+}
+
+/** Which way a two-finger Remote control gesture went — decided early, then kept. */
+private enum class TwoFinger { UNDECIDED, VIEW, SCROLL }
+
+/**
+ * Remote control over the streamed picture. Nothing a finger does here clicks
+ * unless it is meant to:
+ *
+ *  • **one finger** moves the pointer — relative, like a trackpad laid over the
+ *    picture, scaled so the pointer crosses as much of the host's screen as the
+ *    finger crosses of the picture (so it gets finer as you zoom in);
+ *  • a **quick tap** left-clicks (skipped while Left is held), a quick
+ *    **two-finger tap** right-clicks;
+ *  • **two fingers** pinch to zoom and drag to pan the picture on the phone only
+ *    — or, at 1×, drag to scroll the host. Nothing is clicked while zooming or
+ *    panning;
+ *  • **Left / Right** buttons click at the pointer; double-tap Left to hold it
+ *    down (to select text or drag), tap it again to let go.
+ *
+ * It is all relative motion, buttons and scroll, which every host injects;
+ * touches and absolute positions reach only the Mac host, so they aren't used.
+ * Matches the iPhone's `RemoteSurfaceView`.
+ */
+@Composable
+private fun RemoteControlLayer(
+    session: ExtenderSession,
+    videoSize: IntSize,
+    viewSize: IntSize,
+    containerSize: IntSize,
+    scale: Float,
+    onTransform: (Float, Offset) -> Unit,
+    currentOffset: () -> Offset,
+    onToggleChrome: () -> Unit,
+) {
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    // The gesture loop outlives recompositions, so it reads these through
+    // updated-state holders rather than the values it first saw.
+    val video by rememberUpdatedState(videoSize)
+    val picture by rememberUpdatedState(viewSize)
+    val container by rememberUpdatedState(containerSize)
+    val zoom by rememberUpdatedState(scale)
+    var leftHeld by remember { mutableStateOf(false) }
+    var pendingLeft by remember { mutableStateOf<Job?>(null) }
+    var showHint by remember { mutableStateOf(true) }
+    val tapSlop = 16f
+    val tapMaxMs = 300L
+    val doubleTapMs = 300L
+    val zoomThreshold = 0.06f
+    val travelThreshold = 24f
+    val scrollDivisor = 40f
+
+    fun click(button: Int) {
+        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        session.sendMouseButton(button, true)
+        session.sendMouseButton(button, false)
+    }
+    fun setLeftHeld(on: Boolean) {
+        if (on == leftHeld) return
+        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        session.sendMouseButton(0, on)
+        leftHeld = on
+    }
+    // One tap on Left clicks — held back a moment in case a second tap follows,
+    // because click-then-press would reach the host as a double-click (which
+    // maximises a window you meant to drag). A second tap in time holds the button
+    // instead, and a tap while it's held lets go.
+    fun onLeftTap() {
+        val pending = pendingLeft
+        when {
+            leftHeld -> setLeftHeld(false)
+            pending?.isActive == true -> {
+                pending.cancel()
+                pendingLeft = null
+                setLeftHeld(true)
+            }
+            else -> pendingLeft = scope.launch {
+                delay(doubleTapMs)
+                pendingLeft = null
+                click(0)
             }
         }
+    }
+    // Zoom by [by] about [focus] (so the point under the fingers stays put), pan by
+    // [pan], and keep the picture covering the screen along any axis where it
+    // overflows it. Returns the new scale and offset.
+    fun zoomPan(s0: Float, o0: Offset, by: Float, pan: Offset, focus: Offset): Pair<Float, Offset> {
+        val s1 = (s0 * by).coerceIn(1f, 5f)
+        val f = focus - Offset(container.width / 2f, container.height / 2f)
+        val o = f - (f - o0) * (s1 / s0) + pan
+        val maxX = maxOf(0f, (picture.width * s1 - container.width) / 2f)
+        val maxY = maxOf(0f, (picture.height * s1 - container.height) / 2f)
+        return s1 to Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
+    }
+
+    LaunchedEffect(Unit) {
+        delay(6_000)
+        showHint = false
+    }
+    // Safety net: never leave the left button stuck down on the host.
+    DisposableEffect(Unit) {
+        onDispose { if (leftHeld) session.sendMouseButton(0, false) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(session) {
+                    // Sub-pixel remainders, so slow or zoomed-in motion isn't rounded
+                    // away (the Windows and Linux hosts inject whole pixels).
+                    var carryX = 0f
+                    var carryY = 0f
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        // Gesture-local zoom/pan: pushed out on every step, but read
+                        // back from here, as state only catches up on recomposition.
+                        var s = zoom
+                        var o = currentOffset()
+                        var maxPointers = 1
+                        var moved = 0f
+                        var mode = TwoFinger.UNDECIDED
+                        var zoomSoFar = 1f
+                        var travel = 0f
+                        var lastUptime = down.uptimeMillis
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.count { it.pressed }
+                            maxPointers = maxOf(maxPointers, pressed)
+                            lastUptime = event.changes.maxOf { it.uptimeMillis }
+                            if (maxPointers >= 2) {
+                                // Once a second finger has landed, the gesture is about
+                                // the picture (or scrolling) until every finger lifts —
+                                // never pointer motion.
+                                if (pressed >= 2) {
+                                    val by = event.calculateZoom()
+                                    val pan = event.calculatePan()
+                                    zoomSoFar *= by
+                                    travel += pan.getDistance()
+                                    moved += abs(pan.x) + abs(pan.y)
+                                    if (mode == TwoFinger.UNDECIDED) {
+                                        mode = when {
+                                            abs(zoomSoFar - 1f) > zoomThreshold -> TwoFinger.VIEW
+                                            travel > travelThreshold ->
+                                                if (s > 1f) TwoFinger.VIEW else TwoFinger.SCROLL
+                                            else -> TwoFinger.UNDECIDED
+                                        }
+                                    }
+                                    when (mode) {
+                                        TwoFinger.VIEW -> {
+                                            val next = zoomPan(s, o, by, pan, event.calculateCentroid(useCurrent = true))
+                                            s = next.first
+                                            o = next.second
+                                            onTransform(s, o)
+                                        }
+                                        // Natural direction, like the Trackpad mode.
+                                        TwoFinger.SCROLL ->
+                                            session.sendScroll(pan.x / scrollDivisor, -pan.y / scrollDivisor)
+                                        TwoFinger.UNDECIDED -> {}
+                                    }
+                                }
+                            } else {
+                                val change = event.changes.first()
+                                val d = change.position - change.previousPosition
+                                moved += abs(d.x) + abs(d.y)
+                                if (change.pressed && d != Offset.Zero) {
+                                    // Host pixels per screen pixel at the current zoom.
+                                    val shown = picture.width * s
+                                    val k = if (video.width > 0 && shown > 0f) video.width / shown else 1f
+                                    carryX += d.x * k
+                                    carryY += d.y * k
+                                    val ix = carryX.toInt()
+                                    val iy = carryY.toInt()
+                                    if (ix != 0 || iy != 0) {
+                                        carryX -= ix
+                                        carryY -= iy
+                                        session.sendMouseMoveRelative(ix.toFloat(), iy.toFloat())
+                                    }
+                                }
+                            }
+                            event.changes.forEach { it.consume() }
+                            if (event.changes.none { it.pressed }) break
+                        }
+                        // A quick, near-stationary touch that never became a zoom, pan
+                        // or scroll is a click: two fingers = right. Left is skipped
+                        // while it's held down.
+                        val quick = lastUptime - down.uptimeMillis < tapMaxMs
+                        if (quick && moved < tapSlop && mode == TwoFinger.UNDECIDED) {
+                            if (maxPointers >= 2) click(1) else if (!leftHeld) click(0)
+                        }
+                    }
+                },
+        )
+
+        // Touches become pointer input, so the bar can't be toggled by tapping the
+        // picture. This dim, always-present handle does it: press and hold to
+        // show/hide the bar. Its own touches are consumed (no stray host click).
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .size(48.dp)
+                .pointerInput(Unit) { detectTapGestures(onLongPress = { onToggleChrome() }) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.app_icon),
+                contentDescription = "Press and hold to show or hide the controls",
+                modifier = Modifier.size(44.dp),
+                alpha = 0.4f,
+            )
+        }
+
+        // Left / Right, plus a zoom chip while zoomed. The column has no pointer
+        // input of its own, so touches in its gaps still reach the surface.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (scale > 1.01f) {
+                Text(
+                    "${"%.1f".format(scale)}× · Reset zoom",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .clickable { onTransform(1f, Offset.Zero) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            if (showHint && !leftHeld) {
+                Text(
+                    "Drag to move · tap to click · two fingers to zoom or scroll",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MouseButton(
+                    label = if (leftHeld) "Left held" else "Left",
+                    hint = if (leftHeld) "Tap to let go" else "Double-tap to hold",
+                    active = leftHeld,
+                    modifier = Modifier.weight(1f),
+                    onTap = { onLeftTap() },
+                )
+                MouseButton(label = "Right", hint = null, active = false, modifier = Modifier.weight(1f)) { click(1) }
+            }
+        }
+    }
+}
+
+/** A large, translucent mouse button for Remote control; [active] = held down. */
+@Composable
+private fun MouseButton(label: String, hint: String?, active: Boolean, modifier: Modifier, onTap: () -> Unit) {
+    Column(
+        modifier = modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            // Brand orange (#e05504) while held, so it's obvious the button is down.
+            .background(if (active) Color(0xFFE05504) else Color.Black.copy(alpha = 0.6f))
+            .clickable(onClickLabel = label) { onTap() },
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(label, color = Color.White, fontWeight = FontWeight.SemiBold)
+        if (hint != null) Text(hint, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
     }
 }
 
