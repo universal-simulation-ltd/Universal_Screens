@@ -65,7 +65,34 @@ use sha2::{Digest, Sha256};
 /// `TcpStream` (a browser's WebSocket) can run the identical tunnel.
 pub mod session;
 
+/// Wrong-PIN rate limiting for the hosts' accept loops — see [`PinGuard`].
+pub mod guard;
+
+pub use guard::PinGuard;
 pub use session::{Initiator, Session};
+
+/// The inner error of an [`accept`] that failed because the peer's first Noise
+/// message did not authenticate — which, since the PIN keys that message, is
+/// what a wrong PIN looks like. Test for it with [`is_pin_rejection`].
+#[derive(Debug)]
+struct PinRejected(snow::Error);
+
+impl std::fmt::Display for PinRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "noise: handshake rejected (wrong PIN?): {}", self.0)
+    }
+}
+
+impl std::error::Error for PinRejected {}
+
+/// Whether an [`accept`] error means the peer *tested a PIN and got it wrong* —
+/// its handshake message arrived and failed to authenticate — as opposed to a
+/// peer that hung up, timed out, or never spoke Noise. Only the former is a
+/// guess, so only the former should count towards a [`PinGuard`] lockout.
+#[must_use]
+pub fn is_pin_rejection(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<PinRejected>())
+}
 
 /// The Noise handshake pattern + crypto suite. `NNpsk0`: ephemeral-ephemeral (no
 /// static keys to distribute) with the PIN mixed in as a pre-shared key at the
@@ -199,7 +226,12 @@ fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn
     // -> psk, e
     let msg = read_handshake_msg(&mut stream)?;
     let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
-    hs.read_message(&msg, &mut scratch).map_err(noise_err)?;
+    // ⚠️ This is the line a wrong PIN fails on: the PSK keys this message's
+    // AEAD tag. Its error is marked (`PinRejected`) so the host can count it
+    // towards a lockout — and nothing above it is, because a peer that hangs
+    // up before this point has tested no PIN.
+    hs.read_message(&msg, &mut scratch)
+        .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, PinRejected(e)))?;
 
     // <- e, ee
     let mut buf = [0u8; MAX_HANDSHAKE_MSG];
@@ -696,6 +728,55 @@ mod tests {
             .map_err(|e| e.to_string())
             .and_then(|n| init.finish(&reply[..n]).map_err(|e| e.to_string()));
         assert!(outcome.is_err(), "a wrong PIN must not yield a session");
-        assert!(host.join().unwrap().is_err(), "and the host must reject it too");
+        let host_err = host.join().unwrap().err().expect("and the host must reject it too");
+        assert!(
+            is_pin_rejection(&host_err),
+            "a wrong PIN must be countable as a guess: {host_err}"
+        );
+    }
+
+    /// The host side of a wrong PIN through the real `connect`: marked as a
+    /// rejection, so the hosts' `PinGuard` counts it.
+    #[test]
+    fn a_wrong_pin_is_reported_as_a_pin_rejection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+            accept(sock, 1111)
+        });
+        let sock = TcpStream::connect(addr).unwrap();
+        sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+        assert!(connect(sock, 2222).is_err());
+        let err = host.join().unwrap().err().expect("host must reject a wrong PIN");
+        assert!(is_pin_rejection(&err), "{err}");
+    }
+
+    /// A peer that sends the preamble and hangs up has tested no PIN, so it must
+    /// NOT count — otherwise anyone could lock the owner out without guessing.
+    #[test]
+    fn a_peer_that_hangs_up_mid_handshake_is_not_a_pin_rejection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+            accept(sock, 1111)
+        });
+        let mut sock = TcpStream::connect(addr).unwrap();
+        sock.write_all(&PREAMBLE).unwrap();
+        sock.flush().unwrap();
+        drop(sock);
+        let err = host.join().unwrap().err().expect("a truncated handshake is an error");
+        assert!(!is_pin_rejection(&err), "{err}");
+    }
+
+    /// Ordinary I/O and framing errors are not guesses either.
+    #[test]
+    fn a_plain_io_error_is_not_a_pin_rejection() {
+        let e = io::Error::new(io::ErrorKind::UnexpectedEof, "gone");
+        assert!(!is_pin_rejection(&e));
+        assert!(!is_pin_rejection(&noise_err("handshake message exceeds the maximum size")));
     }
 }

@@ -92,6 +92,7 @@ pub const SIBLING_APPS: &[(&str, &str, &str)] = &[
 /// real thing. It previously listed *features* ("Universal navbar with Actions &
 /// Profile menus"), which is not what a "what's new" menu is for.
 pub const CHANGELOG: &[&str] = &[
+    "• Wrong PINs slow down: repeated guesses make the host wait, up to 5 minutes",
     "• Choose your own PIN, so saved devices reconnect after a restart",
     "• Windows installer — per-user, no admin prompt",
     "• Encrypted connections over the LAN (Noise protocol)",
@@ -227,9 +228,14 @@ impl OwnPinEditor {
             self.error = None;
         }
         ui.add_space(4.0);
+        // ⚠️ Keep in step with `extender_transport::guard` (3 free, then 1 s
+        // doubling to 5 min). Until 2026-09-13 this said wrong guesses weren't
+        // rate-limited, which was true then.
         ui.small(
-            "Anyone who learns it can connect until you change it, and wrong guesses \
-             aren't rate-limited — so not 1234, and not a year.",
+            "Anyone who learns it can connect until you change it. After three wrong \
+             PINs in a row the host pauses before the next try — longer each time, up \
+             to 5 minutes — but four digits can still be guessed in the end, so not \
+             1234, and not a year.",
         );
         change
     }

@@ -1051,12 +1051,14 @@ impl eframe::App for HostApp {
                             // tunnel landed, and both contradicted the new About
                             // panel in the same menu.
                             ui.label("• The connection is encrypted end to end, with your PIN as the key — nobody else on the network can read the screen or the keystrokes.");
+                            // Keep in step with extender_transport::guard.
+                            ui.label("• After three wrong PINs in a row the host stops accepting connections for a while — 1 second, doubling each time, up to 5 minutes — so the PIN can't be guessed quickly.");
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new("Not fully locked down").strong());
                             ui.label("• The PIN is what the encryption is built on, so anyone who has it (or sees the QR) can connect and control this Mac.");
                             ui.label("• An old client that predates the encryption can still connect in plaintext; the host logs a warning when one does.");
                             ui.label("• A PIN you chose keeps working until you change it, for anyone who has learned it.");
-                            ui.label("• Wrong PINs aren't rate-limited or locked out, and there's no per-device approval.");
+                            ui.label("• That pause is for everyone: while someone keeps guessing, your own devices have to wait too. And there's no per-device approval.");
                             ui.label("• The host listens on all network interfaces on its port.");
                             ui.add_space(6.0);
                             ui.small("Tip: regenerate the PIN (Actions menu) after sharing your screen.");

@@ -22,12 +22,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use extender_protocol::{
     self as protocol, Button, CaptureMode, ClientHello, ClientPlatform, Input, Message,
 };
-use extender_transport::{self as transport, Conn};
+use extender_transport::{self as transport, Conn, PinGuard};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_HWHEEL,
@@ -105,11 +105,23 @@ pub(crate) fn serve_loop(
 ) {
     let _ = listener.set_nonblocking(true);
     on_event(HostEvent::Waiting);
+    // One wrong-PIN count for this whole loop: per host, not per address,
+    // because the remote-access relay makes every peer look like the same one.
+    let mut guard = PinGuard::new();
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
-                let _ = stream.set_nonblocking(false); // blocking reads for the session
                 let peer = peer_addr.to_string();
+                // Locked after too many wrong PINs: close it before the
+                // handshake, so no PIN is tested while the lock lasts.
+                if let Some(refusal) = guard.refuse(Instant::now()) {
+                    drop(stream);
+                    if refusal.first {
+                        on_event(HostEvent::Error(refusal.message(&peer)));
+                    }
+                    continue;
+                }
+                let _ = stream.set_nonblocking(false); // blocking reads for the session
                 // Transport encryption first: an encrypting native client opens with
                 // the Noise preamble (run the responder handshake, keyed by the PIN);
                 // a legacy/loopback plaintext peer (e.g. the WebSocket bridge) is
@@ -121,7 +133,9 @@ pub(crate) fn serve_loop(
                                 "warning: client {peer} connected without transport encryption (plaintext)"
                             );
                         }
-                        if let Some((platform, mode)) = read_hello(&mut conn, &peer, expected_pin) {
+                        if let Some((platform, mode)) =
+                            read_hello(&mut conn, &peer, expected_pin, &mut guard)
+                        {
                             on_event(HostEvent::Connected { peer: peer.clone(), platform });
                             if let Err(e) = serve(conn, mode) {
                                 on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
@@ -130,10 +144,16 @@ pub(crate) fn serve_loop(
                         }
                     }
                     Err(e) => {
+                        if transport::is_pin_rejection(&e) {
+                            guard.record_failure(Instant::now());
+                        }
                         on_event(HostEvent::Error(format!("handshake with {peer} failed: {e}")));
                     }
                 }
                 on_event(HostEvent::Waiting);
+                if let Some(notice) = guard.notice(Instant::now()) {
+                    on_event(HostEvent::Error(notice));
+                }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(100));
@@ -152,6 +172,7 @@ fn read_hello(
     stream: &mut Conn,
     peer: &str,
     expected_pin: u32,
+    guard: &mut PinGuard,
 ) -> Option<(ClientPlatform, CaptureMode)> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
@@ -170,8 +191,12 @@ fn read_hello(
     // Pairing: when the host has a PIN, reject a client that didn't present it.
     if expected_pin != 0 && hello.pin != expected_pin {
         eprintln!("client {peer} rejected: wrong pairing PIN");
+        // A plaintext peer never runs Noise, so this is where ITS guesses show
+        // up. Count them too, or this would be the free way round the lockout.
+        guard.record_failure(Instant::now());
         return None;
     }
+    guard.record_success();
     println!(
         "client {peer} hello: {}x{}, mode {:?}, platform {:?}",
         hello.width, hello.height, hello.capture_mode, hello.platform

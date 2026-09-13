@@ -4,6 +4,36 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-09-13 (wrong PINs are rate-limited on all three hosts)
+
+**Pushed straight to `main`.** Closes the "Wrong PINs still aren't
+rate-limited" item in the 2026-09-11 entry below.
+
+- **One implementation:** `crates/transport/src/guard.rs` (`PinGuard`), used by
+  the `serve_loop` of the macOS, Windows and Linux hosts. One guard per accept
+  loop, so it is **per host, not per address** (the relay makes every peer look
+  the same).
+- **Policy:** the first 3 wrong PINs in a row are free. Each one after that
+  locks the host for 1 s, doubling, up to 5 min. A right PIN resets the count,
+  and so does an hour with no wrong PIN. While locked, new connections are
+  closed **before** the handshake, so no PIN is tested. The host logs one
+  line per lockout, not one per refused connection.
+- **What counts as a guess:** the AEAD failure in `transport::accept`, marked
+  `PinRejected` and tested with `transport::is_pin_rejection`. The hello
+  check's "wrong pairing PIN" counts too. ⚠️ **That second one matters:** a
+  plaintext peer never runs Noise, so without it the hello would be a free
+  guessing channel beside the limited one. A peer that hangs up mid-handshake
+  has tested nothing and is **not** counted, so nobody can lock the owner out
+  without guessing.
+- **Copy updated:** the PIN panel (host-ui), both 🔒 Security popups, and the
+  what's-new snapshot. The hosts have no translations.
+- **Verified here:** transport (31 tests, 10 of them the guard's) and host-ui
+  pass; host-macos builds and passes clippy.
+- **Not verified here:** host-windows (`ring` needs MSVC headers) and
+  host-linux (no Linux target). The Tests workflow compiles and tests both on
+  push. **Not run against a real client:** nobody has watched a phone get
+  refused and then let back in.
+
 ## Update — 2026-09-11 ("Use my own PIN" — and the random PIN only ever had nine values on a Mac)
 
 **Pushed through branch `own-pin` so CI could compile the Linux and Windows

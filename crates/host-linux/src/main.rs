@@ -44,12 +44,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use extender_protocol::{
     self as protocol, CaptureMode, ClientHello, ClientPlatform, Input, Message,
 };
-use extender_transport::{self as transport, Conn};
+use extender_transport::{self as transport, Conn, PinGuard};
 
 use crate::inject::Injector;
 
@@ -151,11 +151,23 @@ pub(crate) fn serve_loop(
 ) {
     let _ = listener.set_nonblocking(true);
     on_event(HostEvent::Waiting);
+    // One wrong-PIN count for this whole loop: per host, not per address,
+    // because the remote-access relay makes every peer look like the same one.
+    let mut guard = PinGuard::new();
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
-                let _ = stream.set_nonblocking(false); // blocking reads for the session
                 let peer = peer_addr.to_string();
+                // Locked after too many wrong PINs: close it before the
+                // handshake, so no PIN is tested while the lock lasts.
+                if let Some(refusal) = guard.refuse(Instant::now()) {
+                    drop(stream);
+                    if refusal.first {
+                        on_event(HostEvent::Error(refusal.message(&peer)));
+                    }
+                    continue;
+                }
+                let _ = stream.set_nonblocking(false); // blocking reads for the session
                 match transport::accept(stream, expected_pin) {
                     Ok(mut conn) => {
                         if !conn.is_encrypted() {
@@ -163,7 +175,7 @@ pub(crate) fn serve_loop(
                                 "warning: client {peer} connected without transport encryption (plaintext)"
                             );
                         }
-                        if let Some(req) = read_hello(&mut conn, &peer, expected_pin) {
+                        if let Some(req) = read_hello(&mut conn, &peer, expected_pin, &mut guard) {
                             on_event(HostEvent::Connected {
                                 peer: peer.clone(),
                                 platform: req.platform,
@@ -175,10 +187,16 @@ pub(crate) fn serve_loop(
                         }
                     }
                     Err(e) => {
+                        if transport::is_pin_rejection(&e) {
+                            guard.record_failure(Instant::now());
+                        }
                         on_event(HostEvent::Error(format!("handshake with {peer} failed: {e}")));
                     }
                 }
                 on_event(HostEvent::Waiting);
+                if let Some(notice) = guard.notice(Instant::now()) {
+                    on_event(HostEvent::Error(notice));
+                }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(100));
@@ -206,7 +224,12 @@ struct ClientRequest {
 /// Read and log the client's [`ClientHello`], tolerating a protocol-version skew
 /// the way the other hosts do. Returns what this host needs from it, or `None`
 /// (and logs) on a missing, garbled or implausible hello.
-fn read_hello(stream: &mut Conn, peer: &str, expected_pin: u32) -> Option<ClientRequest> {
+fn read_hello(
+    stream: &mut Conn,
+    peer: &str,
+    expected_pin: u32,
+    guard: &mut PinGuard,
+) -> Option<ClientRequest> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -223,8 +246,12 @@ fn read_hello(stream: &mut Conn, peer: &str, expected_pin: u32) -> Option<Client
     }
     if expected_pin != 0 && hello.pin != expected_pin {
         eprintln!("client {peer} rejected: wrong pairing PIN");
+        // A plaintext peer never runs Noise, so this is where ITS guesses show
+        // up. Count them too, or this would be the free way round the lockout.
+        guard.record_failure(Instant::now());
         return None;
     }
+    guard.record_success();
     // ⚠️ Checked, not trusted: the size decides how far this host grows the X
     // framebuffer for a second screen. The same bound the macOS host applies.
     if hello.width == 0
