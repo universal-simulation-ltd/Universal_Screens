@@ -114,6 +114,9 @@ struct ConnectView: View {
     @State private var showAdvanced = false
     @State private var showAbout = false
     @State private var showScanner = false
+    /// Advanced ▸ Appearance. The same key the app root applies, so changing it
+    /// here re-themes the whole window at once.
+    @AppStorage(Appearance.storageKey) private var appearance: Appearance = .light
     // "Cast to a browser": inline manual code entry under Advanced (the QR /
     // deep-link path skips this and casts straight away).
     @State private var castDraft = ""
@@ -436,6 +439,23 @@ struct ConnectView: View {
                         Text("Open …/screens/receive on the screen you want to drive, then enter the code it shows here.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                    }
+
+                    // Appearance — Light (the default), Dark, or Match my device.
+                    // A menu rather than a segmented control: "Match my device"
+                    // does not fit a third of a phone's width untruncated.
+                    Divider()
+                    HStack {
+                        Label("Appearance", systemImage: "circle.lefthalf.filled")
+                            .font(.subheadline)
+                        Spacer()
+                        Picker("Appearance", selection: $appearance) {
+                            ForEach(Appearance.allCases) { choice in
+                                Text(choice.label).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Color.brandOrange)
                     }
 
                     // About this app — last row of Advanced, the same place it

@@ -965,6 +965,8 @@ fun ConnectScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            AppearancePicker()
+
             // About this app — last row of Advanced, the same place it sits in
             // every other app in the suite (and in the desktop hosts' Actions
             // menu). See AboutApp.kt for why the content is shared and the

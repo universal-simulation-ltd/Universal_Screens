@@ -11,6 +11,50 @@ extension Color {
     static let brandSlate = Color(red: 15 / 255, green: 23 / 255, blue: 42 / 255)
 }
 
+/// The Appearance choice under Advanced — Light, Dark or Match my device.
+///
+/// ⚠️ **`.light` is the default, not "follow the system".** The suite's standing
+/// rule is that every app opens light until the user explicitly picks otherwise;
+/// this client used to follow the OS with no choice at all. The Android client
+/// (`Theme.kt`) and the browser client (`index.html`) carry the same three
+/// choices with the same labels and the same stored words.
+enum Appearance: String, CaseIterable, Identifiable {
+    case light, dark, system
+
+    /// The UserDefaults key, shared by the root (which applies it) and the
+    /// Advanced picker (which changes it). A missing or unknown value reads as
+    /// `.light`, because `@AppStorage` falls back to its default.
+    static let storageKey = "appearance"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .light:  "Light"
+        case .dark:   "Dark"
+        case .system: "Match my device"
+        }
+    }
+
+    /// What `.preferredColorScheme` gets — nil means "no preference", so the
+    /// window follows the device.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light:  .light
+        case .dark:   .dark
+        case .system: nil
+        }
+    }
+
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .light:  .light
+        case .dark:   .dark
+        case .system: .unspecified
+        }
+    }
+}
+
 extension Mode {
     /// Short title shown in pickers, saved-host subtitles and connected headers.
     var label: String {

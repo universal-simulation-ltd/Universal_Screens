@@ -12,7 +12,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -111,7 +110,10 @@ private const val CHANGELOG_URL = "https://changelog.unisim.co.uk"
 
 @Composable
 fun SuiteBar(modifier: Modifier = Modifier) {
-    val dark = isSystemInDarkTheme()
+    // ⚠️ The app's resolved Appearance, NOT isSystemInDarkTheme(): under the
+    // default Light choice on a dark phone, the OS flag would paint a dark bar
+    // over a light app.
+    val dark = LocalDarkTheme.current
     val context = LocalContext.current
     val open: (String) -> Unit = { url ->
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }

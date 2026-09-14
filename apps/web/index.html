@@ -4,9 +4,56 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Universal Screens</title>
+<!-- Appearance — Light (the default), Dark, or Match my device.
+
+     ⚠️ LIGHT is the default, not "follow the system": the suite's rule is that
+     every app opens light until the user picks otherwise, and this page used to
+     follow `prefers-color-scheme` with no choice at all. The Android client
+     (Theme.kt) and the iOS client (Theme.swift) carry the same three choices,
+     the same labels and the same stored words.
+
+     Inline and in <head> on purpose: it has to put `.dark` on <html> BEFORE the
+     first paint, or a Dark user gets a white flash on every load. It is the ONE
+     place the choice is decided — the stylesheet has a single dark block keyed on
+     `.dark` and no media query of its own, so CSS and JS cannot disagree, and
+     there is no second dark block to fall out of step with the first. Under
+     "Match my device" the OS is followed live, via the media-query listener.
+     `client.js` only reflects and changes it, through `window.screensAppearance`. -->
+<script>
+  (function () {
+    var KEY = "universal-screens.appearance";
+    var root = document.documentElement;
+    var os = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    var choice = "light";
+    try {
+      var saved = localStorage.getItem(KEY);
+      if (saved === "dark" || saved === "system") choice = saved;
+    } catch (e) { /* storage blocked: stay light */ }
+    function apply() {
+      root.classList.toggle("dark", choice === "dark" || (choice === "system" && !!os && os.matches));
+      root.setAttribute("data-appearance", choice);
+    }
+    apply();
+    if (os) {
+      if (os.addEventListener) os.addEventListener("change", apply);
+      else if (os.addListener) os.addListener(apply);
+    }
+    window.screensAppearance = {
+      get: function () { return choice; },
+      set: function (next) {
+        choice = next === "dark" || next === "system" ? next : "light";
+        try { localStorage.setItem(KEY, choice); } catch (e) { /* applies for this visit only */ }
+        apply();
+      },
+    };
+  })();
+</script>
 <style>
+  /* `color-scheme` follows the CHOSEN theme, not the OS — so native controls and
+     scrollbars match the page. It was `light dark`, which drew dark form
+     controls on a light page for anyone on a dark OS. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
     --accent: #ff6a00;
     --accent-press: #e85f00;
     --bg: #f4f4f6;
@@ -15,9 +62,7 @@
     --muted: #6b6b76;
     --line: #e4e4ea;
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f0f12; --card: #1b1b20; --text: #f4f4f6; --muted: #9a9aa6; --line: #2b2b33; }
-  }
+  :root.dark { color-scheme: dark; --bg: #0f0f12; --card: #1b1b20; --text: #f4f4f6; --muted: #9a9aa6; --line: #2b2b33; }
   * { box-sizing: border-box; }
   html { height: 100%; }
   /* A column: suite bar, then the connect card, then the footer. It used to be
@@ -185,30 +230,31 @@
   .un-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
   /* Dark mode is a SECOND pass, not the design: light is the default above and
-     every value here is BAR.dark from the same `barTheme.ts` table. This page
-     honours `prefers-color-scheme`, so a hard-white bar over its dark body
-     would read as a rendering fault. */
-  @media (prefers-color-scheme: dark) {
-    .un-bar { background: #0f172a; color: #f1f5f9; }
-    .un-head { background: #0f172a; border-bottom-color: #1e293b; }
-    .un-name { color: #f1f5f9; }
-    .un-claim { color: #94a3b8; }
-    /* ⚠️ NOT #c2410c here. Orange 700 measures 3.45:1 on slate-900 and fails;
-       orange 400 is 7.89:1. The rule inverts with the background — darkening
-       the orange to "fix" a dark surface makes it worse. */
-    .un-claim .pct { color: #fb923c; }
-    .un-pill { background: #1e293b; border-color: #334155; color: #e2e8f0; }
-    .un-pill:hover { background: #334155; border-color: #475569; }
-    .un-icon-btn { color: #94a3b8; }
-    .un-icon-btn:hover { background: #1e293b; color: #f1f5f9; }
-    .un-foot { background: #0f172a; border-top-color: #1e293b; }
-    .un-foot-inner { color: #94a3b8; }
-    .un-foot a { color: #cbd5e1; }
-    .un-foot a:hover { color: #fb923c; }
-    .un-foot .heart { color: #fb923c; }
-    .un-foot-gh { color: #94a3b8 !important; }
-    .un-foot-gh:hover { color: #f1f5f9 !important; }
-  }
+     every value here is BAR.dark from the same `barTheme.ts` table. It applies
+     under `.dark` — the user chose Dark, or Match my device on a dark OS (see
+     the script in <head>) — so a hard-white bar never sits over a dark body.
+     Each rule is one class more specific than its light twin, so the dark
+     resting colour also beats the light :hover, exactly as the old media-query
+     block's source order did. */
+  :root.dark .un-bar { background: #0f172a; color: #f1f5f9; }
+  :root.dark .un-head { background: #0f172a; border-bottom-color: #1e293b; }
+  :root.dark .un-name { color: #f1f5f9; }
+  :root.dark .un-claim { color: #94a3b8; }
+  /* ⚠️ NOT #c2410c here. Orange 700 measures 3.45:1 on slate-900 and fails;
+     orange 400 is 7.89:1. The rule inverts with the background — darkening
+     the orange to "fix" a dark surface makes it worse. */
+  :root.dark .un-claim .pct { color: #fb923c; }
+  :root.dark .un-pill { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+  :root.dark .un-pill:hover { background: #334155; border-color: #475569; }
+  :root.dark .un-icon-btn { color: #94a3b8; }
+  :root.dark .un-icon-btn:hover { background: #1e293b; color: #f1f5f9; }
+  :root.dark .un-foot { background: #0f172a; border-top-color: #1e293b; }
+  :root.dark .un-foot-inner { color: #94a3b8; }
+  :root.dark .un-foot a { color: #cbd5e1; }
+  :root.dark .un-foot a:hover { color: #fb923c; }
+  :root.dark .un-foot .heart { color: #fb923c; }
+  :root.dark .un-foot-gh { color: #94a3b8 !important; }
+  :root.dark .un-foot-gh:hover { color: #f1f5f9 !important; }
   @media (prefers-reduced-motion: reduce) { .un-strip { animation: none; } }
 
   /* The streaming session owns the whole viewport — the suite chrome is page
@@ -379,6 +425,22 @@
   #advanced-list { margin-top: .35rem; }
   #advanced-list button { background: none; border: none; color: var(--text); font: inherit; font-size: .84rem; cursor: pointer; padding: .35rem .5rem; border-radius: .4rem; }
   #advanced-list button:hover { background: var(--card); }
+  /* Advanced ▸ Appearance: three native radios drawn as pills. Native, so the
+     group gets arrow-key movement and a radio role for free; the input stays in
+     the tab order and only its circle is hidden. Pills that WRAP rather than
+     fixed thirds, because "Match my device" doesn't fit a third of a phone. */
+  #appearance { margin: .35rem 0 .6rem; }
+  #appearance-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .35rem; }
+  #appearance .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem; }
+  #appearance label { position: relative; cursor: pointer; }
+  #appearance input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  #appearance span {
+    display: inline-block; padding: .3rem .8rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--card); color: var(--text); font-size: .82rem; transition: border-color .12s;
+  }
+  #appearance label:hover span { border-color: var(--accent); }
+  #appearance input:checked + span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #appearance input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* ⚠️ 1100, not 50. The suite bar carries the SDK's z-index of 1000, and
      Tailwind's scale stops at 50 — so every app that hit this settled on 1100.
@@ -657,6 +719,15 @@
           <span class="chev" aria-hidden="true">▶</span> Advanced
         </button>
         <div id="advanced-list" hidden>
+          <!-- Light is the default; see the script at the top of <head>. -->
+          <div id="appearance" role="radiogroup" aria-labelledby="appearance-label">
+            <div id="appearance-label">Appearance</div>
+            <div class="pills">
+              <label><input type="radio" name="appearance" value="light" /><span>Light</span></label>
+              <label><input type="radio" name="appearance" value="dark" /><span>Dark</span></label>
+              <label><input type="radio" name="appearance" value="system" /><span>Match my device</span></label>
+            </div>
+          </div>
           <button type="button" id="about-open">ℹ About this app</button>
         </div>
       </div>

@@ -524,6 +524,14 @@ export function boot() {
     t.classList.toggle("open", open);
     t.setAttribute("aria-expanded", String(open));
   });
+  // Advanced ▸ Appearance. The choice, its storage and the `.dark` class all
+  // live in the inline script at the top of index.html — it has to run before
+  // the first paint — so this only reflects the current choice and changes it.
+  const appearance = window.screensAppearance;
+  for (const radio of document.querySelectorAll('input[name="appearance"]')) {
+    radio.checked = (appearance?.get() ?? "light") === radio.value;
+    radio.addEventListener("change", () => { if (radio.checked) appearance?.set(radio.value); });
+  }
   const about = $("about-backdrop");
   const closeAbout = () => about.classList.remove("open");
   $("about-open").addEventListener("click", () => about.classList.add("open"));

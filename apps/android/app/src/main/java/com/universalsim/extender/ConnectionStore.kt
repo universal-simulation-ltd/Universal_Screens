@@ -30,6 +30,17 @@ object ConnectionStore {
     private const val KEY = "saved"
     private const val KEY_SENSITIVITY = "trackpadSensitivity"
     private const val KEY_DEVICE_NAME = "deviceName"
+    private const val KEY_APPEARANCE = "appearance"
+
+    /** Light / Dark / Match my device. ⚠️ Absent means LIGHT, never "follow the
+     *  system": the suite's rule is that every app opens light until the user
+     *  picks otherwise. An unknown stored value also falls back to light. */
+    fun loadAppearance(context: Context): Appearance =
+        Appearance.fromKey(prefs(context).getString(KEY_APPEARANCE, null))
+
+    fun saveAppearance(context: Context, value: Appearance) {
+        prefs(context).edit().putString(KEY_APPEARANCE, value.key).apply()
+    }
 
     /** This device's human-readable name, sent to the host so the extra screen this
      *  phone adds is labelled (e.g. "James's phone"). Defaults to the hardware model
