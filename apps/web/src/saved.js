@@ -44,6 +44,11 @@ export function label(addr, hostname, os) {
   if (e) { e.hostname = hostname; e.os = os; write(list); }
 }
 
+/// Replace the whole list — what a sync from the account writes back.
+export function replaceAll(list) {
+  write(list);
+}
+
 export function remove(addr) {
   write(load().filter((h) => h.addr !== addr));
 }

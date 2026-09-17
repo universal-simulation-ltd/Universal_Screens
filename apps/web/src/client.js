@@ -10,6 +10,7 @@ import { H264Decoder } from "./decoder.js";
 import { CanvasRenderer } from "./renderer.js";
 import { InputController } from "./input.js";
 import * as saved from "./saved.js";
+import * as account from "./account.js";
 
 // The cloud rendezvous that relays a host ↔ this browser across networks (M8).
 // Same origin the host dials (`crates/web-bridge` DEFAULT_ROOM_URL) and the
@@ -231,16 +232,38 @@ function renderSaved() {
     const title = cn ? `${cn} (${base})` : base;
     row.innerHTML = `<span class="glyph">${DEVICE_GLYPH[h.os] ?? "🖥️"}</span><span class="body"><div class="title">${title}</div><div class="blurb">${h.addr}</div></span><span class="ren" title="Rename">✎</span><span class="del" title="Forget">×</span>`;
     row.addEventListener("click", (e) => {
-      if (e.target.classList.contains("del")) { saved.remove(h.addr); renderSaved(); return; }
+      if (e.target.classList.contains("del")) {
+        saved.remove(h.addr);
+        // Signed in, forget it everywhere; signed out this device only — the
+        // hint under the list says which, so nobody is surprised by a machine
+        // that comes back.
+        void account.forget(h.addr);
+        renderSaved();
+        return;
+      }
       if (e.target.classList.contains("ren")) {
         const next = prompt("Friendly name for this host (leave blank to reset to its device name):", cn);
-        if (next !== null) { saved.setCustomName(h.addr, next); renderSaved(); }
+        if (next !== null) {
+          saved.setCustomName(h.addr, next);
+          void account.remember({ ...h, customName: next.trim(), lastConnected: h.lastConnected || Date.now() });
+          renderSaved();
+        }
         return;
       }
       connect(h.addr, MODES[0]); // reconnect in Remote control
     });
     box.appendChild(row);
   }
+  // Say which "forget" this is. Without an account the list is this device's
+  // alone; with one, × removes the machine everywhere — and a device that
+  // forgets something while signed out gets it back on the next sync, because
+  // there are no tombstones (see account.js).
+  const note = document.createElement("p");
+  note.className = "saved-note";
+  note.textContent = account.account()
+    ? "Kept with your Universal ID — × forgets a machine on every device you sign in on."
+    : "Kept on this device only. Sign in to have them follow you.";
+  box.appendChild(note);
 }
 
 // ---- session ---------------------------------------------------------------
@@ -273,7 +296,10 @@ async function connect(addr, mode, targetHost = null) {
     // A Nearby target isn't saved: saved rows reconnect by treating their addr
     // as the bridge address, which a retargeted ip:port is not. Nearby hosts
     // reappear live from discovery instead.
-    if (!targetHost) saved.touch(addr, Date.now());
+    if (!targetHost) {
+      saved.touch(addr, Date.now());
+      void account.remember({ addr, lastConnected: Date.now() });
+    }
     sendHelloAndAttach(mode);
     $("host-label").textContent = targetHost ?? addr;
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
@@ -499,9 +525,106 @@ export async function runDecodePipelineSelfTest() {
 
 // ---- boot ------------------------------------------------------------------
 
+/**
+ * The Universal ID control in the bar, and the dialog behind it.
+ *
+ * Signing in is optional and changes nothing about connecting; what it buys is
+ * the saved-machine list following the account (James, 2026-09-17). Everything
+ * here fails quietly — this client is routinely used on a LAN with no way out.
+ */
+function wireAccount() {
+  const back = $("account-backdrop");
+  const label = $("account-label");
+  const msg = $("account-msg");
+  const emailField = $("account-email-field");
+  const codeField = $("account-code-field");
+  const submit = $("account-submit");
+  const backBtn = $("account-back");
+  let stage = "email";
+
+  const say = (text, bad = false) => {
+    msg.textContent = text ?? "";
+    msg.hidden = !text;
+    msg.classList.toggle("bad", !!bad);
+  };
+
+  function paint() {
+    const who = account.account();
+    label.textContent = who ? (who.email || "Signed in") : "Sign in";
+    $("account-signed-in").hidden = !who;
+    $("account-signed-out").hidden = !!who;
+    $("account-title").textContent = who ? "Your Universal ID" : "Sign in";
+    $("account-intro").textContent = who
+      ? `Signed in as ${who.email}. Your saved machines are kept with this account.`
+      : "Your saved machines follow your Universal ID. Connecting never needs an account — this is only so a new phone or laptop already knows your machines.";
+  }
+
+  function toEmailStage() {
+    stage = "email";
+    codeField.hidden = true;
+    emailField.hidden = false;
+    backBtn.hidden = true;
+    submit.textContent = "Email me a code";
+    say(null);
+  }
+
+  const open = () => { back.classList.add("open"); paint(); };
+  const close = () => { back.classList.remove("open"); toEmailStage(); };
+
+  $("account-btn").addEventListener("click", open);
+  $("account-close").addEventListener("click", close);
+  back.addEventListener("click", (e) => { if (e.target === back) close(); });
+  backBtn.addEventListener("click", toEmailStage);
+
+  submit.addEventListener("click", async () => {
+    const email = $("account-email").value.trim();
+    submit.disabled = true;
+    try {
+      if (stage === "email") {
+        if (!email.includes("@")) { say("Enter your email address.", true); return; }
+        await account.sendCode(email);
+        stage = "code";
+        emailField.hidden = true;
+        codeField.hidden = false;
+        backBtn.hidden = false;
+        submit.textContent = "Sign in";
+        say(`We emailed a 6-digit code to ${email}.`);
+        $("account-code").focus();
+      } else {
+        await account.verifyCode(email, $("account-code").value);
+        say(null);
+        close();
+        await syncSaved();
+      }
+    } catch (err) {
+      say(String(err.message ?? err), true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  $("account-signout").addEventListener("click", async () => {
+    await account.signOut();
+    close();
+  });
+
+  account.onAccountChange(paint);
+  paint();
+}
+
+/** Merge this device's saved machines with the account's, then repaint. */
+async function syncSaved() {
+  const merged = await account.syncSaved(saved.load());
+  if (!merged) return;              // signed out, or no route out — keep what we have
+  saved.replaceAll(merged);
+  renderSaved();
+}
+
 export function boot() {
   renderModes();
   renderSaved();
+  wireAccount();
+  void syncSaved();
   startNearbyPolling();
   // A changed bridge address means a different /peers source — refresh now.
   $("addr").addEventListener("change", () => { lastNearbyJson = ""; pollNearby(); });

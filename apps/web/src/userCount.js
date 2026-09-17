@@ -26,6 +26,8 @@
 // on with no policies at all, so this key can reach it through those two
 // functions and in no other way.
 
+import { accessToken } from './account.js'
+
 const SUPABASE_URL = 'https://rygfxgalojojppxmhddo.supabase.co'
 const SUPABASE_ANON =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5Z2Z4Z2Fsb2pvanBweG1oZGRvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NTY4MjUsImV4cCI6MjA5NDMzMjgyNX0.hLy_vt9vY_rdPKF3nL32yAuMCD604E3CH5VM7D7CaNE'
@@ -49,11 +51,15 @@ function installId() {
 }
 
 async function rpc(fn, body) {
+  // Signed in, the beat goes as the ACCOUNT: the server reads auth.uid() and
+  // counts one person across their devices rather than one per browser. Signed
+  // out it is the anon key, and the install id is all the server has.
+  const token = await accessToken().catch(() => null)
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON,
-      'Authorization': `Bearer ${SUPABASE_ANON}`,
+      'Authorization': `Bearer ${token ?? SUPABASE_ANON}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body ?? {}),

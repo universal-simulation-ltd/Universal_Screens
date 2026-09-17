@@ -414,6 +414,7 @@
   .link-btn { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; text-decoration: underline; cursor: pointer; }
   /* The user count sits under Advanced, quiet, and is a button only because
      tapping it switches to the suite-wide figure. */
+  .saved-note { margin: .4rem .25rem 0; font-size: .72rem; color: var(--muted); }
   .user-count { display: block; width: 100%; margin-top: .9rem; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: .72rem; cursor: pointer; }
 
   /* ---- Advanced ▸ About this app ----
@@ -498,6 +499,43 @@
      glyph was centred by its own line box, an SVG child is not. */
   #about-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer; }
   #about-close:hover { color: var(--text); }
+
+  /* ---- Universal ID dialog: the About card's shape, a form instead of prose --- */
+  #account-backdrop {
+    position: fixed; inset: 0; background: rgba(15,23,42,.45);
+    display: none; align-items: center; justify-content: center;
+    padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+    z-index: 1100;
+  }
+  #account-backdrop.open { display: flex; }
+  #account-card {
+    position: relative; width: 100%; max-width: 420px;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 1.35rem 1.5rem 1.5rem;
+    text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  #account-card h2 { margin: 0 0 .2rem; font-size: 1.05rem; letter-spacing: -.01em; }
+  #account-card p { margin: 0 0 .9rem; font-size: .8rem; line-height: 1.5; color: var(--muted); }
+  #account-card .field { margin-bottom: .7rem; }
+  /* ⚠️ `.field` sets `display: flex`, and a class rule beats the UA's
+     `[hidden] { display: none }` — so without this the code box is on screen
+     before a code has been asked for, and "Use a different email" sits under
+     the button from the first frame. Caught in the browser, not in review. */
+  #account-card [hidden] { display: none; }
+  #account-card button.primary {
+    width: 100%; padding: .65rem 1rem; border: 0; border-radius: .6rem;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  #account-card button.primary:disabled { opacity: .55; cursor: default; }
+  #account-card button.quiet {
+    margin-top: .6rem; width: 100%; padding: .55rem 1rem; border: 1px solid var(--line);
+    border-radius: .6rem; background: none; color: var(--text); font: inherit; cursor: pointer;
+  }
+  #account-msg { font-size: .78rem; line-height: 1.45; margin: 0 0 .7rem; }
+  #account-msg.bad { color: #b91c1c; }
+  :root.dark #account-msg.bad { color: #fca5a5; }
+  #account-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); cursor: pointer; }
+  #account-close:hover { color: var(--text); }
 
   /* ---- session view (full screen) ---- */
   /* `flex: 1` rather than `height: 100%`: body is a column now, so the session
@@ -646,6 +684,12 @@
         </a>
 
         <div class="un-right">
+          <!-- Universal ID. Signed out this says "Sign in"; signed in it is the
+               account, and opens the same dialog to sign out. Optional in every
+               sense: nothing about connecting to a machine needs it. -->
+          <button type="button" class="un-pill" id="account-btn" title="Your Universal ID">
+            <span id="account-label">Sign in</span>
+          </button>
           <a class="un-pill" href="https://opensource.unisim.co.uk" target="_blank" rel="noopener noreferrer"
              title="All the Universal Apps"><span><span class="long">Universal </span>Apps ↗</span></a>
           <a class="un-icon-btn" href="https://github.com/universal-simulation-ltd/Universal_Screens"
@@ -764,6 +808,40 @@
   <!-- About this app. The content mirrors the SDK's <AboutAppDialog>, which
        every other app in the suite shows; see the CSS block above for why this
        one is hand-written rather than imported. -->
+  <!-- Universal ID: email a code, type it back. LOGIN ONLY — an account is
+       created on the hub, never here (see src/account.js). -->
+  <div id="account-backdrop" role="presentation">
+    <div id="account-card" role="dialog" aria-modal="true" aria-label="Your Universal ID">
+      <!-- An inline SVG, not `✕` — see the About dialog for why. -->
+      <button type="button" id="account-close" aria-label="Close">
+        <svg viewBox="0 0 20 20" aria-hidden="true" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </button>
+      <h2 id="account-title">Sign in</h2>
+      <p id="account-intro">Your saved machines follow your Universal ID. Connecting never needs an account — this is only so a new phone or laptop already knows your machines.</p>
+      <p id="account-msg" hidden></p>
+
+      <div id="account-signed-out">
+        <div class="field" id="account-email-field">
+          <label for="account-email">Email address</label>
+          <input id="account-email" type="email" autocomplete="email" placeholder="you@example.com" />
+        </div>
+        <div class="field" id="account-code-field" hidden>
+          <label for="account-code">Your code</label>
+          <input id="account-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+        </div>
+        <button type="button" class="primary" id="account-submit">Email me a code</button>
+        <button type="button" class="quiet" id="account-back" hidden>Use a different email</button>
+      </div>
+
+      <div id="account-signed-in" hidden>
+        <button type="button" class="quiet" id="account-signout">Sign out</button>
+      </div>
+    </div>
+  </div>
+
   <div id="about-backdrop" role="presentation">
     <div id="about-card" role="dialog" aria-modal="true" aria-label="About Universal Screens">
       <!-- ⚠️ An inline SVG, not `✕` — U+2715 has no glyph in iOS's system font
