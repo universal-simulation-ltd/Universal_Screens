@@ -26,6 +26,7 @@ use crate::{serve_loop, HostEvent};
 // crate's docs for what deliberately stays forked (HostApp, RecentConn,
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
+    account_menu_row, show_account_window, UserAccount,
     show_user_count, UserCount,
     about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
@@ -81,6 +82,10 @@ struct HostApp {
     /// The live user count in the profile menu — beats on its own thread, and
     /// is the hosts' only call to a UNI·SIM server. See host-ui/user_count.rs.
     user_count: UserCount,
+    /// Signing in is optional and identity-only on a host: there is no saved
+    /// list here to follow an account (see host-ui/account.rs). What it does
+    /// is make the user count treat this machine and your phone as one person.
+    account: UserAccount,
     auto_connect: bool,
     /// Theme override: None = follow the OS, Some(true) = dark, Some(false) = light.
     dark_mode: Option<bool>,
@@ -161,6 +166,9 @@ impl HostApp {
         let own_pin: Option<u32> =
             storage.and_then(|s| eframe::get_value::<Option<u32>>(s, OWN_PIN_KEY)).flatten();
         let pin = startup_pin(own_pin);
+        // Restored from `<config>/UniversalScreens/session.json` if the user
+        // has signed in before; it refreshes its token on its own thread.
+        let account = UserAccount::new();
         // Always-on LAN listener: nearby hosts appear even before this PC starts
         // serving, so a PC → PC / PC → Mac connection needs no QR scan.
         let discovered_peers = Arc::new(Mutex::new(Vec::new()));
@@ -178,7 +186,10 @@ impl HostApp {
             own_pin_editor: OwnPinEditor::default(),
             show_pc_info: false,
             caption_dark: None,
-            user_count: UserCount::start(),
+            // Started from the account's token handle, so a sign-in shows up
+            // on the next beat rather than on the next run.
+            user_count: UserCount::start_with(account.token()),
+            account,
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
                 .unwrap_or(true),
@@ -915,6 +926,10 @@ impl HostApp {
                     if ui.checkbox(&mut dont, "Don't connect automatically").changed() {
                         self.auto_connect = !dont;
                     }
+                    ui.separator();
+                    // Optional, and identity-only on a host — see
+                    // host-ui/account.rs for why there is nothing here to sync.
+                    account_menu_row(ui, &mut self.account);
                     // Last in the menu, as in every other app in the suite:
                     // "There are X total users (Y live)". Click for the whole
                     // suite. Draws nothing until a number arrives, so a host
@@ -980,6 +995,10 @@ impl eframe::App for HostApp {
 
         // The UNI·SIM brand strip ("light bar") is painted on a foreground layer
         // across the very top (see paint_brand_strip) — no panel, so no seam line.
+        // The sign-in window, when the profile menu's account row opened it.
+        // Draws nothing otherwise, and drains its worker thread either way.
+        show_account_window(ctx, &mut self.account);
+
         paint_brand_strip(ctx);
 
         // The Universal navbar — mirrors the @unisim/sdk web navbar so this host

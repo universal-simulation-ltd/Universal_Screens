@@ -78,10 +78,12 @@ fn random_uuid() -> String {
 
 /// POST one RPC and hand back the body. `None` on any failure, and nothing is
 /// logged: a host with no internet would otherwise print this every 45 seconds.
-fn rpc(function: &str, body: String) -> Option<String> {
+fn rpc(function: &str, body: String, token: Option<&str>) -> Option<String> {
+    // Signed in, the beat goes as the ACCOUNT: the server reads auth.uid() and
+    // counts one person across their devices instead of one per install.
     let response = ureq::post(&format!("{SUPABASE_URL}/rest/v1/rpc/{function}"))
         .set("apikey", SUPABASE_ANON)
-        .set("Authorization", &format!("Bearer {SUPABASE_ANON}"))
+        .set("Authorization", &format!("Bearer {}", token.unwrap_or(SUPABASE_ANON)))
         .set("Content-Type", "application/json")
         .timeout(Duration::from_secs(10))
         .send_string(&body)
@@ -134,6 +136,8 @@ fn format_counts(total: u64, live: u64, suite: bool) -> String {
 #[derive(Clone)]
 pub struct UserCount {
     line: Arc<Mutex<Option<String>>>,
+    /// The signed-in access token, shared with `UserAccount`. None = a guest.
+    token: Arc<Mutex<Option<String>>>,
     suite: Arc<AtomicBool>,
     /// Bumped by `toggle` so the thread re-reads at once rather than in 45 s.
     refresh: Arc<AtomicBool>,
@@ -146,9 +150,16 @@ impl Default for UserCount {
 }
 
 impl UserCount {
-    /// Begin beating and reading. One thread per host process.
+    /// Begin beating and reading, as a guest.
     pub fn start() -> Self {
+        Self::start_with(Arc::new(Mutex::new(None)))
+    }
+
+    /// Begin beating and reading, following `token` — hand it
+    /// `UserAccount::token()` so signing in is reflected on the next beat.
+    pub fn start_with(token: Arc<Mutex<Option<String>>>) -> Self {
         let this = Self {
+            token,
             line: Arc::new(Mutex::new(None)),
             suite: Arc::new(AtomicBool::new(false)),
             refresh: Arc::new(AtomicBool::new(false)),
@@ -159,16 +170,19 @@ impl UserCount {
             .spawn(move || {
                 let id = install_id();
                 loop {
+                    let token = worker.token.lock().unwrap().clone();
+                    let token = token.as_deref();
                     let beaten = rpc(
                         "app_presence_beat",
                         format!("{{\"p_product\":\"{PRODUCT}\",\"p_install_id\":\"{id}\"}}"),
+                        token,
                     )
                     .is_some();
                     let suite = worker.suite.load(Ordering::Relaxed);
                     let body = if suite {
-                        rpc("suite_user_counts", "{}".into())
+                        rpc("suite_user_counts", "{}".into(), token)
                     } else {
-                        rpc("app_user_counts", format!("{{\"p_product\":\"{PRODUCT}\"}}"))
+                        rpc("app_user_counts", format!("{{\"p_product\":\"{PRODUCT}\"}}"), token)
                     };
                     if let Some((total, live)) = body.as_deref().and_then(parse_counts) {
                         if total > 0 {
