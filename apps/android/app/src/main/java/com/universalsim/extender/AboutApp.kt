@@ -73,8 +73,15 @@ fun AboutAppDialog(onDismiss: () -> Unit) {
                         "encrypted end to end with your PIN as the key, so neither your network nor " +
                         "the relay behind a remote code can read what is on it.",
                 )
+                // ⚠️ This used to read "Nothing is uploaded to UNI·SIM, and
+                // there is no account." Both halves stopped being true on
+                // 2026-09-17 (the user count, then a Universal ID). What is
+                // still true is that your screen is not part of it.
                 Text(
-                    "Nothing is uploaded to UNI·SIM, and there is no account.",
+                    "Your screen is never uploaded to UNI·SIM. Signed out, all this app tells us " +
+                        "is that a Screens client is in use, for the user count under Advanced. " +
+                        "Sign in and your saved machines are kept with your Universal ID — their " +
+                        "addresses and the names you gave them, never your PIN.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

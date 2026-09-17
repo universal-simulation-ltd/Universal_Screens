@@ -394,6 +394,13 @@ pub fn about_panel(ui: &mut egui::Ui, version: &str) {
          nor the relay behind a remote code can read what is on it.",
     );
     ui.small("Full detail, including what is NOT locked down, is under the 🔒 button.");
+    // ⚠️ Say what DOES leave, now that something does (2026-09-17: the user
+    // count, and a Universal ID). A host syncs no list — see account.rs.
+    ui.small(
+        "Your screen is never uploaded to UNI·SIM. All this host tells us is that a Screens \
+         client is in use, for the count at the foot of the profile menu — and who you are, \
+         if you sign in.",
+    );
     ui.add_space(8.0);
 
     about_heading(ui, "Open source");

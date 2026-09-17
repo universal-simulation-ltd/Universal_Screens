@@ -872,7 +872,11 @@
            crates/transport/src/lib.rs for the Noise tunnel that makes the PIN
            encryption rather than just a gate. -->
       <p>It goes to the device you paired with, and to nobody else. The connection is encrypted end to end with your PIN as the key, so neither your network nor the relay behind a remote code can read what is on it.</p>
-      <p class="about-note">Nothing is uploaded to UNI·SIM, and there is no account.</p>
+      <!-- ⚠️ This used to read "Nothing is uploaded to UNI·SIM, and there is
+           no account." Both halves stopped being true on 2026-09-17, when
+           Screens gained the live user count and a Universal ID. What IS still
+           true is that your screen is not part of it. -->
+      <p class="about-note">Your screen is never uploaded to UNI·SIM. Signed out, all this app tells us is that a Screens client is in use, for the user count at the bottom of Advanced. Sign in and your saved machines are kept with your Universal ID — their addresses and the names you gave them, never your PIN.</p>
 
       <h3>Open source</h3>
       <p>Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.</p>

@@ -140,7 +140,11 @@ how the second cut was measured (420dpi ⇒ 24dp mark, 26dp globe).
   A native panel means shipping a changelog reader, so both clients open
   `changelog.unisim.co.uk`. (That tap also confirmed this session's
   `2026.09.01.15` entry is live.)
-- **No profile pill.** Screens has no account system.
+- **The profile pill is a Universal ID** since 2026-09-17 — Screens has an
+  account system now, hand-written per client (no SDK anywhere here): the bar's
+  right cluster on the browser client, a row under Advanced on Android, and the
+  profile menu on the desktop hosts. Login-only, email one-time code. Signing in
+  is optional and changes nothing about connecting.
 - Colours are the SUITE's (`barTheme.ts` BAR), deliberately NOT
   `MaterialTheme.colorScheme` / `Theme.swift`. The bar matches the bar in PDF,
   not the app it is bolted to. Both files say so.
