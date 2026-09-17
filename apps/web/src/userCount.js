@@ -84,8 +84,10 @@ function format(counts, scope) {
 export function startUserCount(el) {
   if (!el) return
   const id = installId()
-  let scope = 'app'
-  try { if (localStorage.getItem(SCOPE_KEY) === 'suite') scope = 'suite' } catch { /* ignore */ }
+  // The whole suite first; this app's own figure is one tap away (James,
+  // 2026-09-17). Only an explicit 'app' switches it back.
+  let scope = 'suite'
+  try { if (localStorage.getItem(SCOPE_KEY) === 'app') scope = 'app' } catch { /* ignore */ }
   let beaten = false
 
   const beat = () =>

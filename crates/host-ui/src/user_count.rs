@@ -161,7 +161,10 @@ impl UserCount {
         let this = Self {
             token,
             line: Arc::new(Mutex::new(None)),
-            suite: Arc::new(AtomicBool::new(false)),
+            // The whole suite first; a click shows this app's own figure
+            // (James, 2026-09-17). A host has nowhere to remember the choice
+            // between runs, so it simply opens on the suite every time.
+            suite: Arc::new(AtomicBool::new(true)),
             refresh: Arc::new(AtomicBool::new(false)),
         };
         let worker = this.clone();

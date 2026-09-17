@@ -71,8 +71,10 @@ object UserCount {
         return id
     }
 
+    /** The whole suite until this person switches it (James, 2026-09-17):
+     *  only an explicit "app" shows this app's own figure. */
     fun scope(context: Context): String =
-        if (prefs(context).getString(SCOPE_KEY, "app") == "suite") "suite" else "app"
+        if (prefs(context).getString(SCOPE_KEY, "suite") == "app") "app" else "suite"
 
     fun setScope(context: Context, scope: String) {
         prefs(context).edit().putString(SCOPE_KEY, scope).apply()
