@@ -32,6 +32,9 @@
 //! and when it changes must not differ by platform. Linux carried its own
 //! clock-seeded copy of `gen_pin` until then.
 
+pub mod user_count;
+pub use user_count::{show_user_count, UserCount};
+
 use std::net::TcpListener;
 
 use eframe::egui;

@@ -972,6 +972,11 @@ fun ConnectScreen(
             // menu). See AboutApp.kt for why the content is shared and the
             // markup is not.
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
+
+            // "There are X total users (Y live)", last under Advanced — the
+            // same place the browser client and the desktop hosts put it. Tap
+            // for the whole suite. See UserCount.kt.
+            UserCountLine(modifier = Modifier.fillMaxWidth())
         }
         if (showAbout) AboutAppDialog(onDismiss = { showAbout = false })
         joinStatus?.let { Text(it) }

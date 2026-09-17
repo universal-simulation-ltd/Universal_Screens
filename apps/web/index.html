@@ -412,6 +412,9 @@
   #connect-status { margin-top: 1rem; color: var(--muted); font-size: .85rem; min-height: 1.2em; text-align: center; }
   .footer { margin-top: 1.5rem; text-align: center; }
   .link-btn { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; text-decoration: underline; cursor: pointer; }
+  /* The user count sits under Advanced, quiet, and is a button only because
+     tapping it switches to the suite-wide figure. */
+  .user-count { display: block; width: 100%; margin-top: .9rem; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: .72rem; cursor: pointer; }
 
   /* ---- Advanced ▸ About this app ----
      Every other app in the suite got this on 2026-08-29 through the SDK's
@@ -731,6 +734,10 @@
           <button type="button" id="about-open">ℹ About this app</button>
         </div>
       </div>
+      <!-- "There are X total users (Y live)" — the line every suite app ends
+           its menu with. Tap it for the whole suite. Hidden until a real
+           number arrives, which on a LAN with no route out is never. -->
+      <button type="button" id="user-count" class="user-count" hidden></button>
     </div>
   </main>
 
@@ -843,7 +850,9 @@
 
   <script type="module">
     import { boot } from "./src/client.js";
+    import { startUserCount } from "./src/userCount.js";
     boot();
+    startUserCount(document.getElementById("user-count"));
   </script>
 </body>
 </html>

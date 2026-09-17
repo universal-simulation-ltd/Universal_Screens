@@ -16,3 +16,10 @@ eframe = { version = "0.29", features = ["persistence"] }
 # The pairing PIN is the Noise pre-shared key, so it comes from the OS RNG — see
 # `gen_pin`. Already in the lockfile via extender-transport.
 getrandom = "0.2"
+# The live user count (user_count.rs) — the hosts' ONE call to a UNI·SIM
+# server. ureq is blocking and tiny, which suits a 45-second beat on its own
+# thread; rustls is already in the tree via extender-transport.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+# Where the install id is kept, per OS.
+dirs = "5"
+

@@ -26,6 +26,7 @@ use crate::{serve_loop, HostEvent};
 // crate's docs for what deliberately stays forked (HostApp, RecentConn,
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
+    show_user_count, UserCount,
     about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
     DeviceKind, OwnPinChange, OwnPinEditor, BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL,
@@ -77,6 +78,9 @@ struct RecentConn {
 }
 
 struct HostApp {
+    /// The live user count in the profile menu — beats on its own thread, and
+    /// is the hosts' only call to a UNI·SIM server. See host-ui/user_count.rs.
+    user_count: UserCount,
     auto_connect: bool,
     /// Theme override: None = follow the OS, Some(true) = dark, Some(false) = light.
     dark_mode: Option<bool>,
@@ -174,6 +178,7 @@ impl HostApp {
             own_pin_editor: OwnPinEditor::default(),
             show_pc_info: false,
             caption_dark: None,
+            user_count: UserCount::start(),
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
                 .unwrap_or(true),
@@ -910,6 +915,11 @@ impl HostApp {
                     if ui.checkbox(&mut dont, "Don't connect automatically").changed() {
                         self.auto_connect = !dont;
                     }
+                    // Last in the menu, as in every other app in the suite:
+                    // "There are X total users (Y live)". Click for the whole
+                    // suite. Draws nothing until a number arrives, so a host
+                    // with no route out shows no empty rule.
+                    show_user_count(ui, &self.user_count, dark);
                 })
                 .response
                 // The disc carries no text, so without this the control is
