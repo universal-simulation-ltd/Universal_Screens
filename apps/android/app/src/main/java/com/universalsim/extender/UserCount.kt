@@ -78,15 +78,18 @@ object UserCount {
         prefs(context).edit().putString(SCOPE_KEY, scope).apply()
     }
 
-    /** POST one RPC. Returns the body, or null on any failure — never throws. */
-    private fun rpc(fn: String, body: String): String? = runCatching {
+    /** POST one RPC. Returns the body, or null on any failure — never throws.
+     *  `token` is the signed-in account's, when there is one: the server then
+     *  reads auth.uid() and counts one person across their devices rather than
+     *  one per install. */
+    private fun rpc(fn: String, body: String, token: String? = null): String? = runCatching {
         val conn = (URL("$SUPABASE_URL/rest/v1/rpc/$fn").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
             readTimeout = 10_000
             doOutput = true
             setRequestProperty("apikey", SUPABASE_ANON)
-            setRequestProperty("Authorization", "Bearer $SUPABASE_ANON")
+            setRequestProperty("Authorization", "Bearer ${token ?: SUPABASE_ANON}")
             setRequestProperty("Content-Type", "application/json")
         }
         conn.outputStream.use { it.write(body.toByteArray()) }
@@ -100,6 +103,7 @@ object UserCount {
         rpc(
             "app_presence_beat",
             """{"p_product":"$PRODUCT","p_install_id":"${installId(context)}"}""",
+            token = Account.accessToken(context),
         ) != null
     }
 

@@ -341,6 +341,9 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     // Remember the host for quick reconnect; store the mode only if
                     // the user asked to. OS/name fill in once HostInfo arrives.
                     ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
+                    // Signed in, this machine is the account's too. No-op
+                    // otherwise, and the PIN is never part of it (Account.kt).
+                    accountScope.launch { Account.remember(context, addr) }
                 }
                 session = s
                 // The verdict is a screen of its own now, not a line of small text
@@ -894,7 +897,11 @@ fun ConnectScreen(
                     },
                     onRename = { renameDraft = c.customName; renaming = c },
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
-                    onDelete = { ConnectionStore.delete(context, c.addr); reload() },
+                    onDelete = {
+                        ConnectionStore.delete(context, c.addr)
+                        accountScope.launch { Account.forget(context, c.addr) }
+                        reload()
+                    },
                 )
             }
         }
@@ -973,6 +980,11 @@ fun ConnectScreen(
             // markup is not.
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
 
+            // Universal ID — optional, and nothing about connecting needs it:
+            // what it buys is the saved machines following the account
+            // (James, 2026-09-17). See Account.kt.
+            AccountRow(onSynced = { reload() })
+
             // "There are X total users (Y live)", last under Advanced — the
             // same place the browser client and the desktop hosts put it. Tap
             // for the whole suite. See UserCount.kt.
@@ -1001,6 +1013,7 @@ fun ConnectScreen(
                 confirmButton = {
                     TextButton(onClick = {
                         ConnectionStore.setCustomName(context, target.addr, renameDraft)
+                        accountScope.launch { Account.remember(context, target.addr) }
                         renaming = null
                         reload()
                     }) { Text("Save") }

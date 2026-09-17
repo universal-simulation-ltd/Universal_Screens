@@ -105,6 +105,11 @@ object ConnectionStore {
         save(context, load(context).map { if (it.addr == addr) it.copy(customName = name.trim()) else it })
     }
 
+    /** Replace the whole list — what a sync from the account writes back. */
+    fun replaceAll(context: Context, list: List<SavedConnection>) {
+        save(context, list)
+    }
+
     fun delete(context: Context, addr: String) {
         save(context, load(context).filterNot { it.addr == addr })
     }
