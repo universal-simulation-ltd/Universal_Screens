@@ -22,7 +22,7 @@ fn main() {
     res.set("ProductName", "Universal Screens");
     res.set("FileDescription", "Universal Screens — host");
     res.set("CompanyName", "Universal Simulation Ltd");
-    res.set("LegalCopyright", "Universal Simulation Ltd — MIT licensed");
+    res.set("LegalCopyright", "Universal Simulation Ltd — AGPL-3.0-or-later");
     if let Err(e) = res.compile() {
         println!("cargo:warning=couldn't embed the Windows icon/version resource: {e}");
     }
