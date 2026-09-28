@@ -7,8 +7,9 @@
 // read `packages/sdk/src/presence.ts` in `universal-platform` before changing
 // anything here:
 //
-//   * POST /rest/v1/rpc/app_presence_beat {p_product:'screens', p_install_id}
-//     on load and every 45 s while the page is visible (migration 0175);
+//   * POST /rest/v1/rpc/app_presence_beat {p_product:'screens', p_install_id,
+//     p_platform:'web'} on load and every 45 s while the page is visible
+//     (migration 0175; the platform since 0187);
 //   * POST /rest/v1/rpc/app_user_counts   {p_product:'screens'} → {total, live}
 //     — and `suite_user_counts` (0177) when the line has been tapped for the
 //     whole-suite figure.
@@ -91,7 +92,7 @@ export function startUserCount(el) {
   let beaten = false
 
   const beat = () =>
-    rpc('app_presence_beat', { p_product: PRODUCT, p_install_id: id })
+    rpc('app_presence_beat', { p_product: PRODUCT, p_install_id: id, p_platform: 'web' })
       .then(() => { beaten = true })
       .catch(() => {})
 

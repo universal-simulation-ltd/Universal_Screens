@@ -5,8 +5,10 @@
 //! `presence.ts` written out against the REST endpoint. Read that file before
 //! changing anything here; the behaviour is deliberately identical:
 //!
-//!   * `app_presence_beat(product, install_id)` on start and every 45 s
-//!     (migration 0175);
+//!   * `app_presence_beat(product, install_id, platform)` on start and every
+//!     45 s (migration 0175; the platform — `std::env::consts::OS`, so
+//!     macos / windows / linux — since 0187, which puts hosts in the suite's
+//!     native column);
 //!   * `app_user_counts('screens')` → total + live, or `suite_user_counts()`
 //!     (0177) once the line has been clicked for the whole-suite figure.
 //!
@@ -177,7 +179,10 @@ impl UserCount {
                     let token = token.as_deref();
                     let beaten = rpc(
                         "app_presence_beat",
-                        format!("{{\"p_product\":\"{PRODUCT}\",\"p_install_id\":\"{id}\"}}"),
+                        format!(
+                            "{{\"p_product\":\"{PRODUCT}\",\"p_install_id\":\"{id}\",\"p_platform\":\"{}\"}}",
+                            std::env::consts::OS
+                        ),
                         token,
                     )
                     .is_some();

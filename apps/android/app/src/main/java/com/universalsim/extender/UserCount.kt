@@ -29,8 +29,8 @@ import java.util.UUID
  * `presence.ts` written out against the REST endpoint, with `HttpURLConnection`
  * rather than a new dependency. Read that file before changing anything here:
  *
- *   * `app_presence_beat(product, install_id)` on open and every 45 s while
- *     this screen is on (migration 0175);
+ *   * `app_presence_beat(product, install_id, platform)` on open and every
+ *     45 s while this screen is on (migration 0175; `android` since 0187);
  *   * `app_user_counts(product)` → total + live, or `suite_user_counts()`
  *     (0177) once the line has been tapped for the whole-suite figure.
  *
@@ -104,7 +104,7 @@ object UserCount {
     suspend fun beat(context: Context): Boolean = withContext(Dispatchers.IO) {
         rpc(
             "app_presence_beat",
-            """{"p_product":"$PRODUCT","p_install_id":"${installId(context)}"}""",
+            """{"p_product":"$PRODUCT","p_install_id":"${installId(context)}","p_platform":"android"}""",
             token = Account.accessToken(context),
         ) != null
     }
