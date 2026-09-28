@@ -407,7 +407,7 @@ pub fn about_panel(ui: &mut egui::Ui, version: &str) {
     ui.add_space(8.0);
 
     about_heading(ui, "Open source");
-    ui.label("Free and open source under the MIT licence — every line of it public.");
+    ui.label("Free and open source under the GNU AGPL v3 or later — every line of it public.");
     ui.horizontal(|ui| {
         ui.hyperlink_to("View the source ↗", REPO_URL);
         ui.hyperlink_to("Report a problem ↗", ISSUES_URL);
