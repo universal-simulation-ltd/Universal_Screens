@@ -500,6 +500,53 @@
   #about-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer; }
   #about-close:hover { color: var(--text); }
 
+  /* ---- Advanced ▸ Knowledge base ----
+     The same reader every other Universal App opens from its Advanced menu
+     (the SDK's <KnowledgeBaseDialog>), hand-built for the same reason as About:
+     this page is not React. Same shell as #about-card — a pinned head over the
+     only scroller — so it behaves the same on a phone. The articles are
+     `knowledge/<lang>.md`, shared with the desktop hosts and the Android app;
+     src/kb-dialog.js renders them as elements, never as HTML. */
+  #kb-backdrop {
+    position: fixed; inset: 0; background: rgba(15,23,42,.45);
+    display: none; align-items: center; justify-content: center;
+    padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+    z-index: 1100;
+  }
+  #kb-backdrop.open { display: flex; }
+  #kb-card {
+    position: relative; width: 100%; max-width: 560px;
+    max-height: min(100%, 100svh);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 1rem;
+    text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.25); outline: none;
+  }
+  #kb-card [hidden] { display: none; }
+  #kb-head { flex: none; padding: 1.2rem 3rem .85rem 1.5rem; border-bottom: 1px solid var(--line); }
+  #kb-head h2 { margin: 0; font-size: 1.05rem; letter-spacing: -.01em; line-height: 1.3; }
+  #kb-back { display: inline-flex; align-items: center; gap: .2rem; margin: 0 0 .35rem -.3rem; padding: .2rem .35rem; border: 0; border-radius: .4rem; background: none; color: var(--accent); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+  #kb-back:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  #kb-lang-wrap { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; font-size: .78rem; font-weight: 600; color: var(--muted); }
+  #kb-lang { font: inherit; font-weight: 400; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: .5rem; padding: .3rem .45rem; }
+  #kb-body { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: .9rem 1.5rem 1.35rem; }
+  #kb-body .kb-status { margin: 0; font-size: .85rem; color: var(--muted); }
+  #kb-body .kb-group { margin: .9rem 0 .25rem; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  #kb-body .kb-group:first-child { margin-top: 0; }
+  #kb-body .kb-row { display: flex; align-items: center; gap: .6rem; width: calc(100% + 1.2rem); margin: 0 -.6rem 2px; padding: .5rem .6rem; border: 0; border-radius: .5rem; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  #kb-body .kb-row:hover { background: var(--bg); }
+  #kb-body .kb-row .kb-text { flex: 1; min-width: 0; }
+  #kb-body .kb-row .kb-title { display: block; font-size: .84rem; font-weight: 600; }
+  #kb-body .kb-row .kb-summary { display: block; margin-top: .12rem; font-size: .74rem; line-height: 1.4; color: var(--muted); }
+  #kb-body .kb-row .kb-chev { flex: none; color: var(--muted); }
+  #kb-body .kb-article { display: grid; gap: .65rem; }
+  #kb-body .kb-article h3 { margin: .35rem 0 0; font-size: .86rem; font-weight: 700; }
+  #kb-body .kb-article p, #kb-body .kb-article ul, #kb-body .kb-article ol { margin: 0; font-size: .86rem; line-height: 1.6; }
+  #kb-body .kb-article ul, #kb-body .kb-article ol { padding-left: 1.25rem; line-height: 1.55; }
+  #kb-body .kb-article li + li { margin-top: .25rem; }
+  #kb-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); cursor: pointer; z-index: 1; }
+  #kb-close:hover { color: var(--text); }
+
   /* ---- Universal ID dialog: the About card's shape, a form instead of prose --- */
   #account-backdrop {
     position: fixed; inset: 0; background: rgba(15,23,42,.45);
@@ -775,6 +822,7 @@
               <label><input type="radio" name="appearance" value="system" /><span>Match my device</span></label>
             </div>
           </div>
+          <button type="button" id="kb-open">📖 Knowledge base</button>
           <button type="button" id="about-open">ℹ About this app</button>
         </div>
       </div>
@@ -839,6 +887,29 @@
       <div id="account-signed-in" hidden>
         <button type="button" class="quiet" id="account-signout">Sign out</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Knowledge base: the list, then one article. Filled by src/kb-dialog.js
+       from knowledge/<lang>.md with textContent only. -->
+  <div id="kb-backdrop" role="presentation">
+    <div id="kb-card" role="dialog" aria-modal="true" aria-labelledby="kb-title" tabindex="-1">
+      <!-- An inline SVG, not `✕` — see the About dialog for why. -->
+      <button type="button" id="kb-close" aria-label="Close">
+        <svg viewBox="0 0 20 20" aria-hidden="true" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </button>
+      <div id="kb-head">
+        <button type="button" id="kb-back" hidden>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          <span id="kb-back-label">All articles</span>
+        </button>
+        <h2 id="kb-title">Knowledge base</h2>
+        <label id="kb-lang-wrap"><span id="kb-lang-label">Language</span><select id="kb-lang"></select></label>
+      </div>
+      <div id="kb-body"></div>
     </div>
   </div>
 
@@ -935,6 +1006,12 @@
     import { startUserCount } from "./src/userCount.js";
     boot();
     startUserCount(document.getElementById("user-count"));
+  </script>
+  <!-- Separate from the module above, so the knowledge base still opens if the
+       WASM codec fails to load. -->
+  <script type="module">
+    import { mountKnowledgeBase } from "./src/kb-dialog.js";
+    mountKnowledgeBase();
   </script>
 </body>
 </html>

@@ -98,6 +98,11 @@ jobs:
       - name: Test the browser's encryption negotiation
         run: node apps/web/room-caps.test.mjs
 
+      # The shared knowledge base, read the way the browser reads it. The data
+      # itself is checked by host-ui's tests (Linux + Windows jobs).
+      - name: Test the browser's knowledge-base reader
+        run: node apps/web/knowledge.test.mjs
+
       # `rust-cache` caches `~/.cargo/bin`, so this compiles once and is a no-op
       # on every later run — worth the guard, because installing it takes longer
       # than everything else in this job put together.

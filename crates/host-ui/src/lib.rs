@@ -38,6 +38,9 @@ pub use account::{account_menu_row, show_account_window, UserAccount};
 pub mod user_count;
 pub use user_count::{show_user_count, UserCount};
 
+pub mod knowledge;
+pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
+
 use std::net::TcpListener;
 
 use eframe::egui;

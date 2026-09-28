@@ -25,7 +25,12 @@ android {
     kotlinOptions { jvmTarget = "17" }
 
     // libextender_mobile.so per ABI is dropped into src/main/jniLibs by cargo-ndk
-    // (see ../README.md). Nothing else to configure here.
+    // (see ../README.md).
+
+    // The knowledge base's articles are the browser client's files, packed as
+    // assets rather than copied: one set of articles for every client. They
+    // land at the assets root as en.md, fr.md, … — see Knowledge.kt.
+    sourceSets["main"].assets.srcDir("../../web/knowledge")
 }
 
 dependencies {

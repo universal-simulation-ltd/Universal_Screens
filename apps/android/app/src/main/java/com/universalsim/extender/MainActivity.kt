@@ -781,6 +781,7 @@ fun ConnectScreen(
     var joinStatus by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var showKnowledge by remember { mutableStateOf(false) }
     // "Cast to a browser": inline manual code entry under Advanced (the QR /
     // deep-link path skips this and casts straight away).
     var castDraft by remember { mutableStateOf("") }
@@ -978,6 +979,10 @@ fun ConnectScreen(
             // every other app in the suite (and in the desktop hosts' Actions
             // menu). See AboutApp.kt for why the content is shared and the
             // markup is not.
+            // The knowledge base sits just above About, as in the web apps'
+            // Advanced menu. The articles are shared with every client — see
+            // Knowledge.kt.
+            TextButton(onClick = { showKnowledge = true }) { Text("📖  Knowledge base") }
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
 
             // Universal ID — optional, and nothing about connecting needs it:
@@ -991,6 +996,7 @@ fun ConnectScreen(
             UserCountLine(modifier = Modifier.fillMaxWidth())
         }
         if (showAbout) AboutAppDialog(onDismiss = { showAbout = false })
+        if (showKnowledge) KnowledgeBaseDialog(onDismiss = { showKnowledge = false })
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
 

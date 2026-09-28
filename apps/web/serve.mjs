@@ -17,6 +17,7 @@ const MIME = {
   ".json": "application/json",
   ".css": "text/css; charset=utf-8",
   ".map": "application/json",
+  ".md": "text/markdown; charset=utf-8",
 };
 
 createServer(async (req, res) => {
