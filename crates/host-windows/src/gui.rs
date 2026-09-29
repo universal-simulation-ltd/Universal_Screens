@@ -28,6 +28,7 @@ use crate::{serve_loop, HostEvent};
 use extender_host_ui::{
     account_menu_row, show_account_window, UserAccount,
     show_user_count, UserCount,
+    show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY,
     about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
     DeviceKind, OwnPinChange, OwnPinEditor, BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL,
@@ -96,6 +97,9 @@ struct HostApp {
     /// means a fresh PIN every start. See host-ui's `OwnPinEditor`.
     own_pin: Option<u32>,
     own_pin_editor: OwnPinEditor,
+    /// Actions ▸ Advanced ▸ Knowledge base. The articles are the shared ones in
+    /// `apps/web/knowledge/`, embedded by host-ui.
+    knowledge: KnowledgeReader,
     /// Reveal the "This PC: …" detail (toggled by clicking the OS icon).
     show_pc_info: bool,
     /// Last theme we painted the title bar for (re-applied on change).
@@ -184,6 +188,9 @@ impl HostApp {
             pin,
             own_pin,
             own_pin_editor: OwnPinEditor::default(),
+            knowledge: KnowledgeReader::with_language(
+                storage.and_then(|s| eframe::get_value::<String>(s, KB_LANGUAGE_KEY)),
+            ),
             show_pc_info: false,
             caption_dark: None,
             // Started from the account's token handle, so a sign-in shows up
@@ -794,6 +801,12 @@ impl HostApp {
                 // which resolves against the crate being compiled — read inside
                 // host-ui it would report host-ui's version, not this host's.
                 ui.menu_button("⚙  Advanced", |ui| {
+                    // The knowledge base sits above About, which stays last,
+                    // as in the web apps' Advanced menu and the macOS host.
+                    if ui.button("📖  Knowledge base").clicked() {
+                        self.knowledge.open();
+                        ui.close_menu();
+                    }
                     ui.menu_button("ℹ  About this app", |ui| {
                         about_panel(ui, APP_VERSION);
                     });
@@ -950,6 +963,7 @@ impl eframe::App for HostApp {
         eframe::set_value(storage, "auto_connect", &self.auto_connect);
         eframe::set_value(storage, "dark_mode", &self.dark_mode);
         eframe::set_value(storage, OWN_PIN_KEY, &self.own_pin);
+        eframe::set_value(storage, KB_LANGUAGE_KEY, &self.knowledge.language);
         eframe::set_value(storage, "port", &self.port);
         eframe::set_value(storage, "recent", &*self.recent.lock().unwrap());
     }
@@ -998,6 +1012,8 @@ impl eframe::App for HostApp {
         // The sign-in window, when the profile menu's account row opened it.
         // Draws nothing otherwise, and drains its worker thread either way.
         show_account_window(ctx, &mut self.account);
+        // The knowledge base, when Actions ▸ Advanced opened it.
+        show_knowledge_window(ctx, &mut self.knowledge);
 
         paint_brand_strip(ctx);
 
