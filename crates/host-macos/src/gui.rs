@@ -1153,7 +1153,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         options,
         Box::new(|cc| {
             let mut app = HostApp::new(cc);
-            if app.auto_connect {
+            #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+            let mut autostart = app.auto_connect;
+            // Debug builds only: SCREENS_OPEN_KB=list (or an article id, and
+            // SCREENS_KB_LANGUAGE=fr for a language) opens the knowledge base
+            // at start, so the reader can be screenshotted without clicking
+            // through Actions ▸ Advanced. It also skips auto-start, so a
+            // screenshot run opens no port and advertises nothing on the LAN
+            // (without touching the saved auto_connect setting).
+            #[cfg(debug_assertions)]
+            if let Ok(target) = std::env::var("SCREENS_OPEN_KB") {
+                if let Ok(lang) = std::env::var("SCREENS_KB_LANGUAGE") {
+                    app.knowledge.language = lang;
+                }
+                app.knowledge.open_article(&target);
+                autostart = false;
+            }
+            if autostart {
                 app.start(&cc.egui_ctx);
             }
             Ok(Box::new(app))

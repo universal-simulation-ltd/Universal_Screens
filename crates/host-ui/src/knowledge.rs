@@ -271,6 +271,12 @@ impl KnowledgeReader {
         self.current = None;
     }
 
+    /// Open straight on one article (by id). An unknown id shows the list.
+    pub fn open_article(&mut self, id: &str) {
+        self.show = true;
+        self.current = Some(id.to_owned());
+    }
+
     fn lang(&self) -> &str {
         if LANGUAGES.iter().any(|(c, _)| *c == self.language) {
             &self.language
