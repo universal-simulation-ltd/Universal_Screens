@@ -107,15 +107,16 @@ abandoned.
   app demos, with a "Present my phone" toggle (MediaProjection + upstream video).
 
 **Shipping:**
-- **Windows installer** — done and **published** (v0.2.0).
+- **Windows installer** — done and **published** (v0.3.0, 2026-09-29).
   `scripts/build-installer.ps1` (or a `v*` tag, via
   [`windows-release.yml`](.github/workflows/windows-release.yml)) produces a
   per-user, no-admin, statically-linked `UniversalScreens-Setup-*.exe`.
 - **macOS packaging** — done. Universal DMG, ad-hoc signed, built by
   [`macos-release.yml`](.github/workflows/macos-release.yml) and attached to
-  **v0.1.0**; the download page offers Mac alongside Windows. See
+  every release since **v0.1.0** (latest **v0.3.0**); the download page offers
+  Mac alongside Windows. See
   [docs/MACOS-APP.md](docs/MACOS-APP.md).
-- **Linux packaging** — done and **published** (v0.2.0, the first Linux
+- **Linux packaging** — done and **published** (since v0.2.0, the first Linux
   release). `scripts/build-appimage.sh` (or a `v*` tag, via
   [`linux-release.yml`](.github/workflows/linux-release.yml)) produces an
   unsigned `UniversalScreens-*.AppImage`.

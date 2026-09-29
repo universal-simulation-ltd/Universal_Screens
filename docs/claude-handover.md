@@ -4,6 +4,55 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-09-29 (v0.3.0 released; knowledge base on iOS and the Windows host's menu)
+
+**All pushed straight to `main`; v0.3.0 tagged and published.**
+
+- **iOS knowledge base** (`fcc3a66`): Advanced ▸ Knowledge base, above About.
+  `project.yml` adds `../web/knowledge` as a **folder reference** (bundle path
+  `knowledge/<lang>.md`), so iOS reads the one shared copy. `KnowledgeView.swift`
+  ports the parser from `knowledge.js` / `Knowledge.kt`: a sheet with a
+  language menu (saved as `kb_language`), grouped article cards, and the
+  article pushed on a NavigationStack. Seen in the simulator (iPhone 17 Pro,
+  iOS 26.3): the list in English light and French dark, and articles in English
+  light and German dark. Not yet on a phone. Debug builds take
+  `-openKnowledgeBase list|<id>`, `-kb_language xx` and `-appearance dark` at
+  launch (see `apps/ios/README.md`). ⚠️ The simulator build **does** link on
+  Apple Silicon; the README's old "device builds only" note was wrong.
+- **Windows host** (`29b4403`): Actions ▸ Advanced ▸ 📖 Knowledge base,
+  mirroring macOS (same `KB_LANGUAGE_KEY`). ⚠️ **A local
+  `cargo check --target x86_64-pc-windows-msvc` cannot get far on the Mac:**
+  it dies in `ring`'s C build script (`'assert.h' file not found`: no MSVC SDK
+  headers, and there is no `cargo-xwin` here) before it reaches any host code.
+  The Tests workflow's Windows job is the real check. It compiled and passed on
+  `2abad69` and `b505437`, and had already passed on `edcc65b`. So the host's
+  user-count edit **had** been compiled by CI before today.
+- **macOS host reader, looked at** (`2abad69`): debug-only
+  `SCREENS_OPEN_KB=list|<id>` (+ `SCREENS_KB_LANGUAGE`) opens the reader at
+  start. That run skips auto-start but leaves the saved `auto_connect` alone.
+  Screenshotted with `screencapture -l <window id>`: dark English list, dark
+  article, light German list. **Nothing broken.** The window fits the 440×720
+  host and articles scroll. One nit: summaries and group headings use egui's
+  `weak()` colour, which is faint in light mode.
+- **v0.3.0** (`b505437`, tag `v0.3.0`): the version bump, then an annotated tag,
+  the same way v0.2.0 was cut. All three release workflows and Tests passed. The
+  release has the DMG, `Setup-0.3.0.exe` and the AppImage, each with a
+  `.sha256`, and is marked Latest. The download page links to
+  `releases/latest`, so it picks this up without changes. ⚠️ Its checksum
+  example still names 0.1.0 files
+  (`backoffice/opensource-portal/public/screens.html`, not this repo).
+- **The `p_platform` builds:** built locally. `build-app-macos.sh` made a
+  universal DMG and passed its guards, and the binary carries the `p_platform`
+  body. `cargo ndk` built all three ABIs, then `assembleDebug` +
+  `assembleRelease` (unsigned: there is no release signing config). The dex
+  holds `"p_platform":"android"`, and the APK packs the eight KB articles. Not
+  installed on any device.
+
+**Left:** the iOS reader and the Android `p_platform` build still need a real
+phone. The iOS app has no Universal ID sign-in, but the KB's "What does signing
+in do?" article describes one. Android `versionName` is still 0.1.0 and is not
+tied to the Rust version.
+
 ## Update — 2026-09-13 (wrong PINs are rate-limited on all three hosts)
 
 **Pushed straight to `main`.** Closes the "Wrong PINs still aren't
