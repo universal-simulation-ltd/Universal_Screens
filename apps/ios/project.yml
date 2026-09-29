@@ -14,6 +14,13 @@ targets:
       - path: ScreenExtender
         excludes:
           - "ScreenExtender-Bridging-Header.h"
+      # The knowledge base's articles are the browser client's files, copied in
+      # as a folder reference rather than duplicated: one set of articles for
+      # every client. They land in the bundle as knowledge/en.md, … — see
+      # KnowledgeView.swift.
+      - path: ../web/knowledge
+        type: folder
+        buildPhase: resources
     dependencies:
       - framework: libs/ExtenderMobile.xcframework
         embed: false

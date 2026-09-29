@@ -63,6 +63,7 @@ apps/ios/
     VideoDecoder.swift               # Annex-B H.264/HEVC -> AVSampleBufferDisplayLayer
     ExtenderSession.swift            # Swift wrapper over the C FFI (+ event pump)
     ConnectionStore.swift            # saved-connection persistence (UserDefaults)
+    KnowledgeView.swift              # Advanced ▸ Knowledge base: parser + reader
     HidKeys.swift                    # HID usage ids for the clicker
     ScreenExtender-Bridging-Header.h # imports extender_ffi.h
 ```
@@ -117,8 +118,34 @@ xcrun devicectl device process launch --device YOUR_DEVICE_ID \
   com.universalsim.screenextender
 ```
 
-⚠️ **Device builds only.** The **simulator** build fails to link: the xcframework
-carries `ios-arm64` and `ios-arm64-simulator`, with no x86_64 slice.
+**Simulator builds work on an Apple Silicon Mac** — the xcframework's
+`ios-arm64-simulator` slice is all it needs. (This section used to say "device
+builds only" because there is no x86_64 slice; that only matters on an Intel
+Mac.) Built and run this way on 2026-09-29:
+
+```bash
+cd /Users/jamesmarkey/Github/UNISIM/Universal_Apps/Universal_Screens/apps/ios
+xcodebuild -project ScreenExtender.xcodeproj -scheme ScreenExtender \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug \
+  -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build
+xcrun simctl install booted build/sim/Build/Products/Debug-iphonesimulator/ScreenExtender.app
+xcrun simctl launch booted com.universalsim.screenextender -openKnowledgeBase list
+```
+
+`-openKnowledgeBase list` (or an article id such as `connecting`) opens the
+knowledge base at start, and `-kb_language fr` / `-appearance dark` pick the
+reader's language and the theme — **Debug builds only** (`#if DEBUG`), so the
+reader can be screenshotted without tapping through Advanced.
+
+## Knowledge base
+
+**Advanced ▸ Knowledge base**, just above About, as on Android and in the
+browser client. ⚠️ **The articles are not in this folder.** `project.yml`
+copies `../web/knowledge/` into the bundle as a folder reference, so the app
+reads the same `<lang>.md` files every other client does; edit them there. The
+parser in `KnowledgeView.swift` is a port of `apps/web/src/knowledge.js` and the
+Android client's `Knowledge.kt` — keep the three in step. The chosen language is
+saved as `kb_language` in UserDefaults; unset, it follows the device.
 
 ## Assembling the Xcode project
 

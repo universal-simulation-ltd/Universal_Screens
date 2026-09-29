@@ -113,6 +113,7 @@ struct ConnectView: View {
     @State private var showHidden = false
     @State private var showAdvanced = false
     @State private var showAbout = false
+    @State private var showKnowledge = false
     @State private var showScanner = false
     /// Advanced ▸ Appearance. The same key the app root applies, so changing it
     /// here re-themes the whole window at once.
@@ -163,6 +164,15 @@ struct ConnectView: View {
         .onAppear {
             saved = ConnectionStore.load()
             nearby.start()
+            #if DEBUG
+            // Debug builds only: `-openKnowledgeBase list` (or an article id)
+            // on the launch arguments opens the reader, so it can be
+            // screenshotted in the simulator without tapping through Advanced.
+            if UserDefaults.standard.string(forKey: KnowledgeView.debugOpenKey) != nil {
+                showAdvanced = true
+                showKnowledge = true
+            }
+            #endif
         }
         .onDisappear { nearby.stop() }
         // PIN prompt for a Nearby host (no QR in this flow, so the PIN — shown
@@ -462,7 +472,19 @@ struct ConnectView: View {
                     // sits in every other app in the suite (and in the desktop
                     // hosts' Actions menu). See AboutView.swift for why the
                     // content is shared and the markup is not.
+                    //
+                    // The knowledge base sits just above About, as in the web
+                    // apps' Advanced menu and the Android client. The articles
+                    // are shared with every client — see KnowledgeView.swift.
                     Divider()
+                    Button {
+                        showKnowledge = true
+                    } label: {
+                        Label("Knowledge base", systemImage: "book")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
                     Button {
                         showAbout = true
                     } label: {
@@ -477,5 +499,6 @@ struct ConnectView: View {
             }
         }
         .sheet(isPresented: $showAbout) { AboutView() }
+        .sheet(isPresented: $showKnowledge) { KnowledgeView() }
     }
 }
