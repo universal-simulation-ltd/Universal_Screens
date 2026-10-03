@@ -508,8 +508,8 @@ fn native_resolution(
 /// Scale `native` by `percent`, preserving aspect ratio. Both dimensions are
 /// rounded down to even numbers (H.264 encoders require even width/height).
 fn scaled_even(native: (u32, u32), percent: u32) -> (u32, u32) {
-    let w = (native.0 * percent / 100 & !1).max(2);
-    let h = (native.1 * percent / 100 & !1).max(2);
+    let w = ((native.0 * percent / 100) & !1).max(2);
+    let h = ((native.1 * percent / 100) & !1).max(2);
     (w, h)
 }
 

@@ -131,6 +131,9 @@ fn decode_from_wire(wire: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
                     .ok_or("failed to reassemble CMSampleBuffer")?;
                 decoder.decode(&sample)?;
             }
+            // Stills, host identity and window lists are not part of the video
+            // path this probe exercises.
+            Message::Snapshot { .. } | Message::HostInfo { .. } | Message::WindowList { .. } => {}
         }
     }
 

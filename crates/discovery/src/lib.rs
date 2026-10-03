@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn beacon_round_trips() {
-        let beacon = format!("USSCREENS\t9000\tMY-PC");
+        let beacon = "USSCREENS\t9000\tMY-PC";
         let (port, name) = parse_beacon(beacon.as_bytes()).unwrap();
         assert_eq!(port, 9000);
         assert_eq!(name, "MY-PC");
