@@ -230,7 +230,15 @@ function renderSaved() {
     const base = h.hostname || h.addr;
     const cn = (h.customName ?? "").trim();
     const title = cn ? `${cn} (${base})` : base;
-    row.innerHTML = `<span class="glyph">${DEVICE_GLYPH[h.os] ?? "🖥️"}</span><span class="body"><div class="title">${title}</div><div class="blurb">${h.addr}</div></span><span class="ren" title="Rename">✎</span><span class="del" title="Forget">×</span>`;
+    // ⚠️ Structure by markup, every value by textContent. `title` is the
+    // host's own machine name (from its HostInfo — anything on the network can
+    // claim any name, including one made of HTML) and the rest arrives by
+    // account sync from other devices; spliced into innerHTML, a rogue "host"
+    // ran script here, on the page that holds the Universal ID session.
+    row.innerHTML = `<span class="glyph"></span><span class="body"><div class="title"></div><div class="blurb"></div></span><span class="ren" title="Rename">✎</span><span class="del" title="Forget">×</span>`;
+    row.querySelector(".glyph").textContent = Object.hasOwn(DEVICE_GLYPH, h.os) ? DEVICE_GLYPH[h.os] : "🖥️";
+    row.querySelector(".title").textContent = title;
+    row.querySelector(".blurb").textContent = h.addr;
     row.addEventListener("click", (e) => {
       if (e.target.classList.contains("del")) {
         saved.remove(h.addr);
