@@ -66,19 +66,16 @@ pub const DEFAULT_WS_ADDR: &str = "0.0.0.0:9002";
 pub const DEFAULT_HOST_ADDR: &str = "127.0.0.1:9000";
 
 /// Read one length-prefixed frame body (4-byte LE length + body) from a TCP
-/// stream — the wire framing of `protocol::read_framed`, but without decoding
-/// the `postcard` body (the bridge only forwards bytes). Must stay in step with
-/// `extender_protocol::{read_framed, write_framed}`.
+/// stream, without decoding the `postcard` body (the bridge only forwards
+/// bytes). This is `extender_protocol::read_frame` — the framing's one
+/// read-side implementation, including its size limit — re-exported under the
+/// name the bridge has always used.
 ///
 /// # Errors
-/// Returns an error if the stream ends or the declared length can't be read.
+/// Returns an error if the stream ends or the declared length is over
+/// `extender_protocol::MAX_FRAME_LEN`.
 pub fn read_frame_body<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
-    let mut len_buf = [0u8; 4];
-    r.read_exact(&mut len_buf)?;
-    let len = u32::from_le_bytes(len_buf) as usize;
-    let mut body = vec![0u8; len];
-    r.read_exact(&mut body)?;
-    Ok(body)
+    extender_protocol::read_frame(r)
 }
 
 /// Write one length-prefixed frame body (4-byte LE length + body) to a TCP

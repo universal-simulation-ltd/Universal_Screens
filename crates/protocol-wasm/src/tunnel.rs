@@ -165,11 +165,15 @@ impl FrameReader {
         let len_bytes = self.buf.get(..4)?;
         let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]])
             as usize;
-        if self.buf.len() < 4 + len {
+        // Checked: on wasm32 `usize` is 32 bits, so a length near `u32::MAX`
+        // wrapped `4 + len` round to a tiny number and the slice below panicked,
+        // taking the tab's whole WASM module with it.
+        let end = len.checked_add(4)?;
+        if self.buf.len() < end {
             return None;
         }
-        let body = self.buf[4..4 + len].to_vec();
-        self.buf.drain(..4 + len);
+        let body = self.buf[4..end].to_vec();
+        self.buf.drain(..end);
         Some(body)
     }
 

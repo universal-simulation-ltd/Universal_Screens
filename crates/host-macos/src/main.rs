@@ -87,6 +87,9 @@ pub(crate) fn serve_loop(
                     continue;
                 }
                 let _ = stream.set_nonblocking(false);
+                // Until the hello is in, a peer has proved nothing: bound it, or
+                // one silent connection holds this loop and nobody else gets in.
+                transport::begin_handshake(&stream);
                 // Transport encryption first: an encrypting native client opens with
                 // the Noise preamble (run the responder handshake, keyed by the PIN);
                 // a legacy/loopback plaintext peer (e.g. the WebSocket bridge) is
@@ -113,6 +116,7 @@ pub(crate) fn serve_loop(
                 if let Some((platform, mode, w, h, name)) =
                     read_hello(&mut conn, &peer, expected_pin, &mut guard)
                 {
+                    let _ = conn.end_handshake();
                     // Identify this host so the client can label/icon the connection.
                     if let Ok(mut writer) = conn.try_clone() {
                         let _ = protocol::write_framed(

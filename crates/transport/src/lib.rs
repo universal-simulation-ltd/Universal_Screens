@@ -120,6 +120,26 @@ const MAX_PLAINTEXT: usize = 65535 - 16;
 /// are ~48 bytes; 4 KiB is comfortable headroom.
 const MAX_HANDSHAKE_MSG: usize = 4096;
 
+/// How long a peer that has not yet authenticated may hold a host's accept loop:
+/// the Noise handshake plus the `ClientHello`. Matches the client side
+/// (`extender_core::HANDSHAKE_TIMEOUT`).
+///
+/// ⚠️ **Every host serves one connection at a time, on the accept loop's own
+/// thread.** Without a bound, one TCP connection that opened and then said
+/// nothing — or sent the first byte of the preamble and stopped — parked
+/// [`accept`]'s peek forever, and nobody else could connect until the host was
+/// restarted. It needed no PIN and no skill: `nc host 9000` was enough.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Bound the unauthenticated part of a connection by [`HANDSHAKE_TIMEOUT`]. Call
+/// it on a freshly accepted socket, before [`accept`]; once the hello has been
+/// read and checked, call [`Conn::end_handshake`] so an idle session (a clicker
+/// between slides) is not cut off.
+pub fn begin_handshake(stream: &TcpStream) {
+    let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
+}
+
 /// Derive the 32-byte Noise pre-shared key from the pairing PIN.
 ///
 /// `pin == 0` means "no pairing"; it still yields a (fixed, well-known) key so the
@@ -247,6 +267,11 @@ fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn
 /// peer is classified from its very first byte with nothing consumed.
 fn peek_is_preamble(stream: &TcpStream) -> io::Result<bool> {
     let mut buf = [0u8; PREAMBLE.len()];
+    // ⚠️ A peer that sends part of the preamble and stops is NOT bounded by the
+    // socket's read timeout: `peek` keeps returning the bytes already queued, at
+    // once, so this loop spun a core at 100% for as long as the peer liked. The
+    // deadline and the nap are what bound it.
+    let deadline = std::time::Instant::now() + stream.read_timeout()?.unwrap_or(HANDSHAKE_TIMEOUT);
     loop {
         let n = stream.peek(&mut buf)?;
         if n == 0 {
@@ -260,7 +285,11 @@ fn peek_is_preamble(stream: &TcpStream) -> io::Result<bool> {
         if n >= PREAMBLE.len() {
             return Ok(true);
         }
-        // Saw a matching-but-partial prefix; loop to peek more once it arrives.
+        // Saw a matching-but-partial prefix; wait a moment for the rest.
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "peer stalled mid-preamble"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -324,6 +353,16 @@ impl Conn {
     /// Returns an error if the underlying call fails.
     pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.tcp().set_write_timeout(dur)
+    }
+
+    /// Lift the [`begin_handshake`] timeouts once the peer is authenticated, so
+    /// the session's reads block for as long as the session lasts.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying calls fail.
+    pub fn end_handshake(&self) -> io::Result<()> {
+        self.set_read_timeout(None)?;
+        self.set_write_timeout(None)
     }
 
     /// Whether this connection is transport-encrypted.
@@ -454,6 +493,47 @@ mod tests {
     /// Cap every socket read in these tests. Long enough that a loaded machine
     /// never trips it, short enough that a broken build reports in seconds.
     const TEST_IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// A connected pair: the far end the test plays, and the host's accepted socket.
+    fn socket_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (host, _) = listener.accept().unwrap();
+        (peer, host)
+    }
+
+    #[test]
+    fn begin_and_end_handshake_set_and_lift_the_timeouts() {
+        let (_peer, host) = socket_pair();
+        begin_handshake(&host);
+        assert_eq!(host.read_timeout().unwrap(), Some(HANDSHAKE_TIMEOUT));
+        assert_eq!(host.write_timeout().unwrap(), Some(HANDSHAKE_TIMEOUT));
+        let conn = Conn::Plain(host);
+        conn.end_handshake().unwrap();
+        assert_eq!(conn.tcp().read_timeout().unwrap(), None);
+        assert_eq!(conn.tcp().write_timeout().unwrap(), None);
+    }
+
+    #[test]
+    fn a_silent_peer_cannot_hold_accept_open() {
+        let (_peer, host) = socket_pair();
+        // The same bound `begin_handshake` sets, shortened so the test is quick.
+        host.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+        let started = std::time::Instant::now();
+        assert!(accept(host, 1234).is_err(), "a peer that says nothing must not be served");
+        assert!(started.elapsed() < TEST_IO_TIMEOUT);
+    }
+
+    #[test]
+    fn a_peer_stalled_mid_preamble_times_out_instead_of_spinning() {
+        let (mut peer, host) = socket_pair();
+        peer.write_all(&PREAMBLE[..2]).unwrap();
+        host.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+        let started = std::time::Instant::now();
+        let err = accept(host, 1234).err().expect("a half-sent preamble must fail");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < TEST_IO_TIMEOUT);
+    }
 
     #[test]
     fn psk_is_deterministic_and_pin_sensitive() {

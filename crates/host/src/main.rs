@@ -92,6 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Transport encryption first: an encrypting native client opens with the
         // Noise preamble (run the responder handshake — this dev host doesn't pair,
         // so PIN 0); a legacy/loopback plaintext peer is passed through untouched.
+        // Bound the handshake + hello, so one silent peer can't hold the loop.
+        transport::begin_handshake(&stream);
         let mut conn = match transport::accept(stream, 0) {
             Ok(c) => c,
             Err(e) => {
@@ -113,6 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
         };
+        let _ = conn.end_handshake();
 
         // Pick what to capture: a virtual second screen sized to the client (the
         // "extend" default) or the host's real primary display (mirror / control).

@@ -168,6 +168,9 @@ pub(crate) fn serve_loop(
                     continue;
                 }
                 let _ = stream.set_nonblocking(false); // blocking reads for the session
+                // Until the hello is in, a peer has proved nothing: bound it, or
+                // one silent connection holds this loop and nobody else gets in.
+                transport::begin_handshake(&stream);
                 match transport::accept(stream, expected_pin) {
                     Ok(mut conn) => {
                         if !conn.is_encrypted() {
@@ -176,6 +179,7 @@ pub(crate) fn serve_loop(
                             );
                         }
                         if let Some(req) = read_hello(&mut conn, &peer, expected_pin, &mut guard) {
+                            let _ = conn.end_handshake();
                             on_event(HostEvent::Connected {
                                 peer: peer.clone(),
                                 platform: req.platform,

@@ -256,16 +256,54 @@ pub fn write_framed<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()
     Ok(())
 }
 
-/// Read a length-prefixed, postcard-encoded value from a stream.
+/// The largest frame body [`read_frame`] will accept: 64 MiB.
+///
+/// ⚠️ The length prefix is read from the peer **before** anything has proved who
+/// the peer is — a plaintext `ClientHello` is the authentication. Trusting it
+/// let any machine on the network make a host allocate 4 GiB by sending four
+/// `0xFF` bytes, and repeat that per connection until the allocator gave up and
+/// the process aborted. Real frames are nowhere near this: an `Input` or a hello
+/// is tens of bytes, and the largest legitimate message, a keyframe of a 5K
+/// display, is a few megabytes.
+pub const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
+
+/// Read one length-prefixed frame body (4-byte little-endian length + body),
+/// without decoding it. The single implementation of the framing's read side:
+/// [`read_framed`] decodes on top of it, and the WebSocket bridge, which only
+/// forwards bytes, uses it as is.
+///
+/// The body grows as bytes actually arrive rather than being allocated at the
+/// declared size up front, so a peer that claims a large frame and then sends
+/// little costs only what it sent.
 ///
 /// # Errors
-/// Returns an error if the stream ends, the length is invalid, or decoding fails.
-pub fn read_framed<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
+/// Returns an error if the stream ends early or the declared length exceeds
+/// [`MAX_FRAME_LEN`].
+pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     r.read_exact(&mut len_buf)?;
     let len = u32::from_le_bytes(len_buf) as usize;
-    let mut body = vec![0u8; len];
-    r.read_exact(&mut body)?;
+    if len > MAX_FRAME_LEN {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame of {len} bytes exceeds the {MAX_FRAME_LEN}-byte limit"),
+        ));
+    }
+    let mut body = Vec::with_capacity(len.min(64 * 1024));
+    let got = r.take(len as u64).read_to_end(&mut body)?;
+    if got != len {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "stream ended mid-frame"));
+    }
+    Ok(body)
+}
+
+/// Read a length-prefixed, postcard-encoded value from a stream.
+///
+/// # Errors
+/// Returns an error if the stream ends, the length is invalid (including over
+/// [`MAX_FRAME_LEN`]), or decoding fails.
+pub fn read_framed<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
+    let body = read_frame(r)?;
     postcard::from_bytes(&body).map_err(io::Error::other)
 }
 
@@ -339,6 +377,43 @@ mod tests {
             out.extend_from_slice(nal);
         }
         out
+    }
+
+    #[test]
+    fn an_oversized_length_prefix_is_refused_before_allocating() {
+        // Four 0xFF bytes claim a 4 GiB frame. It must fail at once, not try.
+        let mut cursor = io::Cursor::new(vec![0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        let err = read_framed::<_, ClientHello>(&mut cursor).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        let just_over = u32::try_from(MAX_FRAME_LEN + 1).unwrap().to_le_bytes();
+        assert!(read_frame(&mut io::Cursor::new(just_over.to_vec())).is_err());
+    }
+
+    #[test]
+    fn a_frame_cut_short_is_an_eof_not_a_short_body() {
+        // Claims 100 bytes, delivers 3.
+        let mut buf = 100u32.to_le_bytes().to_vec();
+        buf.extend_from_slice(&[1, 2, 3]);
+        let err = read_frame(&mut io::Cursor::new(buf)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn read_frame_returns_the_raw_body_written_by_write_framed() {
+        let hello = ClientHello {
+            protocol_version: PROTOCOL_VERSION,
+            width: 1,
+            height: 2,
+            capture_mode: CaptureMode::ControlOnly,
+            platform: ClientPlatform::Linux,
+            pin: 0,
+            device_name: String::new(),
+        };
+        let mut buf = Vec::new();
+        write_framed(&mut buf, &hello).unwrap();
+        let body = read_frame(&mut io::Cursor::new(buf)).unwrap();
+        assert_eq!(body, postcard::to_stdvec(&hello).unwrap());
     }
 
     #[test]
