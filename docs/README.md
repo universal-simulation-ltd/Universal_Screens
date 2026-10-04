@@ -16,10 +16,9 @@ Its cloud touchpoints live in the `opensource-portal` Worker: the `/screens`
 marketing/download page, and a **browser receiver** at `/screens/receive` — a
 rendezvous Durable Object (+ `/screens/turn` for WebRTC ICE) that lets an app
 or another browser pair by code, with a WebRTC peer-to-peer data channel
-proven. Native LAN connections are PIN-gated **and** transport-encrypted with a
-Noise tunnel keyed by the PIN (see the root `README.md` Security note and
-`M10-transport-encryption.md`); the browser-bridge leg is the remaining plaintext
-path.
+proven. Connections are end-to-end encrypted, and devices pair over the PIN with
+SPAKE2 and are then remembered by key (see the root `README.md` Security note and
+`M10-transport-encryption.md`).
 
 ## What's here
 

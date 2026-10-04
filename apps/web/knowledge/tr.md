@@ -53,11 +53,11 @@ Bir Mac ya da Windows PC'de, ana bilgisayarın penceresindeki **Remote access (o
 id: the-pin
 group: Nasıl çalışır
 title: PIN ne işe yarar?
-summary: Cihazlarınızı içeri alır ve aynı zamanda bağlantıyı şifreleyen anahtardır.
+summary: Bir cihazı ilk seferde ana bilgisayarla eşleştirir. Sonrasında cihaz hatırlanır.
 ---
-Her bağlantı, ana bilgisayarın 4 haneli PIN'ini gerektirir. QR kodunu taradığınızda PIN sizin için doldurulur.
+Bir cihaz ilk kez bağlanırken ana bilgisayarın 4 haneli PIN'ine ihtiyaç duyar. QR kodunu taradığınızda PIN sizin için doldurulur.
 
-PIN'in iki görevi vardır. Ana bilgisayar, bir cihazı içeri almadan önce PIN'i kontrol eder; PIN aynı zamanda bağlantının şifrelendiği anahtardır. Şifreleme hakkındaki makale ikinci kısmı açıklar.
+PIN, cihazınızın içeri girebileceğini hiç gönderilmeden kanıtlar. Bir cihaz eşleştikten sonra cihaz ve ana bilgisayar birbirini hatırlar; cihaz, PIN değişse bile PIN olmadan yeniden bağlanır. Şifreleme hakkındaki makale bunun nasıl olduğunu açıklar.
 
 ## Her seferinde yeni bir PIN
 
@@ -65,7 +65,11 @@ Kendi PIN'inizi seçmediğiniz sürece ana bilgisayar her başladığında bilgi
 
 ## Kendi PIN'inizi seçmek
 
-Kayıtlı cihazlarınızın bilgisayar yeniden başladıktan sonra tekrar bağlanmasını istiyorsanız kendi PIN'inizi belirleyebilirsiniz: Mac ya da Windows PC'de **Actions ▸ Use my own PIN**, Linux'ta ise **⚙** altında. Varsayılan olarak kapalıdır. 0000'a izin verilmez, çünkü bağlantıda "PIN yok" anlamına gelir. Seçtiğiniz bir PIN, siz değiştirene kadar onu öğrenmiş herkes için geçerli kalır.
+Eşleşmiş cihazlar zaten PIN olmadan yeniden bağlanır. Kendi PIN'iniz, ekrandan her seferinde yeni bir PIN okumadan yeni cihazlar eşleştirmek istediğinizde ve her seferinde güncel PIN'e ihtiyaç duyan 0.3 ve önceki sürüm uygulamalar için işe yarar. Mac ya da Windows PC'de **Actions ▸ Use my own PIN** ile, Linux'ta ise **⚙** altında belirlersiniz. Varsayılan olarak kapalıdır. 0000'a izin verilmez, çünkü bağlantıda "PIN yok" anlamına gelir. Seçtiğiniz bir PIN, siz değiştirene kadar onu öğrenmiş herkes için geçerli kalır.
+
+## Eşleşmiş cihazlar
+
+Mac ya da Windows PC'de **Actions ▸ Paired devices**, Linux'ta ise **⚙** altındaki aynı seçenek, bilgisayarla eşleşmiş cihazları listeler. **Forget all paired devices**, bu cihazların hepsinin PIN'i yeniden girmesini gerektirir. Eşleşmiş bir telefon ya da bilgisayar kaybolursa veya artık sizin değilse bunu yapın.
 
 ## Yanlış denemeler
 
@@ -73,31 +77,35 @@ Arka arkaya ilk üç yanlış PIN'in hiçbir bedeli yoktur, böylece bir yazım 
 
 ## PIN kimde
 
-PIN'e ya da QR kodunun bir fotoğrafına sahip olan herkes bağlanabilir ve bilgisayarı kontrol edebilir. Her cihaz için ayrı bir onay adımı yoktur. Ekranınızı biriyle paylaştıktan sonra yeni bir PIN oluşturun.
+PIN'e ya da QR kodunun bir fotoğrafına sahip olan herkes bir cihaz eşleştirip bilgisayarı kontrol edebilir ve o cihaz, siz unutturana kadar eşleşmiş kalır. Her cihaz için ayrı bir onay adımı yoktur. Ekranınızı biriyle paylaştıktan sonra yeni bir PIN oluşturun ve tanımadığınız eşleşmiş cihazları unutturun.
 
 ---
 id: encryption
 group: Nasıl çalışır
 title: Bağlantı şifreli mi?
-summary: Evet, uçtan uca ve anahtar olarak PIN'inizle. Mümkün olmadığında tarayıcı istemcisi size söyler.
+summary: Evet, uçtan uca. PIN'iniz hiçbir zaman gönderilmez ve bağlantının bir kaydından bulunamaz.
 ---
-Evet. Cihazınız ana bilgisayara ulaşır ulaşmaz ikisi, şifreli bağlantılar için yayımlanmış bir tasarım olan Noise Protocol Framework'ten bir el sıkışma yürütür. Sonrasındaki her şey şifreli tünelin içinde gider: ekranın görüntüsü, tuş vuruşlarınız ve metinleriniz, hatta PIN kontrolünün kendisi.
+Evet. Cihazınız ana bilgisayara ulaşır ulaşmaz ikisi, şifreli bağlantılar için yayımlanmış bir tasarım olan Noise Protocol Framework'ten bir el sıkışma yürütür. Sonrasındaki her şey şifreli tünelin içinde gider: ekranın görüntüsü, tuş vuruşlarınız ve metinleriniz.
 
 ## PIN'in rolü
 
-El sıkışma, PIN'i ortak bir sır olarak kullanır. Yanlış PIN'e sahip bir cihaz el sıkışmayı tamamlayamaz; PIN'i bilmeden bağlantının ortasına girmeye çalışan biri de tamamlayamaz. Her bağlantı ayrıca yeni, tek kullanımlık anahtarlar üretir; böylece trafiğin bir kaydı, PIN daha sonra öğrenilse bile okunamaz kalır.
+Bir cihaz ilk kez bağlandığında PIN'i kullanarak ana bilgisayarla eşleşir. Eşleştirme, parola ile doğrulanan bir anahtar değişimi olan SPAKE2'yi kullanır: her iki taraf da PIN'i yeni bir anahtar değişimine katar; böylece ikisi, PIN'i ya da yalnızca PIN'den hesaplanabilecek herhangi bir şeyi göndermeden aynı PIN'i bildiklerini kanıtlar. Bağlantıyı kaydeden biri, bu kaydı PIN'i tahmin etmek için kullanamaz. Canlı olarak tahmin eden birinin her bağlantıda tek bir hakkı vardır ve ana bilgisayarın yanlış PIN'lerden sonraki beklemesi bu denemeleri sınırlar.
+
+Eşleştirme sırasında ana bilgisayar ve cihaz kalıcı anahtarlarını değiş tokuş eder ve birbirini hatırlar. Sonraki bağlantılar PIN yerine bu anahtarları kullanır; böylece cihaz PIN olmadan yeniden bağlanır ve bu anahtarlardan birine sahip olmayan biri bağlantının ortasına giremez. Her bağlantı ayrıca yeni, tek kullanımlık anahtarlar üretir; böylece bir kayıt, bir anahtar ya da PIN daha sonra öğrenilse bile okunamaz kalır.
 
 ## Aktarma sunucusu üzerinden
 
 Uzak kodla bağlantı UNI·SIM'in aktarma sunucusundan geçer. Tarayıcı ve ana bilgisayar yine uçtan uca şifreler, bu yüzden sunucu yalnızca okuyamadığı karışık verileri iletir.
 
-## Şifreli olmadığı durumlar
+## Eski sürümler
 
-Şifrelemeden önceki sürümler hâlâ şifresiz bağlanabilir. Eski bir istemci şifresiz bağlandığında ana bilgisayar bir uyarı kaydeder. Tarayıcı istemcisi ana bilgisayarın neleri desteklediğini kontrol eder ve oturum günlüğünde oturumun uçtan uca şifreli olup olmadığını belirtir. Ana bilgisayar eski bir sürümse günlük bunu söyler ve güncellemenizi ister.
+0.3 ve önceki sürümler, yalnızca PIN'den hesaplanan bir anahtarla farklı biçimde eşleşiyordu. Bu bağlantılardan birini kaydeden biri, 10.000 PIN'in hepsini kayıt üzerinde deneyip sizinkini bulabilirdi. Güncel ana bilgisayarlar, hiçbir şey çalışmaz hâle gelmesin diye bu eski uygulamaları hâlâ içeri alır ve biri bağlandığında bir uyarı kaydeder. Onları güncelleyin.
+
+Güncel bir telefon ya da masaüstü uygulaması asla eski yönteme geri dönmez: ana bilgisayar 0.3 ya da daha eski bir sürümse ana bilgisayarı güncellemenizi ister. Tarayıcı istemcisi eski yöntemi yalnızca ana bilgisayar başka bir şey yapamadığını bildirdiğinde kullanır, bunu oturum günlüğünde belirtir ve daha önce güncel yöntemle eşleştiği bir ana bilgisayar için bunu asla yapmaz. Şifrelemeden önceki sürümler şifresiz bağlanır ve günlük bunu da söyler.
 
 ## Teknik ayrıntı merak edenler için
 
-Kullanılan desen Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s'dir; önceden paylaşılan anahtar olarak PIN'den türetilen bir anahtar kullanılır.
+Eşleştirme, PIN üzerinde SPAKE2'yi (Ed25519 grubu) ve ardından önceden paylaşılan anahtar olarak SPAKE2 sonucundan türetilen bir anahtarla Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s'yi çalıştırır. Yeniden bağlanma, hatırlanan anahtarlarla Noise_XX_25519_ChaChaPoly_BLAKE2s'yi çalıştırır. 0.3 ve önceki sürümler, önceden paylaşılan anahtar olarak PIN'den türetilen bir anahtarla Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s kullanıyordu.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Oturumunuz açıkken kayıtlı bir makineyi silmek, onu hesabınızdan da kaldı
 
 ## Neler eşitlenmez
 
-- **PIN.** Bağlantının şifrelendiği anahtar olduğu için hiçbir zaman gönderilmez. Telefon uygulaması yeniden bağlanabilmek için onu her kayıtlı makineyle birlikte telefonda tutar. Tarayıcı istemcisi ise onu hiç kaydetmez.
+- **PIN.** Hiçbir zaman gönderilmez, şifrelenmiş hâlde bile. Telefon uygulaması onu her kayıtlı makineyle birlikte telefonda tutar. Tarayıcı istemcisi ise onu hiç kaydetmez. Bir cihazın eşleştirmeden sonra sakladığı şey kendi anahtarı ve eşleştiği bilgisayarların anahtarlarıdır; böylece PIN olmadan yeniden bağlanabilir. Bunlar cihazda kalır.
 - Telefon uygulamasında seçtiğiniz mod ve bir makineyi gizleyip gizlemediğiniz telefonda kalır.
 - Ekranınızla ilgili hiçbir şey.
 

@@ -161,27 +161,34 @@ platform's API unconditionally — so every job names its packages.
 
 ## Security
 
-Native connections are **PIN-gated and transport-encrypted**. Right after the TCP
-connect, the client and host run a **Noise** handshake
-(`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s`, via the `snow` crate) keyed by the
-pairing PIN, and every `postcard` frame after it — the `ClientHello`, injected
-keystrokes/text, and the mirror video — travels inside that tunnel. See
-[`crates/transport`](crates/transport/src/lib.rs) and
+Every connection is **end-to-end encrypted**, and the 4-digit PIN **pairs** devices.
+It is never sent, and a recording of the connection cannot be used to work it out.
+See [`crates/transport`](crates/transport/src/lib.rs) and
 [docs/M10-transport-encryption.md](docs/M10-transport-encryption.md).
 
-- **Confidentiality + forward secrecy:** the ephemeral-ephemeral DH means a passive
-  eavesdropper on the LAN learns nothing, even if the PIN later leaks.
-- **PIN-bound MITM resistance:** the PIN is the Noise pre-shared key, so an on-path
-  attacker can't complete (or silently relay) the handshake without it. The PIN is
-  now *encryption*, not just a gate. The existing plaintext-`ClientHello` PIN check
-  is kept unchanged inside the tunnel.
+- **Pairing (first connection):** SPAKE2 over the PIN
+  ([`crates/pake`](crates/pake/README.md), RustCrypto `spake2`), then
+  `Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s` (the `snow` crate), keyed by the SPAKE2
+  result. Someone who records the connection can't test PINs against it. Someone
+  guessing live gets one try per connection, and the host counts it (three free
+  tries, then pauses doubling up to 5 minutes).
+- **Remembered devices:** while pairing, host and device swap long-term keys.
+  Later connections use `Noise_XX` with those keys and no PIN, so a paired phone
+  reconnects after the host's PIN changes. *Paired devices ▸ Forget all* on the
+  host revokes them.
+- **Confidentiality + forward secrecy:** fresh ephemeral keys on every connection,
+  so a recording stays unreadable even if a key or the PIN leaks later. The browser
+  runs the same Rust (WASM), so neither the LAN bridge nor the cloud relay can read
+  a session.
 
-The host auto-detects the peer: an encrypting native client is required to speak
-Noise, while the loopback WebSocket **browser bridge** (`crates/web-bridge`, which
-can't speak Noise on a browser's behalf) is still accepted as plaintext and logged.
-The **browser client** leg is therefore not yet end-to-end encrypted (it relies on
-`wss://` to the cloud rendezvous); requiring encryption from every non-loopback peer
-is a follow-up once every client has shipped this build.
+**Compatibility.** Hosts still accept v0.3 clients' older handshake (`NNpsk0` with
+a hash of the PIN, which a recording *does* let someone brute-force) and log a
+warning for each one. They also still accept plaintext from pre-encryption clients
+and the loopback bridge. Current native clients never fall back to the older
+handshake. The browser does so only when the host's own bridge says it is a v0.3
+host, and never for a host that has paired with it the current way.
+Refusing both older forms from non-loopback peers is the follow-up once old
+clients are gone.
 
 ## Licence
 

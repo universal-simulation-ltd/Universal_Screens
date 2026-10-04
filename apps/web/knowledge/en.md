@@ -53,11 +53,11 @@ On a Mac or Windows PC, **Remote access (other networks)** in the host's window 
 id: the-pin
 group: How it works
 title: What does the PIN do?
-summary: It lets your devices in, and it is also the key the connection is encrypted with.
+summary: It pairs a device with the host the first time. After that, the device is remembered.
 ---
-Every connection needs the host's 4-digit PIN. Scanning the QR code fills it in for you.
+A device needs the host's 4-digit PIN the first time it connects. Scanning the QR code fills it in for you.
 
-The PIN does two jobs. The host checks it before letting a device in, and it is also the key the connection is encrypted with. The article on encryption explains the second part.
+The PIN proves your device is allowed in, without ever being sent. Once a device has paired, it and the host remember each other, and it reconnects without the PIN, even after the PIN changes. The article on encryption explains how.
 
 ## A new PIN each time
 
@@ -65,7 +65,11 @@ Unless you choose your own, the host picks a fresh PIN every time it starts, fro
 
 ## Choosing your own
 
-If you want saved devices to reconnect after the computer restarts, you can set a PIN of your own: **Actions ▸ Use my own PIN** on a Mac or Windows PC, or under **⚙** on Linux. It is off by default. 0000 is not allowed, because on the connection it means "no PIN". A PIN you chose keeps working until you change it, for anyone who has learned it.
+Paired devices reconnect without a PIN anyway. Your own PIN helps if you want to pair new devices without reading a fresh one off the screen, and for apps from version 0.3 and earlier, which still need the current PIN every time. Set it with **Actions ▸ Use my own PIN** on a Mac or Windows PC, or under **⚙** on Linux. It is off by default. 0000 is not allowed, because on the connection it means "no PIN". A PIN you chose keeps working until you change it, for anyone who has learned it.
+
+## Paired devices
+
+**Actions ▸ Paired devices** on a Mac or Windows PC, or under **⚙** on Linux, lists the devices that have paired with the computer. **Forget all paired devices** makes every one of them enter the PIN again. Do it if a phone or computer that paired is lost, or no longer yours.
 
 ## Wrong guesses
 
@@ -73,31 +77,35 @@ The first three wrong PINs in a row cost nothing, so a typo does not lock you ou
 
 ## Who has it
 
-Anyone with the PIN, or a photo of the QR code, can connect and control the computer. There is no separate approval for each device. After you have shared your screen with someone, regenerate the PIN.
+Anyone with the PIN, or a photo of the QR code, can pair a device and control the computer, and that device stays paired until you forget it. There is no separate approval for each device. After you have shared your screen with someone, regenerate the PIN, and forget any paired devices you do not recognise.
 
 ---
 id: encryption
 group: How it works
 title: Is the connection encrypted?
-summary: Yes, end to end, with your PIN as the key. The browser client tells you if it cannot be.
+summary: Yes, end to end. Your PIN is never sent, and a recording of the connection cannot be used to work it out.
 ---
-Yes. As soon as your device reaches the host, the two run a handshake from the Noise Protocol Framework, a published design for encrypted connections. Everything after it travels inside the encrypted tunnel: the picture of the screen, your keystrokes and text, and the PIN check itself.
+Yes. As soon as your device reaches the host, the two run a handshake from the Noise Protocol Framework, a published design for encrypted connections. Everything after it travels inside the encrypted tunnel: the picture of the screen, and your keystrokes and text.
 
 ## How the PIN fits in
 
-The handshake mixes the PIN in as a shared secret. A device with the wrong PIN cannot complete it, and neither can someone trying to sit in the middle of the connection without the PIN. Each connection also makes fresh one-off keys, so a recording of the traffic stays unreadable even if the PIN becomes known later.
+The first time a device connects, it pairs with the host using the PIN. Pairing uses SPAKE2, a password-authenticated key exchange: each side mixes the PIN into a fresh exchange of keys, so the two can prove they know the same PIN without sending it, or anything worked out from the PIN alone. Someone who records the connection cannot use the recording to guess the PIN. Someone guessing live gets one try per connection, and the host's pause after wrong PINs limits those tries.
+
+While pairing, the host and the device swap long-term keys and remember each other. Later connections use those keys instead of the PIN, so the device reconnects without it, and someone without one of those keys cannot sit in the middle of the connection. Each connection also makes fresh one-off keys, so a recording stays unreadable even if a key or the PIN becomes known later.
 
 ## Through the relay
 
 With a remote code, the connection passes through UNI·SIM's relay server. The browser and the host still encrypt end to end, so the relay only passes on scrambled data it cannot read.
 
-## When it is not encrypted
+## Older versions
 
-Builds from before the encryption still connect without it. The host logs a warning when an old client connects in plaintext. The browser client checks what the host can do and says in its session log whether the session is end-to-end encrypted. If the host is an older build, the log says so and asks you to update it.
+Version 0.3 and earlier paired differently, with a key made from the PIN alone. Someone who recorded one of those connections could try all 10,000 PINs against the recording and find yours. Current hosts still let those older apps in, so nothing stops working, and log a warning when one connects. Update them.
+
+A current phone or desktop app never falls back to the older way: if the host is version 0.3 or earlier, it asks you to update the host. The browser client uses the older way only when the host says that is all it can do, says so in its session log, and never does it for a host that has paired with it the current way before. Builds from before the encryption connect without it, and the log says that too.
 
 ## For the technically minded
 
-The pattern is Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, with a key derived from the PIN as the pre-shared key.
+Pairing runs SPAKE2 (Ed25519 group) over the PIN, then Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s with a key derived from the SPAKE2 result as the pre-shared key. Reconnecting runs Noise_XX_25519_ChaChaPoly_BLAKE2s with the remembered keys. Version 0.3 and earlier used Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s with a key derived from the PIN as the pre-shared key.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Deleting a saved machine while signed in removes it from your account too.
 
 ## What is not
 
-- **The PIN.** It is the key the connection is encrypted with, so it is never sent. The phone app keeps it on the phone with each saved machine, so it can reconnect. The browser client does not save it at all.
+- **The PIN.** It is never sent, not even scrambled. The phone app keeps it on the phone with each saved machine. The browser client does not save it at all. What a device does keep after pairing is its own key and the keys of the computers it has paired with, so it can reconnect without the PIN. They stay on the device.
 - In the phone app, the mode you chose and whether you hid a machine stay on the phone.
 - Anything about your screen.
 

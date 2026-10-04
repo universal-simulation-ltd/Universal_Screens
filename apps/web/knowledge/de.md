@@ -53,11 +53,11 @@ Auf einem Mac oder Windows-PC gibt Ihnen **Remote access (other networks)** im F
 id: the-pin
 group: So funktioniert es
 title: Wozu dient die PIN?
-summary: Sie lässt Ihre Geräte herein und ist zugleich der Schlüssel, mit dem die Verbindung verschlüsselt wird.
+summary: Sie koppelt ein Gerät beim ersten Mal mit dem Host. Danach wird das Gerät wiedererkannt.
 ---
-Jede Verbindung braucht die 4-stellige PIN des Hosts. Wenn Sie den QR-Code scannen, wird sie automatisch eingetragen.
+Ein Gerät braucht die 4-stellige PIN des Hosts, wenn es sich zum ersten Mal verbindet. Wenn Sie den QR-Code scannen, wird sie automatisch eingetragen.
 
-Die PIN hat zwei Aufgaben. Der Host prüft sie, bevor er ein Gerät hereinlässt, und sie ist zugleich der Schlüssel, mit dem die Verbindung verschlüsselt wird. Der Artikel zur Verschlüsselung erklärt den zweiten Teil.
+Die PIN beweist, dass Ihr Gerät hereindarf, ohne dass sie je gesendet wird. Ist ein Gerät gekoppelt, merken sich Gerät und Host einander, und das Gerät verbindet sich danach ohne PIN wieder, auch wenn sich die PIN geändert hat. Der Artikel zur Verschlüsselung erklärt, wie das funktioniert.
 
 ## Jedes Mal eine neue PIN
 
@@ -65,7 +65,11 @@ Sofern Sie keine eigene wählen, erzeugt der Host bei jedem Start eine neue PIN 
 
 ## Eine eigene wählen
 
-Wenn sich gespeicherte Geräte nach einem Neustart des Computers wieder verbinden sollen, können Sie eine eigene PIN festlegen: **Actions ▸ Use my own PIN** auf einem Mac oder Windows-PC oder unter **⚙** unter Linux. Standardmäßig ist das ausgeschaltet. 0000 ist nicht erlaubt, weil es in der Verbindung „keine PIN“ bedeutet. Eine selbst gewählte PIN gilt, bis Sie sie ändern, für jeden, der sie kennt.
+Gekoppelte Geräte verbinden sich ohnehin ohne PIN wieder. Eine eigene PIN hilft, wenn Sie neue Geräte koppeln möchten, ohne jedes Mal eine neue PIN vom Bildschirm abzulesen, und für Apps der Version 0.3 und älter, die weiterhin bei jeder Verbindung die aktuelle PIN brauchen. Sie legen sie mit **Actions ▸ Use my own PIN** auf einem Mac oder Windows-PC fest, unter Linux unter **⚙**. Standardmäßig ist das ausgeschaltet. 0000 ist nicht erlaubt, weil es in der Verbindung „keine PIN“ bedeutet. Eine selbst gewählte PIN gilt, bis Sie sie ändern, für jeden, der sie kennt.
+
+## Gekoppelte Geräte
+
+**Actions ▸ Paired devices** auf einem Mac oder Windows-PC, unter Linux unter **⚙**, listet die Geräte auf, die mit dem Computer gekoppelt sind. **Forget all paired devices** sorgt dafür, dass jedes von ihnen die PIN wieder eingeben muss. Tun Sie das, wenn ein gekoppeltes Handy oder ein gekoppelter Computer verloren geht oder nicht mehr Ihnen gehört.
 
 ## Falsche Eingaben
 
@@ -73,31 +77,35 @@ Die ersten drei falschen PINs hintereinander kosten nichts, damit ein Tippfehler
 
 ## Wer sie kennt
 
-Wer die PIN oder ein Foto des QR-Codes hat, kann sich verbinden und den Computer steuern. Eine eigene Freigabe pro Gerät gibt es nicht. Nachdem Sie Ihren Bildschirm mit jemandem geteilt haben, erzeugen Sie eine neue PIN.
+Wer die PIN oder ein Foto des QR-Codes hat, kann ein Gerät koppeln und den Computer steuern, und dieses Gerät bleibt gekoppelt, bis Sie es vergessen lassen. Eine eigene Freigabe pro Gerät gibt es nicht. Nachdem Sie Ihren Bildschirm mit jemandem geteilt haben, erzeugen Sie eine neue PIN und lassen gekoppelte Geräte vergessen, die Sie nicht kennen.
 
 ---
 id: encryption
 group: So funktioniert es
 title: Ist die Verbindung verschlüsselt?
-summary: Ja, Ende-zu-Ende, mit Ihrer PIN als Schlüssel. Der Browser-Client sagt es Ihnen, wenn das nicht möglich ist.
+summary: Ja, Ende-zu-Ende. Ihre PIN wird nie gesendet, und aus einem Mitschnitt der Verbindung lässt sie sich nicht ermitteln.
 ---
-Ja. Sobald Ihr Gerät den Host erreicht, führen beide einen Handshake aus dem Noise Protocol Framework aus, einem veröffentlichten Entwurf für verschlüsselte Verbindungen. Alles danach läuft durch den verschlüsselten Tunnel: das Bild des Bildschirms, Ihre Tastenanschläge und Texte und auch die PIN-Prüfung selbst.
+Ja. Sobald Ihr Gerät den Host erreicht, führen beide einen Handshake aus dem Noise Protocol Framework aus, einem veröffentlichten Entwurf für verschlüsselte Verbindungen. Alles danach läuft durch den verschlüsselten Tunnel: das Bild des Bildschirms sowie Ihre Tastenanschläge und Texte.
 
 ## Welche Rolle die PIN spielt
 
-Der Handshake bezieht die PIN als gemeinsames Geheimnis ein. Ein Gerät mit der falschen PIN kann ihn nicht abschließen, und ebenso wenig jemand, der sich ohne die PIN in die Verbindung einschalten will. Jede Verbindung erzeugt außerdem neue Einmalschlüssel, sodass ein Mitschnitt des Datenverkehrs unlesbar bleibt, selbst wenn die PIN später bekannt wird.
+Wenn sich ein Gerät zum ersten Mal verbindet, koppelt es sich mit der PIN an den Host. Die Kopplung verwendet SPAKE2, einen passwortgestützten Schlüsselaustausch: Jede Seite bezieht die PIN in einen neuen Austausch von Schlüsseln ein, sodass beide beweisen können, dass sie dieselbe PIN kennen, ohne sie zu senden oder irgendetwas, das sich allein aus der PIN berechnen lässt. Wer die Verbindung mitschneidet, kann mit dem Mitschnitt die PIN nicht erraten. Wer live rät, hat pro Verbindung einen Versuch, und die Pause des Hosts nach falschen PINs begrenzt diese Versuche.
+
+Beim Koppeln tauschen Host und Gerät dauerhafte Schlüssel aus und merken sich einander. Spätere Verbindungen verwenden diese Schlüssel statt der PIN, sodass sich das Gerät ohne PIN wieder verbindet, und wer keinen dieser Schlüssel hat, kann sich nicht in die Verbindung einschalten. Jede Verbindung erzeugt außerdem neue Einmalschlüssel, sodass ein Mitschnitt unlesbar bleibt, selbst wenn ein Schlüssel oder die PIN später bekannt wird.
 
 ## Über den Relay-Server
 
 Mit einem Fernzugriffscode läuft die Verbindung über den Relay-Server von UNI·SIM. Browser und Host verschlüsseln trotzdem Ende-zu-Ende, der Server reicht also nur verschlüsselte Daten weiter, die er nicht lesen kann.
 
-## Wann sie nicht verschlüsselt ist
+## Ältere Versionen
 
-Versionen aus der Zeit vor der Verschlüsselung verbinden sich weiterhin ohne sie. Der Host protokolliert eine Warnung, wenn sich ein alter Client unverschlüsselt verbindet. Der Browser-Client prüft, was der Host kann, und vermerkt im Sitzungsprotokoll, ob die Sitzung Ende-zu-Ende verschlüsselt ist. Ist der Host eine ältere Version, steht das im Protokoll, zusammen mit der Bitte, ihn zu aktualisieren.
+Version 0.3 und älter koppelten anders, mit einem Schlüssel, der allein aus der PIN berechnet wurde. Wer eine solche Verbindung mitschnitt, konnte alle 10.000 PINs am Mitschnitt ausprobieren und Ihre finden. Aktuelle Hosts lassen diese älteren Apps weiterhin herein, damit nichts aufhört zu funktionieren, und protokollieren eine Warnung, wenn sich eine verbindet. Aktualisieren Sie sie.
+
+Eine aktuelle Handy- oder Desktop-App fällt nie auf das ältere Verfahren zurück: Ist der Host Version 0.3 oder älter, bittet sie Sie, den Host zu aktualisieren. Der Browser-Client nutzt das ältere Verfahren nur, wenn der Host meldet, dass er nichts anderes kann, vermerkt das im Sitzungsprotokoll und tut es nie bei einem Host, mit dem er sich schon einmal auf die aktuelle Weise gekoppelt hat. Versionen aus der Zeit vor der Verschlüsselung verbinden sich ohne sie, und auch das steht im Protokoll.
 
 ## Für technisch Interessierte
 
-Das Muster ist Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, mit einem aus der PIN abgeleiteten Schlüssel als Pre-Shared Key.
+Die Kopplung führt SPAKE2 (Ed25519-Gruppe) über die PIN aus, danach Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s mit einem aus dem SPAKE2-Ergebnis abgeleiteten Schlüssel als Pre-Shared Key. Beim Wiederverbinden läuft Noise_XX_25519_ChaChaPoly_BLAKE2s mit den gespeicherten Schlüsseln. Version 0.3 und älter verwendeten Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s mit einem aus der PIN abgeleiteten Schlüssel als Pre-Shared Key.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Wenn Sie einen gespeicherten Rechner angemeldet löschen, wird er auch aus Ihrem
 
 ## Was nicht
 
-- **Die PIN.** Sie ist der Schlüssel, mit dem die Verbindung verschlüsselt wird, und wird deshalb nie gesendet. Die Handy-App speichert sie mit jedem Rechner auf dem Handy, um sich wieder verbinden zu können. Der Browser-Client speichert sie überhaupt nicht.
+- **Die PIN.** Sie wird nie gesendet, auch nicht verschlüsselt. Die Handy-App speichert sie mit jedem Rechner auf dem Handy. Der Browser-Client speichert sie überhaupt nicht. Was ein Gerät nach dem Koppeln behält, sind sein eigener Schlüssel und die Schlüssel der Computer, mit denen es gekoppelt ist, damit es sich ohne PIN wieder verbinden kann. Sie bleiben auf dem Gerät.
 - In der Handy-App bleiben der gewählte Modus und die Frage, ob Sie einen Rechner ausgeblendet haben, auf dem Handy.
 - Alles, was Ihren Bildschirm betrifft.
 

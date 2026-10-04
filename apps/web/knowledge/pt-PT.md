@@ -53,11 +53,11 @@ Num Mac ou PC com Windows, **Remote access (other networks)** na janela do anfit
 id: the-pin
 group: Como funciona
 title: Para que serve o PIN?
-summary: Deixa entrar os seus dispositivos e é também a chave com que a ligação é encriptada.
+summary: Emparelha um dispositivo com o anfitrião da primeira vez. A partir daí, o dispositivo é reconhecido.
 ---
-Todas as ligações precisam do PIN de 4 dígitos do anfitrião. Ao ler o código QR, é preenchido automaticamente.
+Um dispositivo precisa do PIN de 4 dígitos do anfitrião da primeira vez que se liga. Ao ler o código QR, é preenchido automaticamente.
 
-O PIN tem duas funções. O anfitrião verifica-o antes de deixar entrar um dispositivo, e é também a chave com que a ligação é encriptada. O artigo sobre a encriptação explica esta segunda parte.
+O PIN prova que o seu dispositivo pode entrar, sem nunca ser enviado. Depois de um dispositivo ser emparelhado, o dispositivo e o anfitrião lembram-se um do outro, e volta a ligar-se sem o PIN, mesmo depois de o PIN mudar. O artigo sobre a encriptação explica como.
 
 ## Um PIN novo de cada vez
 
@@ -65,7 +65,11 @@ A menos que escolha o seu, o anfitrião gera um PIN novo sempre que arranca, a p
 
 ## Escolher o seu
 
-Se quiser que os dispositivos guardados voltem a ligar-se depois de o computador reiniciar, pode definir um PIN seu: **Actions ▸ Use my own PIN** num Mac ou PC com Windows, ou em **⚙** no Linux. Está desativado por predefinição. 0000 não é permitido, porque na ligação significa «sem PIN». Um PIN escolhido por si continua válido até o alterar, para qualquer pessoa que o conheça.
+Os dispositivos emparelhados voltam a ligar-se sem PIN de qualquer forma. Um PIN seu ajuda se quiser emparelhar dispositivos novos sem ler um PIN novo no ecrã, e para as apps da versão 0.3 e anteriores, que continuam a precisar do PIN atual de cada vez. Defina-o em **Actions ▸ Use my own PIN** num Mac ou PC com Windows, ou em **⚙** no Linux. Está desativado por predefinição. 0000 não é permitido, porque na ligação significa «sem PIN». Um PIN escolhido por si continua válido até o alterar, para qualquer pessoa que o conheça.
+
+## Dispositivos emparelhados
+
+**Actions ▸ Paired devices** num Mac ou PC com Windows, ou em **⚙** no Linux, mostra os dispositivos emparelhados com o computador. **Forget all paired devices** obriga cada um deles a introduzir de novo o PIN. Faça-o se perder um telemóvel ou computador emparelhado, ou se deixar de ser seu.
 
 ## Tentativas erradas
 
@@ -73,31 +77,35 @@ Os três primeiros PIN errados seguidos não têm consequências, para que um er
 
 ## Quem o conhece
 
-Qualquer pessoa com o PIN, ou com uma fotografia do código QR, pode ligar-se e controlar o computador. Não há uma aprovação separada para cada dispositivo. Depois de partilhar o ecrã com alguém, gere um PIN novo.
+Qualquer pessoa com o PIN, ou com uma fotografia do código QR, pode emparelhar um dispositivo e controlar o computador, e esse dispositivo continua emparelhado até o esquecer. Não há uma aprovação separada para cada dispositivo. Depois de partilhar o ecrã com alguém, gere um PIN novo e esqueça os dispositivos emparelhados que não reconheça.
 
 ---
 id: encryption
 group: Como funciona
 title: A ligação é encriptada?
-summary: Sim, ponto a ponto, com o seu PIN como chave. O cliente no browser avisa-o quando não é possível.
+summary: Sim, ponto a ponto. O seu PIN nunca é enviado, e uma gravação da ligação não serve para o descobrir.
 ---
-Sim. Assim que o seu dispositivo chega ao anfitrião, os dois fazem um handshake do Noise Protocol Framework, um desenho publicado para ligações encriptadas. Tudo o que vem a seguir segue dentro do túnel encriptado: a imagem do ecrã, as teclas e o texto que escreve e a própria verificação do PIN.
+Sim. Assim que o seu dispositivo chega ao anfitrião, os dois fazem um handshake do Noise Protocol Framework, um desenho publicado para ligações encriptadas. Tudo o que vem a seguir segue dentro do túnel encriptado: a imagem do ecrã, e as teclas e o texto que escreve.
 
 ## O papel do PIN
 
-O handshake usa o PIN como segredo partilhado. Um dispositivo com o PIN errado não o consegue concluir, e também não o consegue quem tente meter-se no meio da ligação sem o PIN. Cada ligação cria ainda chaves novas de utilização única, por isso uma gravação do tráfego continua ilegível mesmo que o PIN venha a ser conhecido mais tarde.
+Da primeira vez que um dispositivo se liga, emparelha-se com o anfitrião através do PIN. O emparelhamento usa SPAKE2, uma troca de chaves autenticada por palavra-passe: cada lado mistura o PIN numa troca de chaves nova, pelo que os dois provam que conhecem o mesmo PIN sem o enviar, nem nada que se possa calcular apenas a partir do PIN. Quem gravar a ligação não consegue usar a gravação para adivinhar o PIN. Quem tentar em direto tem uma tentativa por ligação, e a pausa do anfitrião depois de PIN errados limita essas tentativas.
+
+Durante o emparelhamento, o anfitrião e o dispositivo trocam chaves permanentes e lembram-se um do outro. As ligações seguintes usam essas chaves em vez do PIN, por isso o dispositivo volta a ligar-se sem ele, e quem não tiver uma dessas chaves não consegue meter-se no meio da ligação. Cada ligação cria ainda chaves novas de utilização única, por isso uma gravação continua ilegível mesmo que uma chave ou o PIN venham a ser conhecidos mais tarde.
 
 ## Através do servidor de retransmissão
 
 Com um código remoto, a ligação passa pelo servidor de retransmissão da UNI·SIM. O browser e o anfitrião continuam a encriptar ponto a ponto, por isso o servidor só reencaminha dados baralhados que não consegue ler.
 
-## Quando não é encriptada
+## Versões antigas
 
-As versões anteriores à encriptação continuam a ligar-se sem ela. O anfitrião regista um aviso quando um cliente antigo se liga sem encriptação. O cliente no browser verifica o que o anfitrião suporta e indica no registo da sessão se esta está encriptada ponto a ponto. Se o anfitrião for uma versão antiga, o registo di-lo e pede-lhe que o atualize.
+A versão 0.3 e as anteriores emparelhavam de outra forma, com uma chave calculada apenas a partir do PIN. Quem gravasse uma dessas ligações podia experimentar os 10 000 PIN na gravação e encontrar o seu. Os anfitriões atuais continuam a deixar entrar essas apps antigas, para que nada deixe de funcionar, e registam um aviso quando uma se liga. Atualize-as.
+
+Uma app atual para telemóvel ou computador nunca volta à forma antiga: se o anfitrião for da versão 0.3 ou anterior, pede-lhe que o atualize. O cliente no browser só usa a forma antiga quando o anfitrião indica que não sabe fazer mais nada, di-lo no registo da sessão e nunca o faz com um anfitrião com que já se emparelhou da forma atual. As versões anteriores à encriptação ligam-se sem ela, e o registo também o diz.
 
 ## Para quem gosta de pormenores técnicos
 
-O padrão é Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do PIN como chave pré-partilhada.
+O emparelhamento executa SPAKE2 (grupo Ed25519) sobre o PIN e depois Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do resultado do SPAKE2 como chave pré-partilhada. A nova ligação executa Noise_XX_25519_ChaChaPoly_BLAKE2s com as chaves guardadas. A versão 0.3 e as anteriores usavam Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do PIN como chave pré-partilhada.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Eliminar uma máquina guardada com sessão iniciada remove-a também da sua cont
 
 ## O que não é
 
-- **O PIN.** É a chave com que a ligação é encriptada, por isso nunca é enviado. A app para telemóvel guarda-o no telemóvel com cada máquina, para se poder voltar a ligar. O cliente no browser não o guarda de todo.
+- **O PIN.** Nunca é enviado, nem sequer baralhado. A app para telemóvel guarda-o no telemóvel com cada máquina. O cliente no browser não o guarda de todo. O que um dispositivo guarda depois do emparelhamento é a sua própria chave e as chaves dos computadores com que se emparelhou, para voltar a ligar-se sem o PIN. Ficam no dispositivo.
 - Na app para telemóvel, o modo escolhido e o facto de ter ocultado uma máquina ficam no telemóvel.
 - Nada sobre o seu ecrã.
 

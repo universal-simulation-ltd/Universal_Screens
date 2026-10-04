@@ -53,11 +53,11 @@ Sur un Mac ou un PC Windows, **Remote access (other networks)** dans la fenêtre
 id: the-pin
 group: Comment ça marche
 title: À quoi sert le code PIN ?
-summary: Il laisse entrer vos appareils, et c'est aussi la clé qui chiffre la connexion.
+summary: Il associe un appareil à l'hôte la première fois. Ensuite, l'appareil est reconnu.
 ---
-Chaque connexion demande le code PIN à 4 chiffres de l'hôte. Scanner le QR code le remplit pour vous.
+Un appareil a besoin du code PIN à 4 chiffres de l'hôte la première fois qu'il se connecte. Scanner le QR code le remplit pour vous.
 
-Le code PIN a deux rôles. L'hôte le vérifie avant de laisser entrer un appareil, et c'est aussi la clé avec laquelle la connexion est chiffrée. L'article sur le chiffrement explique ce second rôle.
+Le code PIN prouve que votre appareil a le droit d'entrer, sans jamais être envoyé. Une fois un appareil associé, l'appareil et l'hôte se souviennent l'un de l'autre, et il se reconnecte ensuite sans code PIN, même après un changement de code. L'article sur le chiffrement explique comment.
 
 ## Un nouveau code à chaque fois
 
@@ -65,7 +65,11 @@ Sauf si vous choisissez le vôtre, l'hôte tire un nouveau code PIN à chaque d�
 
 ## Choisir le vôtre
 
-Si vous voulez que vos appareils enregistrés se reconnectent après un redémarrage de l'ordinateur, vous pouvez définir votre propre code PIN : **Actions ▸ Use my own PIN** sur un Mac ou un PC Windows, ou sous **⚙** sous Linux. C'est désactivé par défaut. 0000 n'est pas accepté, car sur la connexion il signifie « pas de code PIN ». Un code que vous avez choisi reste valable jusqu'à ce que vous le changiez, pour quiconque l'a appris.
+Les appareils associés se reconnectent de toute façon sans code PIN. Votre propre code est utile si vous voulez associer de nouveaux appareils sans lire un nouveau code à l'écran, et pour les applications en version 0.3 ou antérieure, qui demandent toujours le code actuel à chaque fois. Définissez-le avec **Actions ▸ Use my own PIN** sur un Mac ou un PC Windows, ou sous **⚙** sous Linux. C'est désactivé par défaut. 0000 n'est pas accepté, car sur la connexion il signifie « pas de code PIN ». Un code que vous avez choisi reste valable jusqu'à ce que vous le changiez, pour quiconque l'a appris.
+
+## Appareils associés
+
+**Actions ▸ Paired devices** sur un Mac ou un PC Windows, ou sous **⚙** sous Linux, liste les appareils associés à l'ordinateur. **Forget all paired devices** oblige chacun d'eux à saisir de nouveau le code PIN. Faites-le si un téléphone ou un ordinateur associé est perdu, ou ne vous appartient plus.
 
 ## Mauvais codes
 
@@ -73,31 +77,35 @@ Les trois premiers codes erronés d'affilée ne coûtent rien, pour qu'une faute
 
 ## Qui le connaît
 
-Toute personne qui a le code PIN, ou une photo du QR code, peut se connecter et contrôler l'ordinateur. Il n'y a pas d'autorisation séparée pour chaque appareil. Après avoir partagé votre écran avec quelqu'un, générez un nouveau code.
+Toute personne qui a le code PIN, ou une photo du QR code, peut associer un appareil et contrôler l'ordinateur, et cet appareil reste associé jusqu'à ce que vous l'oubliiez. Il n'y a pas d'autorisation séparée pour chaque appareil. Après avoir partagé votre écran avec quelqu'un, générez un nouveau code et oubliez les appareils associés que vous ne reconnaissez pas.
 
 ---
 id: encryption
 group: Comment ça marche
 title: La connexion est-elle chiffrée ?
-summary: Oui, de bout en bout, avec votre code PIN comme clé. Le client navigateur vous prévient si ce n'est pas possible.
+summary: Oui, de bout en bout. Votre code PIN n'est jamais envoyé, et un enregistrement de la connexion ne permet pas de le retrouver.
 ---
-Oui. Dès que votre appareil atteint l'hôte, les deux effectuent un échange initial issu du Noise Protocol Framework, une conception publiée pour les connexions chiffrées. Tout ce qui suit passe dans le tunnel chiffré : l'image de l'écran, vos frappes et votre texte, et la vérification du code PIN elle-même.
+Oui. Dès que votre appareil atteint l'hôte, les deux effectuent un échange initial issu du Noise Protocol Framework, une conception publiée pour les connexions chiffrées. Tout ce qui suit passe dans le tunnel chiffré : l'image de l'écran, ainsi que vos frappes et votre texte.
 
 ## Le rôle du code PIN
 
-L'échange initial intègre le code PIN comme secret partagé. Un appareil qui a le mauvais code ne peut pas le mener à bien, pas plus que quelqu'un qui tenterait de s'interposer dans la connexion sans le code. Chaque connexion crée aussi de nouvelles clés à usage unique : un enregistrement du trafic reste illisible même si le code PIN est découvert plus tard.
+La première fois qu'un appareil se connecte, il s'associe à l'hôte avec le code PIN. L'association utilise SPAKE2, un échange de clés authentifié par mot de passe : chaque côté intègre le code PIN dans un nouvel échange de clés, si bien que les deux peuvent prouver qu'ils connaissent le même code sans l'envoyer, ni rien qui se calcule à partir du seul code. Quelqu'un qui enregistre la connexion ne peut pas se servir de l'enregistrement pour deviner le code PIN. Quelqu'un qui essaie en direct n'a qu'un essai par connexion, et la pause de l'hôte après des codes erronés limite ces essais.
+
+Pendant l'association, l'hôte et l'appareil échangent des clés durables et se souviennent l'un de l'autre. Les connexions suivantes utilisent ces clés au lieu du code PIN : l'appareil se reconnecte sans lui, et quelqu'un qui n'a pas l'une de ces clés ne peut pas s'interposer dans la connexion. Chaque connexion crée aussi de nouvelles clés à usage unique : un enregistrement reste illisible même si une clé ou le code PIN est découvert plus tard.
 
 ## Par le relais
 
 Avec un code distant, la connexion passe par le serveur relais d'UNI·SIM. Le navigateur et l'hôte chiffrent toujours de bout en bout : le relais ne fait que transmettre des données brouillées qu'il ne peut pas lire.
 
-## Quand elle n'est pas chiffrée
+## Anciennes versions
 
-Les versions antérieures au chiffrement se connectent encore sans lui. L'hôte consigne un avertissement lorsqu'un ancien client se connecte en clair. Le client navigateur vérifie ce dont l'hôte est capable et indique dans son journal de session si la session est chiffrée de bout en bout. Si l'hôte est une ancienne version, le journal le signale et vous invite à le mettre à jour.
+Les versions 0.3 et antérieures s'associaient autrement, avec une clé calculée à partir du seul code PIN. Quelqu'un qui enregistrait une de ces connexions pouvait essayer les 10 000 codes sur l'enregistrement et trouver le vôtre. Les hôtes actuels laissent encore entrer ces anciennes applications, pour que rien ne cesse de fonctionner, et consignent un avertissement lorsqu'une d'elles se connecte. Mettez-les à jour.
+
+Une application actuelle pour téléphone ou ordinateur ne revient jamais à l'ancienne méthode : si l'hôte est en version 0.3 ou antérieure, elle vous demande de mettre l'hôte à jour. Le client navigateur n'utilise l'ancienne méthode que lorsque l'hôte indique qu'il ne sait rien faire d'autre, le signale dans son journal de session, et ne le fait jamais avec un hôte auquel il s'est déjà associé selon la méthode actuelle. Les versions antérieures au chiffrement se connectent sans lui, et le journal le signale aussi.
 
 ## Pour les curieux de technique
 
-Le modèle est Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, avec une clé dérivée du code PIN comme clé pré-partagée.
+L'association exécute SPAKE2 (groupe Ed25519) sur le code PIN, puis Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s avec une clé dérivée du résultat de SPAKE2 comme clé pré-partagée. La reconnexion exécute Noise_XX_25519_ChaChaPoly_BLAKE2s avec les clés mémorisées. Les versions 0.3 et antérieures utilisaient Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s avec une clé dérivée du code PIN comme clé pré-partagée.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Supprimer une machine enregistrée lorsque vous êtes connecté la retire aussi 
 
 ## Ce qui ne l'est pas
 
-- **Le code PIN.** C'est la clé qui chiffre la connexion, il n'est donc jamais envoyé. L'application pour téléphone le garde sur le téléphone avec chaque machine enregistrée, pour pouvoir se reconnecter. Le client navigateur ne l'enregistre pas du tout.
+- **Le code PIN.** Il n'est jamais envoyé, même chiffré. L'application pour téléphone le garde sur le téléphone avec chaque machine enregistrée. Le client navigateur ne l'enregistre pas du tout. Ce qu'un appareil conserve après l'association, c'est sa propre clé et les clés des ordinateurs auxquels il est associé, pour se reconnecter sans code PIN. Elles restent sur l'appareil.
 - Dans l'application pour téléphone, le mode choisi et le fait d'avoir masqué une machine restent sur le téléphone.
 - Tout ce qui concerne votre écran.
 

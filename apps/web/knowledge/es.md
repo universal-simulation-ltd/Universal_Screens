@@ -53,11 +53,11 @@ En un Mac o un PC con Windows, **Remote access (other networks)** en la ventana 
 id: the-pin
 group: Cómo funciona
 title: ¿Para qué sirve el PIN?
-summary: Deja entrar a sus dispositivos y es también la clave con la que se cifra la conexión.
+summary: Vincula un dispositivo con el host la primera vez. Después, el dispositivo queda recordado.
 ---
-Toda conexión necesita el PIN de 4 dígitos del host. Al escanear el código QR, se rellena solo.
+Un dispositivo necesita el PIN de 4 dígitos del host la primera vez que se conecta. Al escanear el código QR, se rellena solo.
 
-El PIN tiene dos funciones. El host lo comprueba antes de dejar entrar a un dispositivo, y es también la clave con la que se cifra la conexión. El artículo sobre el cifrado explica esta segunda parte.
+El PIN demuestra que su dispositivo puede entrar, sin enviarse nunca. Una vez vinculado un dispositivo, el dispositivo y el host se recuerdan mutuamente, y vuelve a conectarse sin el PIN, aunque el PIN haya cambiado. El artículo sobre el cifrado explica cómo.
 
 ## Un PIN nuevo cada vez
 
@@ -65,7 +65,11 @@ Salvo que elija uno propio, el host genera un PIN nuevo cada vez que se inicia, 
 
 ## Elegir el suyo
 
-Si quiere que sus dispositivos guardados vuelvan a conectarse después de reiniciar el ordenador, puede fijar su propio PIN: **Actions ▸ Use my own PIN** en un Mac o un PC con Windows, o en **⚙** en Linux. Está desactivado de forma predeterminada. No se admite 0000, porque en la conexión significa «sin PIN». Un PIN que usted eligió sigue funcionando hasta que lo cambie, para cualquiera que lo conozca.
+Los dispositivos vinculados vuelven a conectarse sin PIN de todos modos. Un PIN propio le resulta útil si quiere vincular dispositivos nuevos sin leer uno nuevo en la pantalla, y para las aplicaciones de la versión 0.3 y anteriores, que siguen necesitando el PIN actual cada vez. Se fija con **Actions ▸ Use my own PIN** en un Mac o un PC con Windows, o en **⚙** en Linux. Está desactivado de forma predeterminada. No se admite 0000, porque en la conexión significa «sin PIN». Un PIN que usted eligió sigue funcionando hasta que lo cambie, para cualquiera que lo conozca.
+
+## Dispositivos vinculados
+
+**Actions ▸ Paired devices** en un Mac o un PC con Windows, o en **⚙** en Linux, muestra los dispositivos vinculados con el ordenador. **Forget all paired devices** hace que todos ellos tengan que volver a introducir el PIN. Hágalo si pierde un teléfono u ordenador vinculado, o si ya no es suyo.
 
 ## Intentos erróneos
 
@@ -73,31 +77,35 @@ Los tres primeros PIN erróneos seguidos no tienen consecuencias, para que una e
 
 ## Quién lo tiene
 
-Cualquiera que tenga el PIN, o una foto del código QR, puede conectarse y controlar el ordenador. No hay una aprobación aparte para cada dispositivo. Después de compartir su pantalla con alguien, genere un PIN nuevo.
+Cualquiera que tenga el PIN, o una foto del código QR, puede vincular un dispositivo y controlar el ordenador, y ese dispositivo sigue vinculado hasta que usted lo olvide. No hay una aprobación aparte para cada dispositivo. Después de compartir su pantalla con alguien, genere un PIN nuevo y olvide los dispositivos vinculados que no reconozca.
 
 ---
 id: encryption
 group: Cómo funciona
 title: ¿Está cifrada la conexión?
-summary: Sí, de extremo a extremo, con su PIN como clave. El cliente de navegador le avisa si no es posible.
+summary: Sí, de extremo a extremo. Su PIN nunca se envía, y una grabación de la conexión no sirve para averiguarlo.
 ---
-Sí. En cuanto su dispositivo llega al host, ambos realizan un intercambio inicial del Noise Protocol Framework, un diseño publicado para conexiones cifradas. Todo lo que viene después viaja dentro del túnel cifrado: la imagen de la pantalla, sus pulsaciones de teclas y el texto, y la propia comprobación del PIN.
+Sí. En cuanto su dispositivo llega al host, ambos realizan un intercambio inicial del Noise Protocol Framework, un diseño publicado para conexiones cifradas. Todo lo que viene después viaja dentro del túnel cifrado: la imagen de la pantalla, y sus pulsaciones de teclas y el texto.
 
 ## Qué papel tiene el PIN
 
-El intercambio inicial incorpora el PIN como secreto compartido. Un dispositivo con el PIN equivocado no puede completarlo, y tampoco alguien que intente interponerse en la conexión sin el PIN. Además, cada conexión crea claves nuevas de un solo uso, así que una grabación del tráfico sigue siendo ilegible aunque el PIN llegue a conocerse más tarde.
+La primera vez que un dispositivo se conecta, se vincula con el host mediante el PIN. La vinculación usa SPAKE2, un intercambio de claves autenticado por contraseña: cada lado incorpora el PIN a un intercambio de claves nuevo, de modo que ambos pueden demostrar que conocen el mismo PIN sin enviarlo, ni nada que se pueda calcular solo a partir del PIN. Quien grabe la conexión no puede usar la grabación para adivinar el PIN. Quien pruebe en directo tiene un intento por conexión, y la pausa del host tras los PIN erróneos limita esos intentos.
+
+Durante la vinculación, el host y el dispositivo intercambian claves permanentes y se recuerdan mutuamente. Las conexiones posteriores usan esas claves en lugar del PIN, así que el dispositivo vuelve a conectarse sin él, y quien no tenga una de esas claves no puede interponerse en la conexión. Además, cada conexión crea claves nuevas de un solo uso, así que una grabación sigue siendo ilegible aunque una clave o el PIN lleguen a conocerse más tarde.
 
 ## A través del servidor de retransmisión
 
 Con un código remoto, la conexión pasa por el servidor de retransmisión de UNI·SIM. El navegador y el host siguen cifrando de extremo a extremo, así que el servidor solo reenvía datos cifrados que no puede leer.
 
-## Cuándo no está cifrada
+## Versiones anteriores
 
-Las versiones anteriores al cifrado siguen conectándose sin él. El host registra una advertencia cuando un cliente antiguo se conecta sin cifrar. El cliente de navegador comprueba lo que admite el host e indica en el registro de la sesión si está cifrada de extremo a extremo. Si el host es una versión antigua, el registro lo dice y le pide que lo actualice.
+La versión 0.3 y las anteriores se vinculaban de otra forma, con una clave calculada solo a partir del PIN. Quien grabara una de esas conexiones podía probar los 10 000 PIN con la grabación y encontrar el suyo. Los hosts actuales siguen dejando entrar a esas aplicaciones antiguas, para que nada deje de funcionar, y registran una advertencia cuando se conecta una. Actualícelas.
+
+Una aplicación actual para el teléfono o el ordenador nunca vuelve al método antiguo: si el host es de la versión 0.3 o anterior, le pide que lo actualice. El cliente de navegador solo usa el método antiguo cuando el host indica que no puede hacer otra cosa, lo dice en el registro de la sesión y nunca lo hace con un host con el que ya se haya vinculado antes con el método actual. Las versiones anteriores al cifrado se conectan sin él, y el registro también lo dice.
 
 ## Para quien le interese la parte técnica
 
-El patrón es Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, con una clave derivada del PIN como clave precompartida.
+La vinculación ejecuta SPAKE2 (grupo Ed25519) sobre el PIN y después Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s, con una clave derivada del resultado de SPAKE2 como clave precompartida. La reconexión ejecuta Noise_XX_25519_ChaChaPoly_BLAKE2s con las claves recordadas. La versión 0.3 y las anteriores usaban Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, con una clave derivada del PIN como clave precompartida.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Si elimina un equipo guardado con la sesión iniciada, también se elimina de su
 
 ## Qué no
 
-- **El PIN.** Es la clave con la que se cifra la conexión, así que nunca se envía. La aplicación para el teléfono lo guarda en el teléfono con cada equipo, para poder volver a conectarse. El cliente de navegador no lo guarda en absoluto.
+- **El PIN.** Nunca se envía, ni siquiera cifrado. La aplicación para el teléfono lo guarda en el teléfono con cada equipo. El cliente de navegador no lo guarda en absoluto. Lo que un dispositivo sí conserva tras la vinculación es su propia clave y las claves de los ordenadores con los que se ha vinculado, para volver a conectarse sin el PIN. Se quedan en el dispositivo.
 - En la aplicación para el teléfono, el modo elegido y si ocultó un equipo se quedan en el teléfono.
 - Nada sobre su pantalla.
 

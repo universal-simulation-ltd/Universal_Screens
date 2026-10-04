@@ -53,11 +53,11 @@ Em um Mac ou PC com Windows, **Remote access (other networks)** na janela do hos
 id: the-pin
 group: Como funciona
 title: Para que serve o PIN?
-summary: Ele deixa seus dispositivos entrarem e também é a chave que criptografa a conexão.
+summary: Ele pareia um dispositivo com o host na primeira vez. Depois disso, o dispositivo é lembrado.
 ---
-Toda conexão precisa do PIN de 4 dígitos do host. Ao escanear o QR code, ele é preenchido para você.
+Um dispositivo precisa do PIN de 4 dígitos do host na primeira vez que se conecta. Ao escanear o QR code, ele é preenchido para você.
 
-O PIN tem duas funções. O host confere o PIN antes de deixar um dispositivo entrar, e ele também é a chave usada para criptografar a conexão. O artigo sobre criptografia explica essa segunda parte.
+O PIN prova que seu dispositivo pode entrar, sem nunca ser enviado. Depois que um dispositivo é pareado, ele e o host se lembram um do outro, e ele se reconecta sem o PIN, mesmo depois que o PIN muda. O artigo sobre criptografia explica como.
 
 ## Um PIN novo a cada vez
 
@@ -65,7 +65,11 @@ A menos que você escolha o seu, o host gera um PIN novo sempre que é iniciado,
 
 ## Escolhendo o seu
 
-Se você quer que os dispositivos salvos se reconectem depois que o computador reiniciar, pode definir o seu próprio PIN: **Actions ▸ Use my own PIN** em um Mac ou PC com Windows, ou em **⚙** no Linux. Isso vem desativado. 0000 não é aceito, porque na conexão significa "sem PIN". Um PIN escolhido por você continua valendo até você mudá-lo, para qualquer pessoa que o conheça.
+Dispositivos pareados se reconectam sem PIN de qualquer forma. Um PIN seu ajuda se você quer parear dispositivos novos sem ler um PIN novo na tela, e para apps da versão 0.3 e anteriores, que ainda precisam do PIN atual toda vez. Defina-o em **Actions ▸ Use my own PIN** em um Mac ou PC com Windows, ou em **⚙** no Linux. Isso vem desativado. 0000 não é aceito, porque na conexão significa "sem PIN". Um PIN escolhido por você continua valendo até você mudá-lo, para qualquer pessoa que o conheça.
+
+## Dispositivos pareados
+
+**Actions ▸ Paired devices** em um Mac ou PC com Windows, ou em **⚙** no Linux, lista os dispositivos pareados com o computador. **Forget all paired devices** faz com que todos eles precisem digitar o PIN de novo. Faça isso se um celular ou computador pareado for perdido ou não for mais seu.
 
 ## Tentativas erradas
 
@@ -73,31 +77,35 @@ Os três primeiros PINs errados seguidos não têm consequência, para que um er
 
 ## Quem tem o PIN
 
-Qualquer pessoa com o PIN, ou com uma foto do QR code, pode se conectar e controlar o computador. Não existe uma aprovação separada para cada dispositivo. Depois de compartilhar sua tela com alguém, gere um PIN novo.
+Qualquer pessoa com o PIN, ou com uma foto do QR code, pode parear um dispositivo e controlar o computador, e esse dispositivo continua pareado até você esquecê-lo. Não existe uma aprovação separada para cada dispositivo. Depois de compartilhar sua tela com alguém, gere um PIN novo e esqueça os dispositivos pareados que você não reconhece.
 
 ---
 id: encryption
 group: Como funciona
 title: A conexão é criptografada?
-summary: Sim, de ponta a ponta, com o seu PIN como chave. O cliente no navegador avisa quando isso não é possível.
+summary: Sim, de ponta a ponta. Seu PIN nunca é enviado, e uma gravação da conexão não serve para descobri-lo.
 ---
-Sim. Assim que seu dispositivo chega ao host, os dois fazem um handshake do Noise Protocol Framework, um projeto publicado para conexões criptografadas. Tudo o que vem depois passa por dentro do túnel criptografado: a imagem da tela, as teclas e o texto que você digita e a própria verificação do PIN.
+Sim. Assim que seu dispositivo chega ao host, os dois fazem um handshake do Noise Protocol Framework, um projeto publicado para conexões criptografadas. Tudo o que vem depois passa por dentro do túnel criptografado: a imagem da tela, e as teclas e o texto que você digita.
 
 ## O papel do PIN
 
-O handshake usa o PIN como segredo compartilhado. Um dispositivo com o PIN errado não consegue concluí-lo, e nem alguém tentando se colocar no meio da conexão sem o PIN. Cada conexão também cria chaves novas de uso único, então uma gravação do tráfego continua ilegível mesmo que o PIN seja descoberto depois.
+Na primeira vez que um dispositivo se conecta, ele é pareado com o host usando o PIN. O pareamento usa SPAKE2, uma troca de chaves autenticada por senha: cada lado mistura o PIN em uma troca de chaves nova, de modo que os dois provam que conhecem o mesmo PIN sem enviá-lo, nem nada que possa ser calculado só a partir do PIN. Quem grava a conexão não consegue usar a gravação para adivinhar o PIN. Quem tenta ao vivo tem uma tentativa por conexão, e a pausa do host depois de PINs errados limita essas tentativas.
+
+Durante o pareamento, o host e o dispositivo trocam chaves permanentes e se lembram um do outro. As conexões seguintes usam essas chaves no lugar do PIN, então o dispositivo se reconecta sem ele, e quem não tem uma dessas chaves não consegue se colocar no meio da conexão. Cada conexão também cria chaves novas de uso único, então uma gravação continua ilegível mesmo que uma chave ou o PIN sejam descobertos depois.
 
 ## Pelo servidor de retransmissão
 
 Com um código remoto, a conexão passa pelo servidor de retransmissão da UNI·SIM. O navegador e o host continuam criptografando de ponta a ponta, então o servidor só repassa dados embaralhados que não consegue ler.
 
-## Quando não é criptografada
+## Versões antigas
 
-Versões anteriores à criptografia ainda se conectam sem ela. O host registra um aviso quando um cliente antigo se conecta sem criptografia. O cliente no navegador verifica o que o host suporta e informa no registro da sessão se ela está criptografada de ponta a ponta. Se o host for uma versão antiga, o registro avisa e pede que você o atualize.
+A versão 0.3 e as anteriores faziam o pareamento de outro jeito, com uma chave calculada só a partir do PIN. Quem gravasse uma dessas conexões podia testar os 10.000 PINs na gravação e encontrar o seu. Os hosts atuais ainda deixam esses apps antigos entrarem, para que nada pare de funcionar, e registram um aviso quando um deles se conecta. Atualize-os.
+
+Um app atual para celular ou computador nunca volta ao jeito antigo: se o host for da versão 0.3 ou anterior, ele pede que você atualize o host. O cliente no navegador só usa o jeito antigo quando o host informa que não sabe fazer outra coisa, avisa isso no registro da sessão e nunca faz isso com um host com o qual já foi pareado do jeito atual. Versões anteriores à criptografia se conectam sem ela, e o registro também avisa isso.
 
 ## Para quem gosta de detalhes técnicos
 
-O padrão é Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do PIN como chave pré-compartilhada.
+O pareamento executa SPAKE2 (grupo Ed25519) sobre o PIN e depois Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do resultado do SPAKE2 como chave pré-compartilhada. A reconexão executa Noise_XX_25519_ChaChaPoly_BLAKE2s com as chaves lembradas. A versão 0.3 e as anteriores usavam Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, com uma chave derivada do PIN como chave pré-compartilhada.
 
 ---
 id: what-leaves-your-network
@@ -147,7 +155,7 @@ Excluir uma máquina salva com a conta conectada também a remove da sua conta.
 
 ## O que não é
 
-- **O PIN.** Ele é a chave que criptografa a conexão, então nunca é enviado. O app para celular o guarda no celular junto com cada máquina salva, para poder se reconectar. O cliente no navegador não o salva de jeito nenhum.
+- **O PIN.** Ele nunca é enviado, nem mesmo embaralhado. O app para celular o guarda no celular junto com cada máquina salva. O cliente no navegador não o salva de jeito nenhum. O que um dispositivo guarda depois do pareamento é a sua própria chave e as chaves dos computadores com que foi pareado, para se reconectar sem o PIN. Elas ficam no dispositivo.
 - No app para celular, o modo escolhido e se você ocultou uma máquina ficam no celular.
 - Qualquer coisa sobre a sua tela.
 

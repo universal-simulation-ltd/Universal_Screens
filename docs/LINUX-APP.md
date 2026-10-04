@@ -64,7 +64,7 @@ repo at [`installer/`](../installer/99-universal-screens-uinput.rules).
 
 Over USB, `adb reverse tcp:9000 tcp:9000` then connect to `127.0.0.1:9000`.
 
-The connection is PIN-gated and encrypted (Noise, keyed by the PIN) exactly as
+The connection is encrypted, and paired over the PIN (SPAKE2, then Noise), exactly as
 on the other two hosts — see the Security section of the main
 [README](../README.md).
 
