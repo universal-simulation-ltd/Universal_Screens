@@ -21,7 +21,7 @@ use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
-use extender_web_bridge::{dial_room, E2EE_SUBPROTOCOL};
+use extender_web_bridge::{dial_room, E2EE_SUBPROTOCOL, E2EE_SUBPROTOCOL_V2};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
 
@@ -90,6 +90,37 @@ fn the_subprotocol_is_matched_as_a_token_not_as_the_whole_header() {
         )),
         "the offered token must be picked out of the list; got:\n{response}"
     );
+}
+
+/// A current tab offers v2 first and v1 as the fall-back; a current bridge
+/// must pick v2, which tells the tab the host behind can pair with SPAKE2.
+#[test]
+fn a_current_bridge_answers_v2_when_the_tab_offers_both() {
+    let bridge = spawn_bridge_serving(spawn_idle_host());
+    let response = raw_handshake(&bridge, Some(&format!("{E2EE_SUBPROTOCOL_V2}, {E2EE_SUBPROTOCOL}")));
+    let lower = response.to_ascii_lowercase();
+    assert!(
+        lower.contains(&format!("sec-websocket-protocol: {}", E2EE_SUBPROTOCOL_V2.to_ascii_lowercase())),
+        "expected the v2 answer; got:\n{response}"
+    );
+}
+
+/// Order in the offer does not matter: the bridge prefers v2 regardless, so a
+/// tab cannot be talked into the weaker handshake by how it listed them.
+#[test]
+fn the_bridge_prefers_v2_whatever_order_it_was_offered_in() {
+    let bridge = spawn_bridge_serving(spawn_idle_host());
+    let response = raw_handshake(&bridge, Some(&format!("{E2EE_SUBPROTOCOL}, {E2EE_SUBPROTOCOL_V2}")));
+    assert!(
+        response.to_ascii_lowercase().contains(&E2EE_SUBPROTOCOL_V2.to_ascii_lowercase()),
+        "got:\n{response}"
+    );
+}
+
+/// The caps signal a room peer reads carries the handshake version.
+#[test]
+fn the_caps_signal_announces_the_v2_handshake() {
+    assert!(extender_web_bridge::CAPS_SIGNAL.contains("\"handshake\":2"));
 }
 
 /// Perform the HTTP half of a WebSocket upgrade by hand and return the raw

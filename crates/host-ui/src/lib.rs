@@ -41,6 +41,9 @@ pub use user_count::{show_user_count, UserCount};
 pub mod knowledge;
 pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
 
+pub mod pairing;
+pub use pairing::{pairing_store, PairedDevicesPanel};
+
 use std::net::TcpListener;
 
 use eframe::egui;
@@ -177,9 +180,12 @@ pub enum OwnPinChange {
 ///
 /// **Off by default, deliberately.** With it off the host picks a new PIN each
 /// time it starts, so a PIN that was seen or shared stops working at the next
-/// start. With it on, a device that saved this host reconnects after a restart —
-/// and so can anyone else who ever learned the PIN, until it is changed. The
-/// panel says so, because that trade is the user's to make.
+/// start. With it on, anyone who ever learned the PIN can pair until it is
+/// changed. The panel says so, because that trade is the user's to make.
+///
+/// Since pairing is remembered (v0.4), a device that paired once reconnects
+/// with its key whatever the PIN is — so this matters only for pairing *new*
+/// devices, and for v0.3 apps, which still need the current PIN every time.
 ///
 /// The PIN itself is never drawn here: the main window's reveal-on-click is the
 /// one place it is shown, and this menu may be on a screen being mirrored.
@@ -203,8 +209,9 @@ impl OwnPinEditor {
             .strong(),
         );
         ui.small(
-            "Choose a PIN to keep, so a device that saved this host can reconnect \
-             after a restart without you being here to read the new one.",
+            "Paired devices reconnect without any PIN. Keep one PIN only if you want \
+             to pair new devices, or older apps that can't pair, without reading a \
+             fresh one off this screen.",
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -241,7 +248,8 @@ impl OwnPinEditor {
         // doubling to 5 min). Until 2026-09-13 this said wrong guesses weren't
         // rate-limited, which was true then.
         ui.small(
-            "Anyone who learns it can connect until you change it. After three wrong \
+            "Anyone who learns it can pair until you change it, and a device that \
+             pairs stays paired until you forget it (Paired devices). After three wrong \
              PINs in a row the host pauses before the next try — longer each time, up \
              to 5 minutes — but four digits can still be guessed in the end, so not \
              1234, and not a year.",

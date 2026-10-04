@@ -236,6 +236,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Where the pairing keys live, so a computer this phone has paired with
+        // reconnects without its code. The Rust side cannot find this folder by
+        // itself on Android; without the call it simply asks for the code each time.
+        ExtenderNative.nativeSetPairingDir(filesDir.absolutePath)
         deepLink.value = intent?.dataString
         setContent {
             val link by deepLink

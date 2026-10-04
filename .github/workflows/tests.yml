@@ -74,7 +74,8 @@ jobs:
         run: |
           cargo test -p extender-protocol -p extender-transport -p extender-core \
                      -p extender-discovery -p extender-h264 -p extender-protocol-wasm \
-                     -p extender-web-bridge -p extender-host-ui
+                     -p extender-web-bridge -p extender-host-ui -p unisim-pake \
+                     -p extender-mobile-ffi
 
       # ⚠️ `xvfb` here, not the whole script: the SECOND SCREEN needs a server
       # whose framebuffer can grow, which neither Xvfb nor this runner's Xorg
@@ -92,7 +93,7 @@ jobs:
         run: |
           cargo clippy -p extender-protocol -p extender-transport -p extender-h264 \
                        -p extender-protocol-wasm -p extender-host-linux \
-                       -p extender-host-ui --all-targets
+                       -p extender-host-ui -p unisim-pake -p extender-core --all-targets
 
       # The browser's own logic, needing neither a server nor the WASM artifact.
       - name: Test the browser's encryption negotiation
@@ -108,6 +109,14 @@ jobs:
       # than everything else in this job put together.
       - name: Install wasm-pack
         run: command -v wasm-pack || cargo install wasm-pack --locked
+
+      # The reusable pairing crate's own JS bindings (for other suite apps):
+      # nothing here consumes them, so without this step they could stop
+      # compiling unnoticed.
+      - name: Build the pairing crate for the browser
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build -p unisim-pake --features wasm --target wasm32-unknown-unknown
 
       - name: Build the WASM shim
         run: |
@@ -190,4 +199,4 @@ jobs:
           key: tests-windows
 
       - name: Test the Windows host
-        run: cargo test -p extender-host-windows -p extender-h264 -p extender-transport
+        run: cargo test -p extender-host-windows -p extender-h264 -p extender-transport -p extender-core -p unisim-pake

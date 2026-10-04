@@ -97,6 +97,9 @@ struct HostApp {
     /// means a fresh PIN every start. See host-ui's `OwnPinEditor`.
     own_pin: Option<u32>,
     own_pin_editor: OwnPinEditor,
+    /// "Paired devices": who reconnects without the PIN, and Forget. See
+    /// host-ui's `pairing` module.
+    paired_panel: extender_host_ui::PairedDevicesPanel,
     /// Actions ▸ Advanced ▸ Knowledge base. The articles are the shared ones in
     /// `apps/web/knowledge/`, embedded by host-ui.
     knowledge: KnowledgeReader,
@@ -188,6 +191,7 @@ impl HostApp {
             pin,
             own_pin,
             own_pin_editor: OwnPinEditor::default(),
+            paired_panel: extender_host_ui::PairedDevicesPanel::default(),
             knowledge: KnowledgeReader::with_language(
                 storage.and_then(|s| eframe::get_value::<String>(s, KB_LANGUAGE_KEY)),
             ),
@@ -769,6 +773,9 @@ impl HostApp {
                         self.apply_own_pin(change, ctx);
                         ui.close_menu();
                     }
+                });
+                ui.menu_button("🔗  Paired devices", |ui| {
+                    self.paired_panel.ui(ui);
                 });
                 ui.horizontal(|ui| {
                     ui.label("Port");

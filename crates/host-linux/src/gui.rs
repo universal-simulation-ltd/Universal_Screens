@@ -79,6 +79,9 @@ struct HostApp {
     /// means a fresh PIN every start. See host-ui's `OwnPinEditor`.
     own_pin: Option<u32>,
     own_pin_editor: OwnPinEditor,
+    /// "Paired devices": who reconnects without the PIN, and Forget. See
+    /// host-ui's `pairing` module.
+    paired_panel: extender_host_ui::PairedDevicesPanel,
     /// Latest lifecycle line from the accept loop.
     status: String,
     events: Option<Receiver<String>>,
@@ -114,6 +117,7 @@ impl HostApp {
             pin: startup_pin(own_pin),
             own_pin,
             own_pin_editor: OwnPinEditor::default(),
+            paired_panel: extender_host_ui::PairedDevicesPanel::default(),
             status: "Not started".to_owned(),
             events: None,
             uinput: inject::uinput_status(),
@@ -262,6 +266,9 @@ impl eframe::App for HostApp {
                                     self.apply_own_pin(change, ctx);
                                     ui.close_menu();
                                 }
+                            });
+                            ui.menu_button("🔗  Paired devices", |ui| {
+                                self.paired_panel.ui(ui);
                             });
                         })
                         .response

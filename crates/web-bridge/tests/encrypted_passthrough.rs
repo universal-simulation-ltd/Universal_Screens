@@ -18,7 +18,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
-use extender_transport::{self as transport, Initiator, Session};
+use extender_transport::{self as transport, ClientHandshake, Identity, Initiator, Session, Step};
 use extender_web_bridge::proxy_connection;
 use tungstenite::Message as WsMessage;
 
@@ -121,6 +121,57 @@ fn a_browser_can_run_the_noise_tunnel_through_the_bridge() {
     }
     assert_eq!(session.take_all(), framed);
     assert_eq!(host.join().unwrap(), b"page down!!");
+}
+
+/// The **v2** handshake through the bridge: SPAKE2 pairing, then the Noise
+/// tunnel, with the browser side driven only by `ClientHandshake` and opaque WS
+/// messages — the shape `protocol-wasm` gives the tab. The bridge must relay all
+/// three round trips verbatim (it switches to passthrough on the preamble the
+/// v2 opening starts with).
+#[test]
+fn a_browser_can_pair_with_spake2_through_the_bridge() {
+    let host_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host_addr = host_listener.local_addr().unwrap().to_string();
+    let host = spawn_host(host_listener);
+    let bridge_addr = spawn_bridge(host_addr);
+
+    let (mut ws, _) = tungstenite::connect(format!("ws://{bridge_addr}/")).unwrap();
+    if let tungstenite::stream::MaybeTlsStream::Plain(s) = ws.get_ref() {
+        s.set_read_timeout(Some(TIMEOUT)).unwrap();
+    }
+
+    let me = Identity::generate().unwrap();
+    let (mut hs, first) = ClientHandshake::pair(PIN, &me).unwrap();
+    ws.send(WsMessage::Binary(first)).unwrap();
+    let mut session = loop {
+        let mut chunk = Vec::new();
+        read_until(&mut ws, &mut chunk, |b| !b.is_empty());
+        match hs.feed(&chunk).unwrap() {
+            Step::Continue(out) => {
+                if !out.is_empty() {
+                    ws.send(WsMessage::Binary(out)).unwrap();
+                }
+            }
+            Step::Done { send, established } => {
+                assert!(established.paired);
+                if !send.is_empty() {
+                    ws.send(WsMessage::Binary(send)).unwrap();
+                }
+                break established.session;
+            }
+        }
+    };
+
+    let mut framed = 11u32.to_le_bytes().to_vec();
+    framed.extend_from_slice(b"next slide!");
+    ws.send(WsMessage::Binary(session.seal(&framed).unwrap())).unwrap();
+    while session.available() < framed.len() {
+        let mut chunk = Vec::new();
+        read_until(&mut ws, &mut chunk, |b| !b.is_empty());
+        session.feed(&chunk).unwrap();
+    }
+    assert_eq!(session.take_all(), framed);
+    assert_eq!(host.join().unwrap(), b"next slide!");
 }
 
 /// The bridge must never be able to read what it relays.

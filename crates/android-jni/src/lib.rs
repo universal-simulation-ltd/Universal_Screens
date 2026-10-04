@@ -15,7 +15,7 @@
 use std::sync::mpsc::{self, Sender};
 
 use extender_core::protocol::{self, Button, CaptureMode, Gesture, Input, TouchPhase};
-use extender_core::{ClientHello, Codec, Session, StreamEvent};
+use extender_core::{set_pairing_location, ClientHello, Codec, PairingLocation, Session, StreamEvent};
 
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jfloat, jint, jlong};
@@ -50,6 +50,26 @@ fn codec_tag(codec: Codec) -> i32 {
 fn send_input(handle: jlong, input: Input) {
     if let Some(s) = unsafe { session(handle) } {
         let _ = s.input_tx.send(input);
+    }
+}
+
+// ---- pairing ---------------------------------------------------------------
+
+/// Keep the pairing keys (this phone's long-term key and the hosts it has
+/// paired with) in `dir` — the app's `filesDir`. ⚠️ Android has no default the
+/// Rust side can find, so without this call a paired host still needs its code
+/// every time.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeSetPairingDir<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dir: JString<'local>,
+) {
+    if let Ok(dir) = env.get_string(&dir) {
+        let dir: String = dir.into();
+        if !dir.is_empty() {
+            set_pairing_location(PairingLocation::Dir(dir.into()));
+        }
     }
 }
 

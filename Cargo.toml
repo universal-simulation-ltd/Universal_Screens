@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/protocol",
+    "crates/pake",
     "crates/transport",
     "crates/core",
     "crates/h264",
@@ -26,9 +27,33 @@ license = "AGPL-3.0-or-later"
 [workspace.dependencies]
 extender-protocol = { path = "crates/protocol" }
 extender-transport = { path = "crates/transport" }
+# Short-code pairing (SPAKE2), transport-free and wasm-ready: see crates/pake/README.md.
+unisim-pake = { path = "crates/pake" }
 extender-core = { path = "crates/core" }
 # Platform-neutral H.264 wire framing + frame sizing, shared by every mirroring host.
 extender-h264 = { path = "crates/h264" }
 extender-discovery = { path = "crates/discovery" }
 extender-host-ui = { path = "crates/host-ui" }
 extender-web-bridge = { path = "crates/web-bridge" }
+
+# The pairing tests run the full code space (10,000 SPAKE2 exchanges and Noise
+# handshakes, the offline-attack tests) — about 15–25 s each unoptimised, a
+# second or two optimised.
+# Optimising only the curve arithmetic keeps debug builds of our own code
+# debuggable while the elliptic-curve maths runs at release speed.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.spake2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.snow]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.poly1305]
+opt-level = 3

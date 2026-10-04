@@ -993,6 +993,7 @@ dependencies = [
  "cpufeatures",
  "curve25519-dalek-derive",
  "fiat-crypto",
+ "rand_core",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -1331,7 +1332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1397,6 +1398,7 @@ dependencies = [
 name = "extender-core"
 version = "0.3.0"
 dependencies = [
+ "dirs",
  "extender-protocol",
  "extender-transport",
 ]
@@ -1480,6 +1482,7 @@ dependencies = [
  "eframe",
  "extender-discovery",
  "extender-protocol",
+ "extender-transport",
  "getrandom 0.2.17",
  "ureq",
 ]
@@ -1538,6 +1541,7 @@ dependencies = [
  "getrandom 0.2.17",
  "sha2",
  "snow",
+ "unisim-pake",
 ]
 
 [[package]]
@@ -2045,6 +2049,24 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hkdf"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+dependencies = [
+ "hmac",
+]
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "home"
@@ -3490,7 +3512,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3888,6 +3910,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "spake2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5482afe85a0b6ce956c945401598dbc527593c77ba51d0a87a586938b1b893a"
+dependencies = [
+ "curve25519-dalek",
+ "hkdf",
+ "rand_core",
+ "sha2",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3987,7 +4021,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4239,6 +4273,18 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unisim-pake"
+version = "0.3.0"
+dependencies = [
+ "getrandom 0.2.17",
+ "hkdf",
+ "sha2",
+ "spake2",
+ "subtle",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "universal-hash"
@@ -4887,7 +4933,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

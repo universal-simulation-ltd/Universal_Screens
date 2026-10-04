@@ -52,10 +52,14 @@ globalThis.WebSocket.OPEN = 1;
 
 const { RoomTransport } = await import("./src/room.js");
 
-/// A SecureChannel stand-in: opens as soon as it is handed anything.
-function fakeSecure(pin) {
+/// A SecureChannel stand-in: opens as soon as it is handed anything. Like the
+/// real factory (`openChannel`), it builds nothing for a host that announced
+/// nothing (hostHandshake 0).
+function fakeSecure(pin, hostHandshake) {
+  if (!hostHandshake) return null;
   return {
     pin,
+    hostHandshake,
     opened: false,
     firstMessage: new Uint8Array([0x55, 0x53, 0x43, 0x52, 0x01, 0xaa]),
     get open() {
@@ -76,7 +80,7 @@ function fakeSecure(pin) {
 {
   let made = null;
   const rt = new RoomTransport("ws://room.invalid", "ABCD", (b) => b, {
-    secure: (pin) => (made = fakeSecure(pin)),
+    secure: (pin, hs) => (made = fakeSecure(pin, hs)),
     capsWaitMs: 500,
   });
   let paired = false;
@@ -91,6 +95,7 @@ function fakeSecure(pin) {
 
   A(made !== null, "a host that announces caps gets an encrypted tunnel");
   A(made?.pin === 4321, "the tunnel is keyed with the PIN passed to connect()");
+  A(made?.hostHandshake === 1, "a caps signal without `handshake` is a v0.3 host (v1 tunnel)");
   A(ws.sent.length === 1 && ws.sent[0][0] === 0x55, "the handshake goes out first, preamble and all");
   A(!paired, "onPaired is withheld until the tunnel is open — nothing may be sent before it");
 
@@ -107,7 +112,7 @@ function fakeSecure(pin) {
 {
   let made = null;
   const rt = new RoomTransport("ws://room.invalid", "ABCD", (b) => b, {
-    secure: (pin) => (made = fakeSecure(pin)),
+    secure: (pin, hs) => (made = fakeSecure(pin, hs)),
     capsWaitMs: 120, // the real 1.5s, shortened so the test is quick
   });
   let paired = false;
@@ -140,6 +145,58 @@ function fakeSecure(pin) {
   await sleep(20);
   A(paired, "with no secure factory the tab pairs immediately, caps or not");
   A(rt.encrypted === false, "and stays plaintext — the caller opted out");
+}
+
+// --- 4. a current host announces the v2 handshake ----------------------------
+{
+  let seen = null;
+  const rt = new RoomTransport("ws://room.invalid", "ABCD", (b) => b, {
+    secure: (pin, hs) => { seen = hs; return fakeSecure(pin, hs); },
+    capsWaitMs: 500,
+  });
+  rt.connect(4321);
+  await sleep(5);
+  const ws = FakeSocket.last;
+  ws.signal({ type: "caps", e2ee: true, handshake: 2 });
+  ws.signal({ type: "paired", peerRole: "sender" });
+  await sleep(30);
+  A(seen === 2, "`handshake: 2` reaches the factory, so the tab pairs with SPAKE2");
+}
+
+// --- 5. the factory refuses a downgrade -> the attempt ends, and says why -----
+{
+  let paired = false;
+  let closed = false;
+  const rt = new RoomTransport("ws://room.invalid", "ABCD", (b) => b, {
+    secure: () => "refuse",
+    capsWaitMs: 500,
+  });
+  rt.onPaired = () => { paired = true; };
+  rt.onClose = () => { closed = true; };
+  rt.connect(4321);
+  await sleep(5);
+  const ws = FakeSocket.last;
+  ws.signal({ type: "caps", e2ee: true });
+  ws.signal({ type: "paired", peerRole: "sender" });
+  await sleep(30);
+  A(!paired && closed, "a refused downgrade never pairs and closes the room");
+  A(rt.failure === "downgrade", "and reports the downgrade");
+  A(ws.sent.length === 0, "nothing at all was sent — not even a v1 handshake");
+}
+
+// --- 6. the decision itself (pairing.plan) -------------------------------------
+{
+  globalThis.localStorage = undefined; // pairing.js must survive no storage
+  const { plan, trustedHosts, isPinnedV2 } = await import("./src/pairing.js");
+  A(trustedHosts().length === 0 && !isPinnedV2("x"), "no storage reads as nothing remembered, not a crash");
+  const p = (o) => plan({ hostHandshake: 2, pin: 0, trusted: [], pinned: false, ...o });
+  A(p({ pin: 1234 }) === "pair", "a typed PIN pairs with a current host");
+  A(p({ trusted: ["k"] }) === "known", "no PIN and a remembered host: reconnect by key");
+  A(p({}) === "pair", "no PIN and nothing remembered: pair over 0 (a host with pairing off)");
+  A(p({ hostHandshake: 1 }) === "v1", "a v0.3 host gets the v1 tunnel — the best it can do");
+  A(p({ hostHandshake: 0 }) === "plain", "an older host still: plaintext, as before");
+  A(p({ hostHandshake: 1, pinned: true }) === "refuse", "but never for a host that spoke v2 to this tab");
+  A(p({ hostHandshake: 0, pinned: true }) === "refuse", "nor plaintext for one");
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

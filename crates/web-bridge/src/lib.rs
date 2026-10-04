@@ -54,11 +54,26 @@ const IDLE_POLL: Duration = Duration::from_millis(4);
 /// path uses [`CAPS_SIGNAL`] instead.
 pub const E2EE_SUBPROTOCOL: &str = "usscreens-e2ee.v1";
 
+/// The subprotocol that says "relay verbatim, **and** the host behind me speaks
+/// the v2 handshake" — pairing with SPAKE2, so a recording cannot be
+/// brute-forced for the PIN (see `extender_transport::handshake`).
+///
+/// A current tab offers both, v2 first; a current bridge answers v2, a v0.3
+/// bridge (which knows only v1) answers v1, and the tab falls back to the v1
+/// handshake only then — the one case where the host can do nothing better.
+///
+/// ⚠️ It describes the host this bridge was **built with**. A `?host=`
+/// retarget to another discovered machine (the "Nearby" path) may reach an
+/// older one; that tab then gets a clear "update that computer" rather than a
+/// silent downgrade.
+pub const E2EE_SUBPROTOCOL_V2: &str = "usscreens-e2ee.v2";
+
 /// What a host announces into a rendezvous room once paired, so the browser on
-/// the other side knows it can encrypt. Relayed verbatim by the room (an
-/// unknown `type` is ignored by every existing peer, in both directions), and an
-/// older host simply never sends it.
-pub const CAPS_SIGNAL: &str = r#"{"type":"caps","e2ee":true}"#;
+/// the other side knows it can encrypt — and, with `"handshake":2`, that it can
+/// pair with SPAKE2. Relayed verbatim by the room (an unknown `type` or field
+/// is ignored by every existing peer, in both directions); a v0.3 host sends it
+/// without `handshake`, and an older one not at all.
+pub const CAPS_SIGNAL: &str = r#"{"type":"caps","e2ee":true,"handshake":2}"#;
 
 /// Default WebSocket bind address the bridge listens on for browsers.
 pub const DEFAULT_WS_ADDR: &str = "0.0.0.0:9002";
@@ -273,18 +288,24 @@ fn proxy_browser(
     proxy_established(ws, &target)
 }
 
-/// True when the handshake request offers [`E2EE_SUBPROTOCOL`].
+/// The E2EE subprotocol to answer with: [`E2EE_SUBPROTOCOL_V2`] when the tab
+/// offered it, else [`E2EE_SUBPROTOCOL`] when it offered that, else none.
 ///
 /// `Sec-WebSocket-Protocol` is a comma-separated preference list, and a browser
-/// may offer several, so this looks for the token rather than matching the whole
-/// header.
-fn offers_e2ee(req: &tungstenite::handshake::server::Request) -> bool {
-    req.headers()
+/// may offer several, so this looks for the tokens rather than matching the
+/// whole header.
+fn e2ee_answer(req: &tungstenite::handshake::server::Request) -> Option<&'static str> {
+    let offered: Vec<String> = req
+        .headers()
         .get_all("Sec-WebSocket-Protocol")
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(','))
-        .any(|tok| tok.trim() == E2EE_SUBPROTOCOL)
+        .map(|tok| tok.trim().to_owned())
+        .collect();
+    [E2EE_SUBPROTOCOL_V2, E2EE_SUBPROTOCOL]
+        .into_iter()
+        .find(|ours| offered.iter().any(|tok| tok == ours))
 }
 
 /// The value of `key` in a raw `k=v&k=v` query string (no percent-decoding —
@@ -458,10 +479,10 @@ fn accept_negotiating(
             // Answer the E2EE subprotocol if the tab offered it, so it can tell
             // whether this bridge understands an encrypted connection *before*
             // sending a byte. See `E2EE_SUBPROTOCOL`.
-            if offers_e2ee(req) {
+            if let Some(answer) = e2ee_answer(req) {
                 resp.headers_mut().insert(
                     "Sec-WebSocket-Protocol",
-                    E2EE_SUBPROTOCOL.parse().expect("a static ASCII header value"),
+                    answer.parse().expect("a static ASCII header value"),
                 );
             }
             Ok(resp)

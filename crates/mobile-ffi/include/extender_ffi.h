@@ -48,6 +48,14 @@ typedef enum {
   EXTENDER_MOUSE_MIDDLE = 2,
 } ExtenderMouseButton;
 
+/* --- pairing --- */
+
+/* Keep this client's pairing keys (its long-term key and the hosts it has
+ * paired with) in the folder `dir`, so a paired host reconnects with no code.
+ * Call once, before the first connect. NULL restores the default, which on iOS
+ * is the app's Library/Application Support — so iOS need not call it. */
+void extender_set_pairing_dir(const char *dir);
+
 /* --- session lifecycle --- */
 
 /* capture_mode for extender_session_connect. */

@@ -1,39 +1,45 @@
-//! Transport encryption for the Universal Screens LAN protocol.
+//! Transport encryption and pairing for the Universal Screens LAN protocol.
 //!
-//! The wire protocol (`crates/protocol`) is length-prefixed `postcard` frames over
-//! plaintext TCP, gated by a 4-digit pairing PIN. Historically the PIN was *a gate,
-//! not encryption*: anyone on the LAN could read the stream (mirror video, injected
-//! keystrokes/text) or, on-path, tamper with it. This crate closes that gap.
+//! The wire protocol (`crates/protocol`) is length-prefixed `postcard` frames.
+//! This crate wraps the TCP stream they travel on in a **Noise** tunnel, and
+//! decides who is allowed to open one.
 //!
-//! ## What it does
+//! ## Two handshakes, one of them retired
 //!
-//! A native client, right after `TcpStream::connect`, runs a **Noise** handshake
-//! ([`connect`]) — `Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s` — before it sends its
-//! [`ClientHello`](../extender_protocol/struct.ClientHello.html). The PIN is folded
-//! in as the Noise **pre-shared key** ([`derive_psk`]), so:
+//! **v2 — what every current client runs** ([`handshake`] has the details):
 //!
-//! - **Confidentiality + forward secrecy:** the ephemeral-ephemeral (`NN`) DH means
-//!   a passive eavesdropper on the LAN learns nothing, even if the PIN later leaks.
-//! - **PIN-bound MITM resistance:** an active on-path attacker can't complete the
-//!   handshake (or silently relay it) without knowing the PIN, because the PSK keys
-//!   the AEAD. This is what makes the PIN *encryption*, not just a gate.
+//! - **Pairing** ([`connect_pair`]): the 4-digit code goes through **SPAKE2**
+//!   (`unisim-pake`), and the Noise handshake (`XXpsk0`) is keyed by the
+//!   result. A recording of it gives an eavesdropper nothing to test codes
+//!   against; someone actively guessing gets one try per connection, and the
+//!   host counts it ([`is_pin_rejection`] → [`PinGuard`]). Inside it the two
+//!   ends swap long-term keys and remember each other ([`PairingStore`]).
+//! - **Reconnecting** ([`connect_known`]): `XX` with the remembered keys and no
+//!   code at all, so a paired phone reconnects after the host restarts with a
+//!   new PIN.
 //!
-//! The existing plaintext-`ClientHello` PIN check is **kept unchanged** on top of
-//! the tunnel (belt and suspenders) — this layer never weakens the existing auth.
+//! **v1 — `NNpsk0` keyed by `SHA-256(domain ‖ PIN)`** — is what v0.3 and earlier
+//! spoke. Its first message is authenticated by a fixed function of the PIN,
+//! so one recorded connection let anyone try all 10,000 PINs offline. Hosts
+//! still **accept** it, so old clients are not stranded (the same call as
+//! plaintext, below); no current client sends it to a host that can do better.
+//!
+//! Either way the tunnel gives confidentiality and forward secrecy (ephemeral
+//! Diffie-Hellman), and the host's in-tunnel `ClientHello` PIN check stays on
+//! top for everything except a v2 peer, whose handshake already settled it
+//! ([`PeerAuth::settles_pin`]).
 //!
 //! ## Compatibility
 //!
-//! The host [`accept`]s a connection by peeking the first bytes:
+//! The host [`accept_with`]s a connection by peeking the first bytes:
 //!
-//! - A [`PREAMBLE`] marker ⇒ an encrypted native client ⇒ run the Noise responder
-//!   and hand back an encrypted [`Conn`].
-//! - Anything else ⇒ a legacy plaintext peer or the loopback WebSocket bridge
-//!   (`crates/web-bridge`, which forwards raw frames from a browser tab and can't
-//!   speak Noise) ⇒ hand back a plaintext [`Conn`] (logged by the caller).
+//! - the v2 [`OPENING`](handshake::OPENING) ⇒ pair, or let a remembered device in;
+//! - the [`PREAMBLE`] with an ordinary length ⇒ a v1 client ⇒ the v1 responder;
+//! - anything else ⇒ a legacy plaintext peer or the loopback WebSocket bridge
+//!   relaying a tab that could not encrypt ⇒ a plaintext [`Conn`].
 //!
-//! So encryption is on by default for every native client, without breaking the
-//! browser-bridge path or an older plaintext client. Requiring encryption from
-//! non-loopback peers is a follow-up hardening once every client ships this build.
+//! Refusing v1 and plaintext from non-loopback peers is the follow-up once no
+//! v0.3 client is left; until then, hosts log which kind each peer was.
 //!
 //! ## Framing
 //!
@@ -47,11 +53,11 @@
 //!
 //! ## Where the socket isn't
 //!
-//! The handshake and the record layer live in [`session`], which touches no
-//! socket at all — it is bytes in, bytes out. That is what allows the **browser**
-//! client, whose carrier is a WebSocket, to run the same tunnel with the same
-//! code rather than a JavaScript re-implementation of the same wire format.
-//! Everything in this file is the `TcpStream` adapter on top of it.
+//! The client handshakes and the record layer live in [`session`], which touches
+//! no socket at all — it is bytes in, bytes out. That is what allows the
+//! **browser** client, whose carrier is a WebSocket, to run the same tunnel with
+//! the same code rather than a JavaScript re-implementation of the same wire
+//! format. Everything in this file is the `TcpStream` adapter on top of it.
 
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
@@ -68,8 +74,22 @@ pub mod session;
 /// Wrong-PIN rate limiting for the hosts' accept loops — see [`PinGuard`].
 pub mod guard;
 
+/// The v2 handshake's wire constants and failure kinds.
+pub mod handshake;
+
+/// This device's long-term key and the devices it has paired with.
+pub mod pairing;
+
 pub use guard::PinGuard;
-pub use session::{Initiator, Session};
+pub use handshake::{failure, Failure};
+pub use pairing::{Identity, PairedPeer, PairingStore};
+pub use session::{ClientHandshake, Established, Initiator, Session, Step};
+
+use handshake::{
+    code_bytes, MODE_KNOWN, MODE_PAIR, OPENING, PAIR_CONTEXT, PSK_LABEL, STATUS_GO, STATUS_LOCKED,
+    STATUS_UNSUPPORTED, VERDICT_NOT_PAIRED, VERDICT_OK, VERSION_ESCAPE,
+};
+use unisim_pake::{Pake, Role};
 
 /// The inner error of an [`accept`] that failed because the peer's first Noise
 /// message did not authenticate — which, since the PIN keys that message, is
@@ -94,9 +114,43 @@ pub fn is_pin_rejection(e: &io::Error) -> bool {
     e.get_ref().is_some_and(|inner| inner.is::<PinRejected>())
 }
 
-/// The Noise handshake pattern + crypto suite. `NNpsk0`: ephemeral-ephemeral (no
-/// static keys to distribute) with the PIN mixed in as a pre-shared key at the
-/// very start of the handshake.
+/// How the far end of a [`Conn`] was authenticated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerAuth {
+    /// Not encrypted at all: a legacy client, or the loopback web bridge
+    /// relaying a tab that could not encrypt.
+    Plaintext,
+    /// **v1**: encrypted, keyed by a hash of the PIN. It proves the PIN, but a
+    /// recording of it lets the PIN be guessed offline. Only clients from v0.3
+    /// and before (and a browser tab facing a v0.3 host) still speak it.
+    LegacyPin,
+    /// **v2**, paired on this connection: the code was proven by SPAKE2.
+    Paired {
+        /// The peer's long-term public key.
+        key: [u8; pairing::KEY_LEN],
+    },
+    /// **v2**, a remembered device: its long-term key is on the paired list
+    /// (or the host has pairing switched off and lets anyone in).
+    Known {
+        /// The peer's long-term public key.
+        key: [u8; pairing::KEY_LEN],
+    },
+}
+
+impl PeerAuth {
+    /// Whether the transport itself already settled the PIN question, so the
+    /// host's older in-tunnel `ClientHello` PIN check must be skipped. A
+    /// remembered device does not send the current PIN — that is the point of
+    /// remembering it.
+    #[must_use]
+    pub fn settles_pin(self) -> bool {
+        matches!(self, PeerAuth::Paired { .. } | PeerAuth::Known { .. })
+    }
+}
+
+/// The **v1** Noise handshake pattern + crypto suite. `NNpsk0`:
+/// ephemeral-ephemeral with a hash of the PIN as the pre-shared key. Kept for
+/// compatibility only — see [`handshake`] for v2 and why it replaced this.
 pub const NOISE_PARAMS: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 
 /// Marker a native (encrypting) client writes before its first Noise message, so
@@ -165,10 +219,13 @@ fn noise_params() -> io::Result<snow::params::NoiseParams> {
 }
 
 /// Write one length-prefixed handshake message (`u16` LE length + body).
+///
+/// ⚠️ One write, not two. Writing the length and then the body as separate
+/// small writes meets Nagle's algorithm on the second one, which then waits for
+/// the peer's delayed ACK — up to 40 ms on Linux and 200 ms on Windows, per
+/// message, and v2 has three host messages.
 fn write_handshake_msg<W: Write>(w: &mut W, body: &[u8]) -> io::Result<()> {
-    let len = u16::try_from(body.len()).map_err(|_| noise_err("handshake message too large"))?;
-    w.write_all(&len.to_le_bytes())?;
-    w.write_all(body)?;
+    w.write_all(&handshake::frame(body)?)?;
     w.flush()
 }
 
@@ -185,19 +242,18 @@ fn read_handshake_msg<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
     Ok(body)
 }
 
-/// Perform the Noise **initiator** handshake as the client: write the [`PREAMBLE`],
-/// exchange the two `NNpsk0` handshake messages, and return an encrypted [`Conn`].
-/// `pin` is the pairing PIN (0 = none) — it must match the host's or the handshake
-/// fails. Call this immediately after `TcpStream::connect`, before any framing.
+/// **v1** client handshake: write the [`PREAMBLE`], exchange the two `NNpsk0`
+/// messages keyed by a hash of `pin`, and return an encrypted [`Conn`].
+///
+/// ⚠️ **Compatibility and tests only.** Its first message lets anyone who
+/// records it guess the PIN offline. Current clients use [`connect_pair`] /
+/// [`connect_known`]; this stays so the hosts' acceptance of v0.3 clients can be
+/// tested.
 ///
 /// # Errors
 /// Returns an error if the preamble/handshake write or read fails, or the peer
 /// rejects the handshake (e.g. a PIN mismatch, which fails the AEAD).
-pub fn connect(mut stream: TcpStream, pin: u32) -> io::Result<Conn> {
-    // The handshake itself is socket-free (`session::Initiator`), so this
-    // function is only the I/O: send what it produced, read the reply, hand it
-    // back. That split is what lets a browser — which has a WebSocket and no
-    // TcpStream — run the identical handshake. See `session.rs`.
+pub fn connect_v1(mut stream: TcpStream, pin: u32) -> io::Result<Conn> {
     let (init, first) = session::Initiator::start(pin)?;
     stream.write_all(&first)?; // PREAMBLE + the length-prefixed `-> psk, e`
     stream.flush()?;
@@ -210,32 +266,161 @@ pub fn connect(mut stream: TcpStream, pin: u32) -> io::Result<Conn> {
         .to_vec();
     reply.extend_from_slice(&msg);
 
-    Ok(Conn::Secure(SecureStream::new(stream, init.finish(&reply)?)))
+    Ok(Conn::Secure(SecureStream::new(stream, init.finish(&reply)?, PeerAuth::LegacyPin)))
 }
 
-/// Accept a connection as the host: peek the first bytes to decide whether the peer
-/// is an encrypting native client (runs the Noise **responder** handshake, keyed by
-/// `expected_pin`) or a legacy/loopback plaintext peer (returned as-is). Nothing is
-/// consumed on the plaintext path, so the caller's existing `read_framed` sees an
-/// intact stream.
+/// **Pair** with a host over its code (v2): SPAKE2, then `Noise_XXpsk0`. On
+/// success the returned [`Established`]-style tuple carries the host's
+/// long-term key — remember it (when `pin != 0`) so the next connection can use
+/// [`connect_known`] and skip the code.
+///
+/// Call it immediately after `TcpStream::connect`, before any framing.
+///
+/// # Errors
+/// I/O errors, or a [`Failure`] (read it with [`failure`]): `WrongCode`,
+/// `HostLocked`, `OlderHost` (a v0.3 host, which cannot pair this way).
+pub fn connect_pair(stream: TcpStream, pin: u32, identity: &Identity) -> io::Result<(Conn, [u8; 32])> {
+    let (hs, first) = ClientHandshake::pair(pin, identity)?;
+    drive_client(stream, hs, &first)
+}
+
+/// **Reconnect** to a host this device has paired with (v2): `Noise_XX` with
+/// long-term keys, no code. `trusted` is every host key this device accepts.
+///
+/// # Errors
+/// I/O errors, or a [`Failure`]: `NotPaired` (the host does not know, or has
+/// forgotten, this device — pair again with the code), `UnknownHost` (the far
+/// end is not a host this device paired with), `OlderHost`.
+pub fn connect_known(
+    stream: TcpStream,
+    identity: &Identity,
+    trusted: Vec<[u8; 32]>,
+) -> io::Result<(Conn, [u8; 32])> {
+    let (hs, first) = ClientHandshake::reconnect(identity, trusted)?;
+    drive_client(stream, hs, &first)
+}
+
+/// Run a [`ClientHandshake`] over a socket: the same state machine a browser
+/// drives over a WebSocket, with the socket as nothing but a byte carrier.
+fn drive_client(
+    mut stream: TcpStream,
+    mut hs: ClientHandshake,
+    first: &[u8],
+) -> io::Result<(Conn, [u8; 32])> {
+    stream.write_all(first)?;
+    stream.flush()?;
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = match stream.read(&mut chunk) {
+            Ok(n) => n,
+            // ⚠️ A host that closes with our bytes still unread in its buffer
+            // makes the OS send a reset, not a clean close — which is exactly
+            // how a v0.3 host turns a v2 opening away. Same meaning as EOF.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe
+                ) =>
+            {
+                0
+            }
+            Err(e) => return Err(e),
+        };
+        if n == 0 {
+            return Err(hs.closed());
+        }
+        match hs.feed(&chunk[..n])? {
+            Step::Continue(out) => {
+                if !out.is_empty() {
+                    stream.write_all(&out)?;
+                    stream.flush()?;
+                }
+            }
+            Step::Done { send, established } => {
+                if !send.is_empty() {
+                    stream.write_all(&send)?;
+                    stream.flush()?;
+                }
+                let key = established.host_key;
+                let auth = if established.paired { PeerAuth::Paired { key } } else { PeerAuth::Known { key } };
+                return Ok((Conn::Secure(SecureStream::new(stream, established.session, auth)), key));
+            }
+        }
+    }
+}
+
+/// Accept a connection as the host, with a throwaway identity and no memory
+/// of paired devices: every v2 client must pair with the code, every time.
+/// For tests and the development host; the real hosts use [`accept_with`].
+///
+/// # Errors
+/// As [`accept_with`].
+pub fn accept(stream: TcpStream, expected_pin: u32) -> io::Result<Conn> {
+    let mut store = PairingStore::ephemeral()?;
+    accept_with(stream, expected_pin, &mut store, "")
+}
+
+/// Accept a connection as the host. Peeks the first bytes to tell:
+///
+/// - a **v2** client (the [`OPENING`](handshake::OPENING)) — pair it over the
+///   code with SPAKE2, or let a remembered device in by its key, per
+///   [`handshake`];
+/// - a **v1** client (the [`PREAMBLE`] and a real length) — the v0.3 `NNpsk0`
+///   handshake keyed by a hash of the PIN, still accepted so old clients keep
+///   working;
+/// - anything else — a legacy/loopback plaintext peer, returned untouched.
+///
+/// `store` is this host's identity and paired list; a successful pairing (with
+/// a non-zero PIN) is added to it and saved, labelled `peer_label`. It is
+/// re-read from disk first, so a "Forget paired devices" made elsewhere takes
+/// effect on the next connection.
+///
+/// Nothing is consumed on the plaintext path, so the caller's `read_framed`
+/// sees an intact stream.
 ///
 /// # Errors
 /// Returns an error if peeking, the handshake, or the underlying socket fails.
-pub fn accept(stream: TcpStream, expected_pin: u32) -> io::Result<Conn> {
+/// A wrong code is marked — test with [`is_pin_rejection`] — and is the only
+/// failure that should count towards a [`PinGuard`] lockout.
+pub fn accept_with(
+    stream: TcpStream,
+    expected_pin: u32,
+    store: &mut PairingStore,
+    peer_label: &str,
+) -> io::Result<Conn> {
     if !peek_is_preamble(&stream)? {
         return Ok(Conn::Plain(stream));
     }
-    accept_encrypted(stream, expected_pin)
+    accept_encrypted(stream, expected_pin, store, peer_label)
 }
 
 /// Run the responder handshake on a stream already known to start with the
-/// [`PREAMBLE`] (peeked by [`accept`]). Split out so it stays testable in isolation.
-fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn> {
+/// [`PREAMBLE`] (peeked by [`accept_with`]): v2 if the version escape follows,
+/// v1 otherwise.
+fn accept_encrypted(
+    mut stream: TcpStream,
+    expected_pin: u32,
+    store: &mut PairingStore,
+    peer_label: &str,
+) -> io::Result<Conn> {
     let mut pre = [0u8; PREAMBLE.len()];
     stream.read_exact(&mut pre)?;
     if pre != PREAMBLE {
         return Err(noise_err("client preamble mismatch"));
     }
+    let mut len_buf = [0u8; 2];
+    stream.read_exact(&mut len_buf)?;
+    if len_buf == VERSION_ESCAPE {
+        return accept_v2(stream, expected_pin, store, peer_label);
+    }
+
+    // ---- v1: NNpsk0 keyed by a hash of the PIN (v0.3 clients) ----------------
+    let len = u16::from_le_bytes(len_buf) as usize;
+    if len > MAX_HANDSHAKE_MSG {
+        return Err(noise_err("handshake message exceeds the maximum size"));
+    }
+    let mut msg = vec![0u8; len];
+    stream.read_exact(&mut msg)?;
 
     let psk = derive_psk(expected_pin);
     let mut hs = snow::Builder::new(noise_params()?)
@@ -244,7 +429,6 @@ fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn
         .map_err(noise_err)?;
 
     // -> psk, e
-    let msg = read_handshake_msg(&mut stream)?;
     let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
     // ⚠️ This is the line a wrong PIN fails on: the PSK keys this message's
     // AEAD tag. Its error is marked (`PinRejected`) so the host can count it
@@ -259,7 +443,144 @@ fn accept_encrypted(mut stream: TcpStream, expected_pin: u32) -> io::Result<Conn
     write_handshake_msg(&mut stream, &buf[..n])?;
 
     let transport = hs.into_transport_mode().map_err(noise_err)?;
-    Ok(Conn::Secure(SecureStream::new(stream, Session::from_transport(transport))))
+    Ok(Conn::Secure(SecureStream::new(stream, Session::from_transport(transport), PeerAuth::LegacyPin)))
+}
+
+/// The v2 responder. See [`handshake`] for the message sequence.
+fn accept_v2(
+    mut stream: TcpStream,
+    expected_pin: u32,
+    store: &mut PairingStore,
+    peer_label: &str,
+) -> io::Result<Conn> {
+    let mut head = [0u8; 2];
+    stream.read_exact(&mut head)?;
+    let [version, mode] = head;
+    if version != handshake::HANDSHAKE_VERSION || !matches!(mode, MODE_PAIR | MODE_KNOWN) {
+        let _ = write_handshake_msg(&mut stream, &[STATUS_UNSUPPORTED]);
+        return Err(noise_err(format!("unsupported handshake version {version} / mode {mode}")));
+    }
+    // Pick up a "Forget paired devices" made in the host window since the
+    // last connection — before anything below can write the list back.
+    let _ = store.reload();
+    let mut prologue = OPENING.to_vec();
+    prologue.push(mode);
+    let secret = store.identity().secret();
+    let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
+    let mut buf = [0u8; MAX_HANDSHAKE_MSG];
+
+    if mode == MODE_PAIR {
+        // -> SPAKE2 A
+        let msg_a = read_handshake_msg(&mut stream)?;
+        prologue.extend_from_slice(&handshake::frame(&msg_a)?);
+        // <- status, SPAKE2 B. Independent of A, and keyed by nothing yet:
+        // nothing the host sends before the client's proof can be used to
+        // test a code.
+        let (pake, msg_b) = Pake::start(Role::Responder, &code_bytes(expected_pin), PAIR_CONTEXT);
+        let mut reply = vec![STATUS_GO];
+        reply.extend_from_slice(&msg_b);
+        prologue.extend_from_slice(&handshake::frame(&reply)?);
+        write_handshake_msg(&mut stream, &reply)?;
+        // A malformed A is not a guess — nothing about the code was tested.
+        let key = pake.finish(&msg_a).map_err(noise_err)?;
+        let psk = key.derive(PSK_LABEL);
+        let mut hs = snow::Builder::new(handshake::pair_params()?)
+            .local_private_key(&secret)
+            .psk(0, &psk)
+            .prologue(&prologue)
+            .build_responder()
+            .map_err(noise_err)?;
+
+        // -> psk, e
+        let m1 = read_handshake_msg(&mut stream)?;
+        // ⚠️ THE guess. The client's first Noise message is keyed by its
+        // SPAKE2 result, which matches ours only if its code does. Marked so
+        // the host counts it: one wrong code, one counted attempt.
+        hs.read_message(&m1, &mut scratch)
+            .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, PinRejected(e)))?;
+        // <- e, ee, s, es
+        let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+        write_handshake_msg(&mut stream, &buf[..n])?;
+        // -> s, se
+        let m3 = read_handshake_msg(&mut stream)?;
+        hs.read_message(&m3, &mut scratch).map_err(noise_err)?;
+        let client_key = remote_static_key(&hs)?;
+        let mut session = Session::from_transport(hs.into_transport_mode().map_err(noise_err)?);
+        // With pairing switched off (PIN 0) everyone is let in anyway, so
+        // there is nothing to remember — and a device that came in while it was
+        // off must not stay trusted once a PIN is set.
+        if expected_pin != 0 {
+            // Best effort: a failed save still lets this session in; the device
+            // simply pairs again next time.
+            let _ = store.remember(client_key, peer_label);
+        }
+        stream.write_all(&session.seal(&[VERDICT_OK])?)?;
+        stream.flush()?;
+        return Ok(Conn::Secure(SecureStream::new(stream, session, PeerAuth::Paired { key: client_key })));
+    }
+
+    // ---- MODE_KNOWN: remembered keys, no code ----------------------------------
+    let mut hs = snow::Builder::new(handshake::known_params()?)
+        .local_private_key(&secret)
+        .prologue(&prologue)
+        .build_responder()
+        .map_err(noise_err)?;
+    // -> e
+    let m1 = read_handshake_msg(&mut stream)?;
+    hs.read_message(&m1, &mut scratch).map_err(noise_err)?;
+    // <- status, (e, ee, s, es)
+    let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+    let mut reply = vec![STATUS_GO];
+    reply.extend_from_slice(&buf[..n]);
+    write_handshake_msg(&mut stream, &reply)?;
+    // -> s, se. A client that does not recognise this host's key stops before
+    // this and hangs up — not a guess, just a stranger.
+    let m3 = read_handshake_msg(&mut stream)?;
+    hs.read_message(&m3, &mut scratch).map_err(noise_err)?;
+    let client_key = remote_static_key(&hs)?;
+    let mut session = Session::from_transport(hs.into_transport_mode().map_err(noise_err)?);
+    if expected_pin != 0 && !store.is_paired(&client_key) {
+        // Say so inside the tunnel, so the client knows to ask for the code
+        // rather than reporting a broken connection. Not a guess: no code was
+        // tested.
+        let _ = stream.write_all(&session.seal(&[VERDICT_NOT_PAIRED])?);
+        let _ = stream.flush();
+        return Err(Failure::NotPaired.into_io());
+    }
+    stream.write_all(&session.seal(&[VERDICT_OK])?)?;
+    stream.flush()?;
+    Ok(Conn::Secure(SecureStream::new(stream, session, PeerAuth::Known { key: client_key })))
+}
+
+fn remote_static_key(hs: &snow::HandshakeState) -> io::Result<[u8; 32]> {
+    let key = hs.get_remote_static().ok_or_else(|| noise_err("the peer sent no static key"))?;
+    <[u8; 32]>::try_from(key).map_err(|_| noise_err("the peer's static key has the wrong length"))
+}
+
+/// Turn a connection away while the host is locked after wrong codes, telling
+/// a **v2** client why and for how long, so its user sees "try again in 2
+/// minutes" rather than a bare refusal. Anything else is simply closed, as
+/// before. Tests no code.
+///
+/// Bounded to about a second, since it runs on the accept loop's own thread.
+pub fn refuse_locked(mut stream: TcpStream, left: Duration) {
+    // Accepted from a non-blocking listener, the socket may be non-blocking
+    // too (macOS and Windows both pass it on); the timeouts need it blocking.
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    let mut head = [0u8; OPENING.len() + 1];
+    if stream.read_exact(&mut head).is_err() || head[..OPENING.len()] != OPENING {
+        return;
+    }
+    // Drain the client's first message too: closing with its bytes unread
+    // makes the OS send a reset, which can arrive before our reply is read.
+    let _ = read_handshake_msg(&mut stream);
+    let seconds = u32::try_from(left.as_secs().max(1)).unwrap_or(u32::MAX);
+    let mut reply = vec![STATUS_LOCKED];
+    reply.extend_from_slice(&seconds.to_le_bytes());
+    let _ = write_handshake_msg(&mut stream, &reply);
+    let _ = stream.shutdown(Shutdown::Write);
 }
 
 /// Peek (without consuming) enough bytes to tell whether the peer opened with the
@@ -371,6 +692,15 @@ impl Conn {
         matches!(self, Conn::Secure(_))
     }
 
+    /// How the far end was authenticated.
+    #[must_use]
+    pub fn auth(&self) -> PeerAuth {
+        match self {
+            Conn::Plain(_) => PeerAuth::Plaintext,
+            Conn::Secure(s) => s.auth,
+        }
+    }
+
     fn tcp(&self) -> &TcpStream {
         match self {
             Conn::Plain(s) => s,
@@ -413,17 +743,20 @@ pub struct SecureStream {
     /// spans reads. Shared between the read and write clones, which is what
     /// keeps nonce order equal to wire order.
     session: Arc<Mutex<Session>>,
+    /// How the far end proved itself.
+    auth: PeerAuth,
 }
 
 impl SecureStream {
-    fn new(inner: TcpStream, session: Session) -> Self {
-        SecureStream { inner, session: Arc::new(Mutex::new(session)) }
+    fn new(inner: TcpStream, session: Session, auth: PeerAuth) -> Self {
+        SecureStream { inner, session: Arc::new(Mutex::new(session)), auth }
     }
 
     fn try_clone(&self) -> io::Result<SecureStream> {
         Ok(SecureStream {
             inner: self.inner.try_clone()?,
             session: Arc::clone(&self.session),
+            auth: self.auth,
         })
     }
 }
@@ -568,7 +901,7 @@ mod tests {
         });
         let client_sock = TcpStream::connect(addr)?;
         client_sock.set_read_timeout(Some(TEST_IO_TIMEOUT))?;
-        let client = connect(client_sock, pin_client)?;
+        let client = connect_v1(client_sock, pin_client)?;
         let server = host.join().unwrap()?;
         Ok((client, server))
     }
@@ -675,7 +1008,7 @@ mod tests {
             }
             seen
         });
-        let mut client = connect(TcpStream::connect(addr).unwrap(), 7777).unwrap();
+        let mut client = connect_v1(TcpStream::connect(addr).unwrap(), 7777).unwrap();
         // Write the secret a few times so there's plenty on the wire to scan.
         for _ in 0..4 {
             client.write_all(secret).unwrap();
@@ -828,7 +1161,7 @@ mod tests {
         });
         let sock = TcpStream::connect(addr).unwrap();
         sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
-        assert!(connect(sock, 2222).is_err());
+        assert!(connect_v1(sock, 2222).is_err());
         let err = host.join().unwrap().err().expect("host must reject a wrong PIN");
         assert!(is_pin_rejection(&err), "{err}");
     }
@@ -858,5 +1191,373 @@ mod tests {
         let e = io::Error::new(io::ErrorKind::UnexpectedEof, "gone");
         assert!(!is_pin_rejection(&e));
         assert!(!is_pin_rejection(&noise_err("handshake message exceeds the maximum size")));
+    }
+
+    // ---- v2: pairing with SPAKE2, reconnecting with remembered keys --------
+
+    /// A v2 host on a loopback port, running `accept_with` against `store`
+    /// once, handing back what it returned and the store.
+    fn v2_host(
+        pin: u32,
+        store: PairingStore,
+    ) -> (std::net::SocketAddr, thread::JoinHandle<(io::Result<Conn>, PairingStore)>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let mut store = store;
+            let (sock, peer) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+            let conn = accept_with(sock, pin, &mut store, &peer.to_string());
+            (conn, store)
+        });
+        (addr, host)
+    }
+
+    fn client_sock(addr: std::net::SocketAddr) -> TcpStream {
+        let s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(TEST_IO_TIMEOUT)).unwrap();
+        s
+    }
+
+    fn round_trip(client: &mut Conn, server: &mut Conn) {
+        client.write_all(b"ping over v2").unwrap();
+        let mut got = [0u8; 12];
+        server.read_exact(&mut got).unwrap();
+        assert_eq!(&got, b"ping over v2");
+        server.write_all(b"pong").unwrap();
+        let mut back = [0u8; 4];
+        client.read_exact(&mut back).unwrap();
+        assert_eq!(&back, b"pong");
+    }
+
+    /// Pair `client` with a host whose store is `host_store`; return the host's
+    /// store afterwards and the host key the client learned.
+    /// What [`pair_once`] hands back: the client's result, the host's, and the
+    /// host's store afterwards.
+    type PairOutcome = (io::Result<(Conn, [u8; 32])>, io::Result<Conn>, PairingStore);
+
+    fn pair_once(pin_host: u32, pin_client: u32, host_store: PairingStore, client: &Identity) -> PairOutcome {
+        let (addr, host) = v2_host(pin_host, host_store);
+        let c = connect_pair(client_sock(addr), pin_client, client);
+        let (h, store) = host.join().unwrap();
+        (c, h, store)
+    }
+
+    #[test]
+    fn pairing_with_the_right_code_opens_the_tunnel_and_both_ends_learn_the_keys() {
+        let host_store = PairingStore::ephemeral().unwrap();
+        let host_public = host_store.identity().public();
+        let me = Identity::generate().unwrap();
+        let (c, h, store) = pair_once(4321, 4321, host_store, &me);
+        let (mut client, host_key) = c.unwrap();
+        let mut server = h.unwrap();
+        assert_eq!(host_key, host_public, "the client learned the host's real key");
+        assert_eq!(client.auth(), PeerAuth::Paired { key: host_public });
+        assert_eq!(server.auth(), PeerAuth::Paired { key: me.public() });
+        assert!(server.auth().settles_pin());
+        assert!(store.is_paired(&me.public()), "the host remembers the device it paired");
+        round_trip(&mut client, &mut server);
+    }
+
+    #[test]
+    fn a_remembered_device_reconnects_with_no_code_even_after_the_pin_changed() {
+        let me = Identity::generate().unwrap();
+        let (c, _h, store) = pair_once(4321, 4321, PairingStore::ephemeral().unwrap(), &me);
+        let (_, host_key) = c.unwrap();
+
+        // The host restarted with a fresh PIN; the device has no code at all.
+        let (addr, host) = v2_host(9876, store);
+        let (mut client, key) = connect_known(client_sock(addr), &me, vec![host_key]).unwrap();
+        let (h, _) = host.join().unwrap();
+        let mut server = h.unwrap();
+        assert_eq!(key, host_key);
+        assert_eq!(server.auth(), PeerAuth::Known { key: me.public() });
+        round_trip(&mut client, &mut server);
+    }
+
+    #[test]
+    fn a_forgotten_device_is_told_to_pair_again_and_it_is_not_a_guess() {
+        let me = Identity::generate().unwrap();
+        let (c, _h, mut store) = pair_once(4321, 4321, PairingStore::ephemeral().unwrap(), &me);
+        let (_, host_key) = c.unwrap();
+        store.forget_all().unwrap();
+
+        let (addr, host) = v2_host(4321, store);
+        let err = connect_known(client_sock(addr), &me, vec![host_key]).err().expect("forgotten");
+        assert_eq!(failure(&err), Some(Failure::NotPaired), "{err}");
+        let (h, _) = host.join().unwrap();
+        let host_err = h.err().expect("the host refuses it");
+        assert!(!is_pin_rejection(&host_err), "no code was tested: {host_err}");
+    }
+
+    #[test]
+    fn a_stranger_answering_is_refused_before_the_client_reveals_its_key() {
+        let me = Identity::generate().unwrap();
+        let stranger = PairingStore::ephemeral().unwrap();
+        let (addr, host) = v2_host(4321, stranger);
+        let trusted = vec![[0x11u8; 32]]; // some other host's key
+        let err = connect_known(client_sock(addr), &me, trusted).err().expect("not our host");
+        assert_eq!(failure(&err), Some(Failure::UnknownHost), "{err}");
+        let (h, store) = host.join().unwrap();
+        let host_err = h.err().expect("the client hung up before message 3");
+        assert!(!is_pin_rejection(&host_err));
+        assert!(!store.is_paired(&me.public()));
+    }
+
+    /// The online side of the fix: a wrong code is tested by the host exactly
+    /// once per connection, reported so the lockout counts it, and the
+    /// connection ends there.
+    #[test]
+    fn a_wrong_code_costs_exactly_one_counted_attempt() {
+        let me = Identity::generate().unwrap();
+        let mut guard = PinGuard::new();
+        let (c, h, store) = pair_once(1111, 2222, PairingStore::ephemeral().unwrap(), &me);
+        let err = c.err().expect("a wrong code must not open a tunnel");
+        assert_eq!(failure(&err), Some(Failure::WrongCode), "{err}");
+        let host_err = h.err().expect("the host refuses it");
+        assert!(is_pin_rejection(&host_err), "a wrong code must count: {host_err}");
+        guard.record_failure(std::time::Instant::now());
+        assert_eq!(guard.failures(), 1);
+        assert!(!store.is_paired(&me.public()));
+    }
+
+    /// A peer that sends the opening and its SPAKE2 message, takes the host's,
+    /// and hangs up has tested nothing — the host sent nothing keyed by the
+    /// code — so it must not count, or anyone could lock the owner out.
+    #[test]
+    fn a_peer_that_hangs_up_after_the_pake_messages_is_not_a_guess() {
+        let me = Identity::generate().unwrap();
+        let (addr, host) = v2_host(1111, PairingStore::ephemeral().unwrap());
+        let mut sock = client_sock(addr);
+        let (mut hs, first) = ClientHandshake::pair(2222, &me).unwrap();
+        sock.write_all(&first).unwrap();
+        let mut chunk = [0u8; 256];
+        // The host's reply may arrive in pieces; feed until the handshake has
+        // its proof ready to send — and then never send it.
+        loop {
+            let n = sock.read(&mut chunk).unwrap();
+            assert_ne!(n, 0, "the host hung up first");
+            if matches!(hs.feed(&chunk[..n]).unwrap(), Step::Continue(ref out) if !out.is_empty()) {
+                break;
+            }
+        }
+        drop(sock);
+        let (h, _) = host.join().unwrap();
+        assert!(!is_pin_rejection(&h.err().expect("an abandoned handshake is an error")));
+    }
+
+    #[test]
+    fn a_host_with_pairing_off_lets_anyone_in_and_remembers_nobody() {
+        let me = Identity::generate().unwrap();
+        let (c, h, store) = pair_once(0, 0, PairingStore::ephemeral().unwrap(), &me);
+        let (_, host_key) = c.unwrap();
+        assert!(h.is_ok());
+        assert!(store.peers().is_empty(), "nothing to remember when nobody is kept out");
+        // Known mode is let in too, without being on any list.
+        let (addr, host) = v2_host(0, store);
+        assert!(connect_known(client_sock(addr), &me, vec![host_key]).is_ok());
+        assert!(host.join().unwrap().0.is_ok());
+    }
+
+    /// The compatibility call: a v0.3 client (v1, `NNpsk0`) still gets in.
+    #[test]
+    fn a_v1_client_is_still_accepted_and_marked_legacy() {
+        let (addr, host) = v2_host(4321, PairingStore::ephemeral().unwrap());
+        let mut client = connect_v1(client_sock(addr), 4321).unwrap();
+        let (h, store) = host.join().unwrap();
+        let mut server = h.unwrap();
+        assert_eq!(server.auth(), PeerAuth::LegacyPin);
+        assert!(!server.auth().settles_pin(), "a v1 client still sends its PIN in the hello");
+        assert!(store.peers().is_empty());
+        round_trip(&mut client, &mut server);
+    }
+
+    /// What a v0.3 host does with a v2 opening — read the preamble and a
+    /// length, find it over its 4 KiB bound, close — reproduced line for line
+    /// from v0.3's `accept_encrypted`. The client must say "older host", fast.
+    #[test]
+    fn a_v2_client_facing_a_v03_host_is_told_the_host_is_older() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let old_host = thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut pre = [0u8; PREAMBLE.len()];
+            sock.read_exact(&mut pre).unwrap();
+            assert!(read_handshake_msg(&mut sock).is_err(), "v0.3 refuses the escape length");
+        });
+        let me = Identity::generate().unwrap();
+        let started = std::time::Instant::now();
+        let err = connect_pair(client_sock(addr), 4321, &me).err().expect("v0.3 cannot pair");
+        assert_eq!(failure(&err), Some(Failure::OlderHost), "{err}");
+        assert!(started.elapsed() < TEST_IO_TIMEOUT, "it must not wait for a timeout");
+        old_host.join().unwrap();
+    }
+
+    #[test]
+    fn a_locked_host_tells_a_v2_client_how_long_to_wait() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            refuse_locked(sock, Duration::from_secs(120));
+        });
+        let me = Identity::generate().unwrap();
+        let err = connect_pair(client_sock(addr), 4321, &me).err().expect("locked");
+        assert_eq!(failure(&err), Some(Failure::HostLocked { seconds: 120 }), "{err}");
+        host.join().unwrap();
+    }
+
+    #[test]
+    fn an_unknown_handshake_version_is_answered_not_misread() {
+        let (addr, host) = v2_host(4321, PairingStore::ephemeral().unwrap());
+        let mut sock = client_sock(addr);
+        let mut opening = OPENING.to_vec();
+        *opening.last_mut().unwrap() = 3; // a future v3
+        opening.push(MODE_PAIR);
+        sock.write_all(&opening).unwrap();
+        let reply = read_handshake_msg(&mut sock).unwrap();
+        assert_eq!(reply, vec![STATUS_UNSUPPORTED]);
+        let (h, _) = host.join().unwrap();
+        assert!(!is_pin_rejection(&h.err().unwrap()));
+    }
+
+    // ---- the offline attack, on a recording ---------------------------------
+
+    /// Everything that crossed the wire during one pairing, as an eavesdropper
+    /// on the network would record it.
+    struct Recording {
+        /// Client → host bytes.
+        up: Vec<u8>,
+        /// Host → client bytes.
+        down: Vec<u8>,
+    }
+
+    /// Pair once with the real client state machine against the real host,
+    /// keeping a copy of every byte each way.
+    fn record_v2_pairing(pin: u32) -> Recording {
+        let (addr, host) = v2_host(pin, PairingStore::ephemeral().unwrap());
+        let me = Identity::generate().unwrap();
+        let mut sock = client_sock(addr);
+        let (mut hs, first) = ClientHandshake::pair(pin, &me).unwrap();
+        let mut rec = Recording { up: first.clone(), down: Vec::new() };
+        sock.write_all(&first).unwrap();
+        let mut chunk = [0u8; 4096];
+        let mut session = loop {
+            let n = sock.read(&mut chunk).unwrap();
+            assert_ne!(n, 0, "the host hung up");
+            rec.down.extend_from_slice(&chunk[..n]);
+            match hs.feed(&chunk[..n]).unwrap() {
+                Step::Continue(out) => {
+                    rec.up.extend_from_slice(&out);
+                    sock.write_all(&out).unwrap();
+                }
+                Step::Done { send, established } => {
+                    rec.up.extend_from_slice(&send);
+                    sock.write_all(&send).unwrap();
+                    break established.session;
+                }
+            }
+        };
+        // Some application data too, so the recording is a real session.
+        let sealed = session.seal(b"\x05\x00\x00\x00hello").unwrap();
+        rec.up.extend_from_slice(&sealed);
+        sock.write_all(&sealed).unwrap();
+        let _ = host.join().unwrap().0.unwrap();
+        rec
+    }
+
+    /// The v1 recording, for the control experiment.
+    fn record_v1_pairing(pin: u32) -> Recording {
+        let (init, first) = Initiator::start(pin).unwrap();
+        let _ = init; // the attacker never sees the client's state
+        Recording { up: first, down: Vec::new() }
+    }
+
+    /// The best an offline attacker can do with a v2 recording, for one
+    /// guessed code: compute a SPAKE2 key over the guess — the only way to get
+    /// one without the secret scalars is to play a side itself — derive the
+    /// PSK as the protocol does, and see whether the client's first Noise
+    /// message authenticates under it. Returns true if the guess "checks out".
+    fn v2_guess_checks_out(rec: &Recording, guess: u32) -> bool {
+        // Parse the recording exactly as the host does.
+        let up = &rec.up;
+        assert_eq!(&up[..OPENING.len()], &OPENING[..]);
+        let mut rest = up[OPENING.len() + 1..].to_vec();
+        let msg_a = handshake::take_frame(&mut rest).unwrap().unwrap();
+        let m1 = handshake::take_frame(&mut rest).unwrap().unwrap();
+        let mut down = rec.down.clone();
+        let reply = handshake::take_frame(&mut down).unwrap().unwrap();
+
+        let mut prologue = up[..OPENING.len() + 1].to_vec();
+        prologue.extend_from_slice(&handshake::frame(&msg_a).unwrap());
+        prologue.extend_from_slice(&handshake::frame(&reply).unwrap());
+
+        // Play the responder over the guess against the recorded A.
+        let (pake, _) = Pake::start(Role::Responder, &code_bytes(guess), PAIR_CONTEXT);
+        let key = pake.finish(&msg_a).unwrap();
+        let psk = key.derive(PSK_LABEL);
+        // Any 32 bytes are a valid X25519 secret; the attacker's own static
+        // key plays no part in authenticating message 1.
+        let attacker_static = [0x5Au8; 32];
+        let mut hs = snow::Builder::new(handshake::pair_params().unwrap())
+            .local_private_key(&attacker_static)
+            .psk(0, &psk)
+            .prologue(&prologue)
+            .build_responder()
+            .unwrap();
+        let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
+        if hs.read_message(&m1, &mut scratch).is_ok() {
+            return true;
+        }
+        // And the v1 attack, in case anything in v2 were still a function of
+        // the PIN alone: `NNpsk0` with SHA-256(PIN) against the same message.
+        let mut v1 = snow::Builder::new(noise_params().unwrap())
+            .psk(0, &derive_psk(guess))
+            .build_responder()
+            .unwrap();
+        v1.read_message(&m1, &mut scratch).is_ok()
+    }
+
+    /// The v1 attack on a v1 recording: rebuild the host's side for a guess
+    /// and see whether the client's first message authenticates.
+    fn v1_guess_checks_out(rec: &Recording, guess: u32) -> bool {
+        let mut rest = rec.up[PREAMBLE.len()..].to_vec();
+        let m1 = handshake::take_frame(&mut rest).unwrap().unwrap();
+        let mut hs = snow::Builder::new(noise_params().unwrap())
+            .psk(0, &derive_psk(guess))
+            .build_responder()
+            .unwrap();
+        let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
+        hs.read_message(&m1, &mut scratch).is_ok()
+    }
+
+    /// **The bug, and the fix, as one test.** Against a v1 recording, trying
+    /// all 10,000 codes offline finds the PIN — that is the attack the backlog
+    /// reported, and seeing it succeed here proves the attacker below is a
+    /// real one. Against a v2 recording of the same PIN the identical search
+    /// finds nothing: no guess, the right one included, authenticates
+    /// anything that was recorded.
+    #[test]
+    fn an_offline_brute_force_of_a_recorded_pairing_finds_nothing() {
+        const PIN: u32 = 7305;
+
+        let v1 = record_v1_pairing(PIN);
+        let found: Vec<u32> = (0..10_000).filter(|&g| v1_guess_checks_out(&v1, g)).collect();
+        assert_eq!(found, vec![PIN], "control: the v1 recording gives the PIN away");
+
+        let v2 = record_v2_pairing(PIN);
+        let found: Vec<u32> = (0..10_000).filter(|&g| v2_guess_checks_out(&v2, g)).collect();
+        assert!(found.is_empty(), "a v2 recording let these codes be tested offline: {found:?}");
+    }
+
+    /// And the code itself never crosses the wire in any form a recording
+    /// could match against: not as digits, not as the v1 PSK.
+    #[test]
+    fn a_v2_recording_contains_neither_the_code_nor_a_hash_of_it() {
+        let rec = record_v2_pairing(7305);
+        let all = [rec.up.as_slice(), rec.down.as_slice()].concat();
+        assert!(!all.windows(4).any(|w| w == b"7305"));
+        let psk = derive_psk(7305);
+        assert!(!all.windows(8).any(|w| w == &psk[..8]));
     }
 }

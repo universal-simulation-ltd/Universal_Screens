@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 extender-protocol.workspace = true
-# The PIN-keyed Noise tunnel, so the browser leg can be end-to-end encrypted
+# Pairing (SPAKE2 then Noise) and the Noise tunnel, so the browser leg can be end-to-end encrypted
 # rather than trusting the relay. `transport::session` is the socket-free half
 # of that crate and builds for wasm32; nothing else of it is used here.
 extender-transport.workspace = true

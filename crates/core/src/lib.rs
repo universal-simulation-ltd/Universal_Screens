@@ -11,12 +11,84 @@
 
 use std::io::{self, BufReader};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 pub use extender_protocol::{self as protocol, ClientHello, Codec, Input, Message};
-use extender_transport::{self as transport, Conn};
+pub use extender_transport::Failure;
+use extender_transport::{self as transport, Conn, PairingStore};
+
+/// The client's pairing file: its long-term key and the hosts it has paired
+/// with. Separate from a host's (`host-pairing.txt`), so one machine can be both.
+pub const PAIRING_FILE: &str = "client-pairing.txt";
+
+/// Where the pairing file lives. See [`set_pairing_location`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PairingLocation {
+    /// The platform default: the per-user config folder on desktops, the app's
+    /// `Library/Application Support` on iOS, and **nowhere** on Android (which
+    /// must say where).
+    Default,
+    /// This folder.
+    Dir(PathBuf),
+    /// Keep nothing: pair with the code on every connection. For tests.
+    Nowhere,
+}
+
+static PAIRING_LOCATION: Mutex<Option<PairingLocation>> = Mutex::new(None);
+
+/// Tell the client where to keep its pairing keys. Call once, before the
+/// first connect. Android must (its files folder is only known to the app);
+/// everything else has a working default.
+pub fn set_pairing_location(location: PairingLocation) {
+    if let Ok(mut slot) = PAIRING_LOCATION.lock() {
+        *slot = Some(location);
+    }
+}
+
+/// The pairing file this client uses, or `None` to keep nothing.
+fn pairing_path() -> Option<PathBuf> {
+    let location = PAIRING_LOCATION.lock().ok().and_then(|l| l.clone()).unwrap_or(PairingLocation::Default);
+    match location {
+        PairingLocation::Dir(dir) => Some(dir.join(PAIRING_FILE)),
+        PairingLocation::Nowhere => None,
+        PairingLocation::Default => default_pairing_dir().map(|dir| dir.join(PAIRING_FILE)),
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn default_pairing_dir() -> Option<PathBuf> {
+    // Inside the iOS sandbox HOME is the app's own container.
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join("Library/Application Support/UniversalScreens"))
+}
+
+#[cfg(target_os = "android")]
+fn default_pairing_dir() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn default_pairing_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("UniversalScreens"))
+}
+
+/// The client's pairing store: from its file when it has one, otherwise in
+/// memory for this connection only (the code is then needed every time — as
+/// before pairing was remembered, and no less safe).
+fn open_pairing_store() -> io::Result<PairingStore> {
+    match pairing_path().map(|path| PairingStore::open(&path)) {
+        Some(Ok(store)) => Ok(store),
+        Some(Err(e)) => {
+            eprintln!("pairing keys unavailable ({e}); pairing with the code this time");
+            PairingStore::ephemeral()
+        }
+        None => PairingStore::ephemeral(),
+    }
+}
 
 /// How long to wait for the TCP connection to the host to be established before
 /// giving up. Without a cap the OS default applies (tens of seconds, sometimes
@@ -116,34 +188,26 @@ impl Session {
         hello: &ClientHello,
         input_rx: Receiver<Input>,
     ) -> io::Result<Session> {
-        Session::connect_inner(addr, hello, input_rx, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT)
+        let mut store = open_pairing_store()?;
+        Session::connect_inner(addr, hello, input_rx, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, &mut store)
     }
 
-    /// [`connect`](Session::connect) with the two deadlines injectable, so tests can
-    /// drive it with short timeouts. See the public method for the full contract.
+    /// [`connect`](Session::connect) with the two deadlines and the pairing store
+    /// injectable, so tests can drive it with short timeouts and no files. See
+    /// the public method for the full contract.
     fn connect_inner(
         addr: &str,
         hello: &ClientHello,
         input_rx: Receiver<Input>,
         connect_timeout: Duration,
         handshake_timeout: Duration,
+        store: &mut PairingStore,
     ) -> io::Result<Session> {
-        let stream = tcp_connect_within(addr, connect_timeout)?;
-        let _ = stream.set_nodelay(true); // disable Nagle — low latency for video + input
-
-        // Bound the handshake below so a peer that accepts the TCP connection but
-        // never speaks the protocol can't wedge the connect forever — it surfaces
-        // as an error instead of a silent hang. These deadlines are cleared once
-        // the session is live so the frame reader can park waiting on the socket.
-        stream.set_read_timeout(Some(handshake_timeout))?;
-        stream.set_write_timeout(Some(handshake_timeout))?;
-
-        // Encrypt the transport *before* any framing: a Noise tunnel keyed by the
-        // pairing PIN (`hello.pin`). The `ClientHello` and everything after it then
-        // travel inside the tunnel, so the LAN sees only ciphertext. A PIN mismatch
-        // fails the handshake here (surfacing as a `connect` error), on top of the
-        // host's own plaintext-hello PIN check inside the tunnel.
-        let mut conn = transport::connect(stream, hello.pin)?;
+        // Encrypt the transport *before* any framing, and settle who may talk:
+        // a remembered host by its key, otherwise pairing over the code. The
+        // `ClientHello` and everything after it then travel inside the tunnel,
+        // so the LAN sees only ciphertext. A wrong code fails here.
+        let mut conn = open_tunnel(addr, hello.pin, store, connect_timeout, handshake_timeout)?;
 
         // Handshake first, on the caller's thread, so a failure surfaces as an
         // error from `connect` rather than dying silently in a background thread.
@@ -200,6 +264,62 @@ impl Drop for Session {
         // writer can be parked on `recv()` and joining it here would deadlock.
         let _ = self.shutdown.shutdown(Shutdown::Both);
     }
+}
+
+/// Open the encrypted tunnel to `addr`.
+///
+/// 1. If this client has paired with any host, try **reconnecting** with the
+///    remembered keys — no code. That is what lets a saved machine reconnect
+///    after it restarted with a new PIN.
+/// 2. If the host does not know this device (or it is a host this device has
+///    not paired with), **pair** with `pin` on a fresh connection, and remember
+///    the host's key for next time.
+///
+/// ⚠️ **No v1 fall-back.** A v0.3 host speaks only the v1 handshake, whose
+/// first message lets a recording be brute-forced for the PIN. Falling back to
+/// it when v2 is refused would hand exactly that to anyone able to make v2
+/// fail — so against a v0.3 host this fails with [`Failure::OlderHost`] and the
+/// user updates the host. (Hosts still *accept* v1, so v0.3 clients keep
+/// working; the browser falls back only when the host's own bridge says it is
+/// old. See `docs/M10-transport-encryption.md`.)
+fn open_tunnel(
+    addr: &str,
+    pin: u32,
+    store: &mut PairingStore,
+    connect_timeout: Duration,
+    handshake_timeout: Duration,
+) -> io::Result<Conn> {
+    if !store.peers().is_empty() {
+        let stream = dial(addr, connect_timeout, handshake_timeout)?;
+        match transport::connect_known(stream, store.identity(), store.peer_keys()) {
+            Ok((conn, _)) => return Ok(conn),
+            Err(e) if matches!(transport::failure(&e), Some(Failure::NotPaired | Failure::UnknownHost)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let stream = dial(addr, connect_timeout, handshake_timeout)?;
+    let (conn, host_key) = transport::connect_pair(stream, pin, store.identity())?;
+    // Pairing with no code (a host that lets anyone in) proves nothing about
+    // who answered, so it earns no trust.
+    if pin != 0 {
+        if let Err(e) = store.remember(host_key, addr) {
+            eprintln!("could not save the pairing with {addr}: {e}");
+        }
+    }
+    Ok(conn)
+}
+
+/// A TCP connection to `addr`, with Nagle off and the handshake deadlines set.
+fn dial(addr: &str, connect_timeout: Duration, handshake_timeout: Duration) -> io::Result<TcpStream> {
+    let stream = tcp_connect_within(addr, connect_timeout)?;
+    let _ = stream.set_nodelay(true); // disable Nagle — low latency for video + input
+    // Bound the handshake so a peer that accepts the TCP connection but never
+    // speaks the protocol can't wedge the connect forever — it surfaces as an
+    // error instead of a silent hang. Cleared once the session is live so the
+    // frame reader can park waiting on the socket.
+    stream.set_read_timeout(Some(handshake_timeout))?;
+    stream.set_write_timeout(Some(handshake_timeout))?;
+    Ok(stream)
 }
 
 /// Connect to `addr` with a bounded wait, trying each resolved socket address in
@@ -295,6 +415,8 @@ mod tests {
             pin: 0,
             device_name: String::new(),
         };
+        // Never touch the developer's real pairing file from a test.
+        set_pairing_location(PairingLocation::Nowhere);
         let session = Session::connect(&addr.to_string(), &hello, input_rx).unwrap();
 
         // First event is the stream start.
@@ -360,6 +482,7 @@ mod tests {
             input_rx,
             Duration::from_secs(5),
             Duration::from_millis(300),
+            &mut PairingStore::ephemeral().unwrap(),
         );
         assert!(result.is_err(), "a silent peer must fail the handshake, not hang");
         assert!(
@@ -368,5 +491,137 @@ mod tests {
             start.elapsed(),
         );
         host.join().unwrap();
+    }
+
+    // ---- pairing: remembered hosts, and no v1 fall-back ---------------------
+
+    fn hello(pin: u32) -> ClientHello {
+        ClientHello {
+            protocol_version: protocol::PROTOCOL_VERSION,
+            width: 800,
+            height: 600,
+            capture_mode: protocol::CaptureMode::ControlOnly,
+            platform: protocol::ClientPlatform::current(),
+            pin,
+            device_name: String::new(),
+        }
+    }
+
+    /// The fake host's store afterwards, and how each connection authenticated
+    /// (`None` for a refused one).
+    type HostRecord = (PairingStore, Vec<Option<transport::PeerAuth>>);
+
+    /// A host that serves `connections` connections with `accept_with` over
+    /// one store, at the PINs given, reading each hello and replying with a
+    /// HostInfo. Returns the store and how each connection was authenticated.
+    fn paired_host(
+        pins: Vec<u32>,
+        store: PairingStore,
+    ) -> (String, thread::JoinHandle<HostRecord>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let host = thread::spawn(move || {
+            let mut store = store;
+            let mut auths = Vec::new();
+            let mut pins = pins.into_iter();
+            while let Some(pin) = pins.next() {
+                let (sock, _) = listener.accept().unwrap();
+                sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                match transport::accept_with(sock, pin, &mut store, "test") {
+                    Ok(mut conn) => {
+                        auths.push(Some(conn.auth()));
+                        let _hello: ClientHello = protocol::read_framed(&mut conn).unwrap();
+                        protocol::write_framed(
+                            &mut conn,
+                            &Message::HostInfo { os: "test".into(), name: "host".into() },
+                        )
+                        .unwrap();
+                    }
+                    // A refused reconnect: the client pairs on a second
+                    // connection, which this same PIN serves.
+                    Err(_) => {
+                        auths.push(None);
+                        pins = std::iter::once(pin).chain(pins).collect::<Vec<_>>().into_iter();
+                    }
+                }
+            }
+            (store, auths)
+        });
+        (addr, host)
+    }
+
+    fn connect_with(addr: &str, pin: u32, store: &mut PairingStore) -> io::Result<Session> {
+        let (_tx, rx) = mpsc::channel();
+        Session::connect_inner(addr, &hello(pin), rx, Duration::from_secs(5), Duration::from_secs(5), store)
+    }
+
+    #[test]
+    fn a_paired_client_reconnects_with_no_code_after_the_host_changes_its_pin() {
+        let mut client = PairingStore::ephemeral().unwrap();
+        let (addr, host) = paired_host(vec![4321, 8765], PairingStore::ephemeral().unwrap());
+
+        let first = connect_with(&addr, 4321, &mut client).unwrap();
+        assert!(matches!(first.next_event(), Some(StreamEvent::HostInfo { .. })));
+        assert_eq!(client.peers().len(), 1, "the client remembers the host it paired");
+
+        // New host PIN, and the client offers none: the keys are enough.
+        let second = connect_with(&addr, 0, &mut client).unwrap();
+        assert!(matches!(second.next_event(), Some(StreamEvent::HostInfo { .. })));
+
+        let (_, auths) = host.join().unwrap();
+        assert!(matches!(auths[0], Some(transport::PeerAuth::Paired { .. })));
+        assert!(matches!(auths[1], Some(transport::PeerAuth::Known { .. })));
+    }
+
+    #[test]
+    fn a_host_that_forgot_this_device_gets_the_code_on_a_second_connection() {
+        let mut client = PairingStore::ephemeral().unwrap();
+        let host_store = PairingStore::ephemeral().unwrap();
+        // The client trusts this host, but the host has no memory of it.
+        client.remember(host_store.identity().public(), "earlier").unwrap();
+        let (addr, host) = paired_host(vec![4321], host_store);
+
+        let session = connect_with(&addr, 4321, &mut client).unwrap();
+        assert!(matches!(session.next_event(), Some(StreamEvent::HostInfo { .. })));
+        let (store, auths) = host.join().unwrap();
+        assert_eq!(auths.len(), 2, "one refused reconnect, then the pairing");
+        assert!(auths[0].is_none());
+        assert!(matches!(auths[1], Some(transport::PeerAuth::Paired { .. })));
+        assert_eq!(store.peers().len(), 1);
+    }
+
+    /// The downgrade that must not happen: against a v0.3 host the client
+    /// reports an older host, and never sends the v1 handshake whose recording
+    /// would give the PIN away.
+    #[test]
+    fn a_v03_host_is_reported_as_older_and_is_never_sent_the_v1_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let old_host = thread::spawn(move || {
+            listener.set_nonblocking(false).unwrap();
+            let mut openings = Vec::new();
+            // v0.3: read the 5-byte preamble and a u16 length; over 4 KiB, close.
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut head = [0u8; 7];
+            std::io::Read::read_exact(&mut sock, &mut head).unwrap();
+            openings.push(head);
+            drop(sock);
+            // Any second connection would be a fall-back attempt.
+            listener.set_nonblocking(true).unwrap();
+            thread::sleep(Duration::from_millis(500));
+            if let Ok((mut sock, _)) = listener.accept() {
+                let mut head = [0u8; 7];
+                let _ = std::io::Read::read_exact(&mut sock, &mut head);
+                openings.push(head);
+            }
+            openings
+        });
+        let err = connect_with(&addr, 4321, &mut PairingStore::ephemeral().unwrap())
+            .err()
+            .expect("a v0.3 host cannot pair");
+        assert_eq!(transport::failure(&err), Some(Failure::OlderHost), "{err}");
+        let openings = old_host.join().unwrap();
+        assert_eq!(openings.len(), 1, "no second (v1) attempt");
+        assert_eq!(&openings[0][5..], &[0xFF, 0xFF], "the one attempt was v2");
     }
 }

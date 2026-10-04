@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import init, * as protocol from "./pkg/extender_protocol.js";
-import { SecureChannel, E2EE_SUBPROTOCOL } from "./src/secure.js";
+import { SecureChannel, E2EE_SUBPROTOCOL, E2EE_SUBPROTOCOL_V2 } from "./src/secure.js";
 
 const PIN = 4321;
 const REPO = fileURLToPath(new URL("../../", import.meta.url));
@@ -128,7 +128,7 @@ for (const m of burst) session.send(m);
 A(await waitFor(() => session.inbox.length === burst.length), "a burst of five messages arrived as five");
 A(burst.every((m, i) => session.inbox[i] && eq(session.inbox[i], m)), "in order, each with its own boundary");
 
-// --- 5. the wrong PIN cannot open a tunnel -----------------------------------
+// --- 5. the wrong PIN cannot open a tunnel (v1 — what a v0.3 client sends) ----
 const wrong = await connect({ pin: PIN + 1 });
 A(wrong.encrypted, "the wrong-PIN session still negotiated encryption");
 A(!(await waitFor(() => wrong.open, 3000)), "but the handshake never completes with the wrong PIN");
@@ -140,6 +140,70 @@ A(!plain.encrypted, "a tab that offers no subprotocol is not encrypted");
 plain.send(hello);
 A(await waitFor(() => plain.inbox.length > 0), "and the plaintext path still round-trips (older hosts keep working)");
 plain.ws.close();
+
+// --- 7. v2: pairing with SPAKE2, then reconnecting by key --------------------
+// The same chain — WASM `PairingHandshake` in `secure.js`, real bridge, the
+// shipped `transport::accept_with` — for the handshake every current tab runs.
+
+/// Open a v2 session as `src/transport.js` does: offer v2 then v1, and run the
+/// channel `opts` describes once the bridge answers v2.
+function connectV2(opts) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${wsPort}/`, [E2EE_SUBPROTOCOL_V2, E2EE_SUBPROTOCOL]);
+    ws.binaryType = "arraybuffer";
+    const inbox = [];
+    const state = { ws, inbox, secure: null, error: null, closed: false, protocol: "" };
+    ws.onerror = (e) => reject(e);
+    ws.onclose = () => { state.closed = true; };
+    ws.onopen = () => {
+      state.protocol = ws.protocol;
+      if (ws.protocol === E2EE_SUBPROTOCOL_V2) {
+        state.secure = new SecureChannel(protocol, opts);
+        state.secure.onSend = (b) => ws.send(b);
+        ws.send(state.secure.firstMessage);
+      }
+      resolve(state);
+    };
+    ws.onmessage = (ev) => {
+      try {
+        for (const body of state.secure.receive(new Uint8Array(ev.data))) inbox.push(body);
+      } catch (e) {
+        state.error = e;
+        ws.close();
+      }
+    };
+  });
+}
+
+const keys = protocol.PairingKeys.generate();
+const paired = await connectV2({ kind: "pair", pin: PIN, keys });
+A(paired.protocol === E2EE_SUBPROTOCOL_V2, "a current bridge answers the v2 subprotocol");
+A(await waitFor(() => paired.secure.open), "the tab paired with SPAKE2 and the tunnel opened");
+A(paired.secure.paired && /^[0-9a-f]{64}$/.test(paired.secure.hostKeyHex ?? ""), "and learned the host's key");
+paired.ws.send(paired.secure.seal(hello));
+A(await waitFor(() => paired.inbox.length > 0), "a message round-trips through the paired tunnel");
+A(paired.inbox[0] && eq(paired.inbox[0], hello), "byte-identical");
+const hostKey = paired.secure.hostKeyHex;
+paired.ws.close();
+
+const known = await connectV2({ kind: "known", keys, hostKeys: [hostKey] });
+A(await waitFor(() => known.secure.open), "the same tab reconnects by key, with no PIN at all");
+A(known.secure.paired === false && known.secure.hostKeyHex === hostKey, "as a remembered device, to the same host");
+known.ws.send(known.secure.seal(hello));
+A(await waitFor(() => known.inbox.length > 0), "and the reconnected tunnel round-trips too");
+known.ws.close();
+
+// --- 8. v2 failures say why ----------------------------------------------------
+const wrongV2 = await connectV2({ kind: "pair", pin: PIN + 1, keys: protocol.PairingKeys.generate() });
+A(await waitFor(() => wrongV2.closed || wrongV2.error, 5000), "a wrong PIN ends the v2 attempt");
+const why = wrongV2.secure.failure ?? wrongV2.secure.closedFailure();
+A(why === "wrong-code", `and it reads as a wrong PIN (got ${why})`);
+A(!wrongV2.secure.open, "with no tunnel");
+
+const stranger = await connectV2({ kind: "known", keys: protocol.PairingKeys.generate(), hostKeys: [hostKey] });
+A(await waitFor(() => stranger.closed || stranger.error, 5000), "an unpaired tab cannot reconnect by key");
+A(stranger.secure.failure === "not-paired", `and is told to pair with the PIN (got ${stranger.secure.failure})`);
+stranger.ws.close();
 
 // ⚠️ Tear down in this order, and do NOT call `process.exit()` here. Killing the
 // child and exiting in the same tick aborts Node on Windows inside libuv

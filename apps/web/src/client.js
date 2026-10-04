@@ -4,7 +4,7 @@
 // with InputController forwarding mouse/keyboard/touch/gestures.
 import { ready, protocol } from "./wasm.js";
 import { Transport } from "./transport.js";
-import { SecureChannel } from "./secure.js";
+import { openChannel, describeFailure } from "./secure.js";
 import { RoomTransport } from "./room.js";
 import { H264Decoder } from "./decoder.js";
 import { CanvasRenderer } from "./renderer.js";
@@ -316,6 +316,8 @@ async function connect(addr, mode, targetHost = null) {
   };
   transport.onClose = () => {
     log("host disconnected", "dim");
+    // Capture before `disconnect()` drops the transport.
+    const t = transport;
     // Tear down either way; the overlay decides whether this was an attempt that
     // failed (say so, over the connect screen) or a session that ended (nothing
     // to report — the user asked for it, or the host went away).
@@ -324,9 +326,11 @@ async function connect(addr, mode, targetHost = null) {
     if (failed) {
       connFail(
         attemptId,
-        opened
-          ? `${targetHost ?? addr} closed the connection — the PIN is the usual reason.`
-          : `Couldn't reach ${targetHost ?? addr}.`,
+        describeFailure(t?.failure, t?.lockedSeconds) ??
+          // A handshake that started means the host was reached.
+          (opened || t?.secure
+            ? `${targetHost ?? addr} closed the connection — the PIN is the usual reason.`
+            : `Couldn't reach ${targetHost ?? addr}.`),
         () => connect(addr, mode, targetHost),
       );
     }
@@ -360,7 +364,8 @@ async function connectRoom(code, mode) {
   renderer = new CanvasRenderer(canvas);
   decoder = new H264Decoder((frame) => renderer.draw(frame), (e) => log(`decoder error: ${e}`, "err"));
   transport = new RoomTransport(ROOM_BASE, room, (bytes) => protocol.decode_message(bytes), {
-    secure: (pin) => new SecureChannel(protocol, pin),
+    // Which handshake, from what the host announced — and what to remember.
+    secure: (pin, hostHandshake) => openChannel(protocol, { hostHandshake, pin, target: `remote:${room}` }),
   });
   input = new InputController(transport, renderer, canvas);
 
@@ -387,12 +392,14 @@ async function connectRoom(code, mode) {
   transport.onPeerLeft = () => { log("host left the room", "dim"); disconnect(); };
   transport.onClose = () => {
     log("relay closed", "dim");
+    const t = transport;
     const failed = connBusy(attemptId);
     disconnect();
     if (failed) {
       connFail(
         attemptId,
-        paired ? `The remote host closed the connection.` : `Couldn't join room ${room}.`,
+        describeFailure(t?.failure, t?.lockedSeconds) ??
+          (paired ? `The remote host closed the connection.` : `Couldn't join room ${room}.`),
         () => connectRoom(room, mode),
       );
     }
@@ -415,8 +422,21 @@ function pinValue() {
 /// relay — ours, on the cloud path — can read what passes through it. Claiming
 /// encryption that isn't there would be worse than saying nothing.
 function logEncryption(t) {
-  if (t.encrypted) {
+  const s = t.secure;
+  if (s && s.kind !== "v1") {
     log("end-to-end encrypted — the relay cannot read this session", "ok");
+    log(
+      s.paired
+        ? "paired with the PIN: this browser is now remembered, so next time it connects without one"
+        : "reconnected as a paired device — no PIN needed",
+      "ok",
+    );
+  } else if (s) {
+    log("end-to-end encrypted — the relay cannot read this session", "ok");
+    log(
+      "but the host is an older build (v0.3): someone who records this connection could work out its PIN. Update the host.",
+      "dim",
+    );
   } else {
     log("not end-to-end encrypted: the host is an older build. Update it to encrypt.", "dim");
   }

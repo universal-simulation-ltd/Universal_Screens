@@ -1,0 +1,38 @@
+[package]
+name = "unisim-pake"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Short-code pairing (SPAKE2) as bytes in, bytes out: no socket, no transport, builds for wasm32."
+
+# Why this crate exists, and why it is not part of `extender-transport`: the
+# short-code exchange is useful to anything that pairs two devices over a code a
+# person reads off one screen and types into another — not only Screens. It
+# knows nothing about Noise, TCP or the Screens wire format; it turns a short
+# code into a strong shared key, and nothing else. See README in this folder.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# JavaScript bindings (`PakeSession` / `PakeKey`), for a browser that runs the
+# exchange itself. Off by default so a native consumer pulls in no
+# wasm-bindgen.
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+# RustCrypto's SPAKE2 (Ed25519 group). Chosen over the CPace crates — see
+# README.md, "Why SPAKE2".
+spake2 = "0.4"
+hkdf = "0.12"
+sha2 = "0.10"
+# Constant-time comparison of key-confirmation tags.
+subtle = "2"
+wasm-bindgen = { version = "0.2", optional = true }
+
+# `spake2` draws its secret scalar from `getrandom`, which will not build for
+# `wasm32-unknown-unknown` unless told the randomness source is the browser's
+# `crypto.getRandomValues`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

@@ -4,9 +4,10 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
-# Transport encryption for the LAN protocol: a Noise (snow) handshake wrapping the
-# plaintext TCP stream, keyed by the pairing PIN. Native clients always encrypt;
-# the host auto-detects an encrypted vs a legacy/loopback plaintext peer. The
+# Transport encryption and pairing for the LAN protocol: SPAKE2 over the pairing
+# PIN, then a Noise (snow) handshake wrapping the TCP stream; remembered devices
+# reconnect by key. The host also accepts v0.3's PIN-keyed handshake and
+# legacy/loopback plaintext peers. The
 # `postcard` framing (crates/protocol) runs unchanged on top of the encrypted
 # byte stream. See docs/M10-transport-encryption.md.
 
@@ -15,8 +16,11 @@ license.workspace = true
 # on every target the clients run on — Windows, macOS, Android (NDK), iOS, and
 # (unused here) wasm — with no C/ring dependency to cross-compile.
 snow = { version = "0.9", default-features = false, features = ["default-resolver"] }
-# PIN -> 32-byte pre-shared key derivation (SHA-256). Pure Rust, all targets.
+# PIN -> 32-byte pre-shared key derivation (SHA-256) for the v1 handshake.
 sha2 = "0.10"
+# v2 pairing: SPAKE2 over the code, so a recorded handshake gives nobody
+# anything to test codes against. Transport-free, so it builds for wasm32 too.
+unisim-pake.workspace = true
 
 # wasm32 only, and NOT this crate's own code: `snow`'s ephemeral key generation
 # reaches `getrandom`, which refuses to build for `wasm*-unknown-unknown` unless

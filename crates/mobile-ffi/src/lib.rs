@@ -22,7 +22,7 @@ use std::sync::mpsc::{self, Sender};
 use extender_core::protocol::{
     self, Button, CaptureMode, ClientHello, Codec, Gesture, Input, TouchPhase,
 };
-use extender_core::{Session, StreamEvent};
+use extender_core::{set_pairing_location, PairingLocation, Session, StreamEvent};
 
 /// Opaque session handle returned by [`extender_session_connect`].
 pub struct ExtenderSession {
@@ -83,6 +83,29 @@ pub enum ExtenderMouseButton {
     Left = 0,
     Right = 1,
     Middle = 2,
+}
+
+// ---- pairing ---------------------------------------------------------------
+
+/// Keep this client's pairing keys (its long-term key and the hosts it has
+/// paired with) in the folder `dir`, so a paired host reconnects with no code.
+/// Call once, before the first connect. `NULL` restores the default — which on
+/// iOS is the app's `Library/Application Support`, so an iOS shell need not
+/// call this at all.
+///
+/// # Safety
+/// `dir` must be null or a valid pointer to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn extender_set_pairing_dir(dir: *const c_char) {
+    let location = if dir.is_null() {
+        PairingLocation::Default
+    } else {
+        match unsafe { CStr::from_ptr(dir) }.to_str() {
+            Ok(dir) if !dir.is_empty() => PairingLocation::Dir(dir.into()),
+            _ => PairingLocation::Default,
+        }
+    };
+    set_pairing_location(location);
 }
 
 // ---- session lifecycle ---------------------------------------------------
@@ -533,6 +556,8 @@ mod tests {
     /// conversion), send a touch, and confirm the host received it.
     #[test]
     fn ffi_round_trips_through_the_c_abi() {
+        // Never touch the developer's real pairing file from a test.
+        extender_core::set_pairing_location(extender_core::PairingLocation::Nowhere);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
 
@@ -613,6 +638,7 @@ mod tests {
     /// `Input::Key` with the right HID usage id.
     #[test]
     fn ffi_send_key_reaches_host() {
+        extender_core::set_pairing_location(extender_core::PairingLocation::Nowhere);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
 
@@ -641,6 +667,7 @@ mod tests {
     /// ABI with the right kinds/payloads, and the scan/focus sends reach the host.
     #[test]
     fn ffi_surfaces_clicker_events_and_sends() {
+        extender_core::set_pairing_location(extender_core::PairingLocation::Nowhere);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
 

@@ -17,8 +17,11 @@
 // The relay is a Cloudflare Durable Object that relays whatever it is given -
 // so TLS protects the wire to Cloudflare, and NOT the stream from Cloudflare.
 // When a `secure` factory is supplied and the host announces that it can relay
-// verbatim, this class runs a PIN-keyed Noise tunnel end to end instead and the
-// room sees only Noise records.
+// verbatim, this class runs a Noise tunnel end to end instead and the room sees
+// only Noise records. A current host also says `"handshake":2` — it pairs with
+// SPAKE2, so a recording gives nobody anything to guess the PIN against — and
+// the factory decides which handshake to run from that (see `secure.js`
+// `openChannel` and `pairing.plan`).
 //
 // ⚠️ The negotiation cannot be a WebSocket subprotocol here, the way it is on the
 // LAN path: this socket terminates at *Cloudflare*, not at the host, so no
@@ -33,8 +36,11 @@ export class RoomTransport {
    * @param {string} code      the receiver's pairing code
    * @param {(bytes: Uint8Array) => any} decode  postcard Message decoder
    * @param {object} [opts]
-   * @param {(pin: number) => object} [opts.secure]  builds a SecureChannel; omit
-   *   to stay plaintext (the Node room test does, so it needs no WASM)
+   * @param {(pin: number, hostHandshake: number) => object|null|"refuse"} [opts.secure]
+   *   builds the channel for what the host announced (2 = SPAKE2 pairing, 1 = a
+   *   v0.3 host, 0 = no announcement): a SecureChannel, null for plaintext, or
+   *   "refuse" for a downgrade. Omit to stay plaintext (the Node room test does,
+   *   so it needs no WASM).
    * @param {number} [opts.capsWaitMs]  how long to wait for the host's caps
    *   signal after pairing before giving up on encryption
    */
@@ -48,6 +54,11 @@ export class RoomTransport {
     this.pin = 0;
     /// Set when the host announces it can relay verbatim.
     this.hostSupportsE2ee = false;
+    /// Set when the host announces the v2 (SPAKE2) handshake.
+    this.hostHandshake = 0;
+    /// Why the attempt failed, when we know: a `describeFailure` code.
+    this.failure = null;
+    this.lockedSeconds = 0;
     this.ws = null;
     this.paired = false;
     // Callbacks (all optional):
@@ -70,7 +81,12 @@ export class RoomTransport {
     this.ws = new WebSocket(this.url);
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => this.onOpen?.();
-    this.ws.onclose = () => this.onClose?.();
+    this.ws.onclose = () => {
+      if (this.secure && !this.secure.open && !this.failure) {
+        this.failure = this.secure.closedFailure?.() ?? null;
+      }
+      this.onClose?.();
+    };
     this.ws.onerror = (e) => this.onError?.(e);
     this.ws.onmessage = (ev) => {
       // Text → a rendezvous signal; binary → a relayed postcard frame.
@@ -84,7 +100,10 @@ export class RoomTransport {
           // The host's capability announcement. Unknown to older browsers, which
           // fall through to `default` and ignore it — that is what makes it safe
           // to add to a relay both sides already speak.
-          case "caps": this.hostSupportsE2ee = sig.e2ee === true; break;
+          case "caps":
+            this.hostSupportsE2ee = sig.e2ee === true;
+            this.hostHandshake = this.hostSupportsE2ee ? (sig.handshake === 2 ? 2 : 1) : 0;
+            break;
           default: break;
         }
         return;
@@ -95,7 +114,21 @@ export class RoomTransport {
           this.onMessage?.(this.decode(bytes));
           return;
         }
-        for (const body of this.secure.receive(bytes)) {
+        let bodies;
+        try {
+          bodies = this.secure.receive(bytes);
+        } catch (e) {
+          // A failed handshake: remember why, and end the attempt.
+          if (!this.secure.open) {
+            this.failure = this.secure.failure ?? "handshake";
+            this.lockedSeconds = this.secure.lockedSeconds ?? 0;
+            this.onError?.(e);
+            this.close();
+            return;
+          }
+          throw e;
+        }
+        for (const body of bodies) {
           this.onMessage?.(this.decode(body));
         }
       } catch (e) {
@@ -129,9 +162,18 @@ export class RoomTransport {
       while (!this.hostSupportsE2ee && Date.now() < deadline && this.connected) {
         await new Promise((r) => setTimeout(r, 25));
       }
-      if (this.hostSupportsE2ee && this.connected) {
-        this.secure = this.makeSecure(this.pin);
+      // A caps signal may still be on its way after the deadline; what we have
+      // now decides. The factory sees "nothing announced" as 0.
+      const channel = this.connected ? this.makeSecure(this.pin, this.hostHandshake) : null;
+      if (channel === "refuse") {
+        this.failure = "downgrade";
+        this.close();
+        return;
+      }
+      if (channel && this.connected) {
+        this.secure = channel;
         this.encrypted = true;
+        channel.onSend = (bytes) => this.ws.send(bytes);
         this.ws.send(this.secure.firstMessage);
         // The host answers through the relay; wait for the tunnel to open so
         // the hello that follows can actually be sealed.
@@ -140,8 +182,10 @@ export class RoomTransport {
           await new Promise((r) => setTimeout(r, 10));
         }
         if (!this.secure.open) {
-          this.onError?.(new Error("the encrypted handshake did not complete"));
-          this.close();
+          if (this.connected) {
+            this.onError?.(new Error("the encrypted handshake did not complete"));
+            this.close();
+          }
           return;
         }
       }
@@ -157,7 +201,7 @@ export class RoomTransport {
    */
   sendHello(encode, { width, height, captureMode, pin }) {
     const p = Number(pin) || 0;
-    if (this.secure && p !== this.pin) {
+    if (this.secure?.kind === "v1" && p !== this.pin) {
       throw new Error(`hello PIN ${p} differs from the PIN this tunnel was keyed with (${this.pin})`);
     }
     this.send(encode.encode_hello(encode.protocol_version(), width, height, captureMode, 0, p));

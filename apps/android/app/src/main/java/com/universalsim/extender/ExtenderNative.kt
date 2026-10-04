@@ -12,6 +12,9 @@ object ExtenderNative {
         System.loadLibrary("extender_mobile")
     }
 
+    /** Where to keep the pairing keys, so a paired computer reconnects with no code. Call once at start with `filesDir.absolutePath`. */
+    external fun nativeSetPairingDir(dir: String)
+
     /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display, 2 = control-only (clicker). pin: host pairing code (0 = none). deviceName: label for the screen this phone adds on the host ("" = host default). */
     external fun nativeConnect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int, deviceName: String): Long
     external fun nativeFree(handle: Long)

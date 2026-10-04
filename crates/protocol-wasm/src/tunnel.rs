@@ -1,5 +1,6 @@
-//! The encrypted browser leg: the PIN-keyed Noise tunnel and the protocol's own
-//! framing, exposed to JavaScript.
+//! The encrypted browser leg: pairing (v2 — SPAKE2, then Noise; or by
+//! remembered key), the older PIN-keyed Noise tunnel (v1, for v0.3 hosts only),
+//! and the protocol's own framing, exposed to JavaScript.
 //!
 //! Until this existed, a browser tab was the one client that spoke the protocol
 //! **in the clear** — TLS to the cloud rendezvous protected the wire, but the
@@ -22,11 +23,225 @@
 //! usually happens to carry exactly one record carrying exactly one frame, so
 //! code that ignores both looks fine right up until a 200 KB keyframe arrives.
 
-use extender_transport::{Initiator, Session};
+use extender_transport::pairing::{from_hex, to_hex};
+use extender_transport::{failure, ClientHandshake, Failure, Identity, Initiator, Session, Step};
 use wasm_bindgen::prelude::*;
 
-/// A handshake in progress. Send [`Handshake::first_message`] as the first
-/// thing on the connection, then hand the peer's reply to [`Handshake::finish`].
+// ---- v2: pairing with SPAKE2, reconnecting by key -------------------------------
+
+/// This tab's long-term key pair — what a host remembers it by after pairing.
+///
+/// The page keeps the two hex halves in `localStorage` (the browser's only
+/// durable store) and rebuilds the pair with [`PairingKeys::from_hex`]. ⚠️ So
+/// anyone who can read this origin's storage can act as this browser to the
+/// hosts it paired with; "Forget paired devices" on the host is the remedy.
+#[wasm_bindgen]
+pub struct PairingKeys {
+    identity: Identity,
+}
+
+#[wasm_bindgen]
+impl PairingKeys {
+    /// A fresh key pair from `crypto.getRandomValues`.
+    ///
+    /// # Errors
+    /// If no randomness is available.
+    pub fn generate() -> Result<PairingKeys, String> {
+        Identity::generate().map(|identity| PairingKeys { identity }).map_err(|e| e.to_string())
+    }
+
+    /// Rebuild a stored pair.
+    ///
+    /// # Errors
+    /// If either half is not 64 hex digits.
+    #[wasm_bindgen(js_name = fromHex)]
+    pub fn from_hex(secret: &str, public: &str) -> Result<PairingKeys, String> {
+        let secret = from_hex(secret).ok_or("the stored secret key is not 64 hex digits")?;
+        let public = from_hex(public).ok_or("the stored public key is not 64 hex digits")?;
+        Ok(PairingKeys { identity: Identity::from_parts(secret, public) })
+    }
+
+    /// The secret half, as hex, for storage.
+    #[wasm_bindgen(getter, js_name = secretHex)]
+    #[must_use]
+    pub fn secret_hex(&self) -> String {
+        to_hex(&self.identity.secret())
+    }
+
+    /// The public half, as hex, for storage.
+    #[wasm_bindgen(getter, js_name = publicHex)]
+    #[must_use]
+    pub fn public_hex(&self) -> String {
+        to_hex(&self.identity.public())
+    }
+}
+
+/// The **v2** handshake for a tab — the same `ClientHandshake` state machine
+/// every native client runs, bytes in and bytes out.
+///
+/// ```js
+/// const hs = PairingHandshake.pair(pin, keys);        // or .reconnect(keys, hostKeys)
+/// ws.send(hs.firstMessage);
+/// ws.onmessage = (m) => {
+///   try { const out = hs.feed(bytes); if (out.length) ws.send(out); }
+///   catch (e) { report(hs.failure); } // "wrong-code", "not-paired", …
+///
+/// ⚠️ No block comments in these examples: wasm-bindgen copies them into a JS
+/// doc comment, where a closing star-slash ends it early and breaks the module.
+///   if (hs.done) { const tunnel = hs.takeTunnel(); remember(hs.hostKeyHex); }
+/// };
+/// ws.onclose = () => { if (!hs.done) report(hs.closedFailure()); };
+/// ```
+#[wasm_bindgen]
+pub struct PairingHandshake {
+    hs: ClientHandshake,
+    first: Vec<u8>,
+    established: Option<extender_transport::Established>,
+    host_key: Option<[u8; 32]>,
+    paired: bool,
+    failure: Option<Failure>,
+}
+
+fn failure_code(f: Failure) -> &'static str {
+    match f {
+        Failure::WrongCode => "wrong-code",
+        Failure::HostLocked { .. } => "host-locked",
+        Failure::NotPaired => "not-paired",
+        Failure::UnknownHost => "unknown-host",
+        Failure::OlderHost => "older-host",
+        Failure::Unsupported => "unsupported",
+    }
+}
+
+#[wasm_bindgen]
+impl PairingHandshake {
+    /// Pair over `pin` (0 = a host with pairing switched off).
+    ///
+    /// # Errors
+    /// Only if the opening cannot be built.
+    pub fn pair(pin: u32, keys: &PairingKeys) -> Result<PairingHandshake, String> {
+        let (hs, first) = ClientHandshake::pair(pin, &keys.identity).map_err(|e| e.to_string())?;
+        Ok(Self::new(hs, first))
+    }
+
+    /// Reconnect by key, with no code, to any host whose public key (hex) is in
+    /// `host_keys`.
+    ///
+    /// # Errors
+    /// A key that is not 64 hex digits, or an opening that cannot be built.
+    pub fn reconnect(keys: &PairingKeys, host_keys: Vec<String>) -> Result<PairingHandshake, String> {
+        let trusted = host_keys
+            .iter()
+            .map(|k| from_hex(k).ok_or_else(|| format!("not a host key: {k:?}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (hs, first) = ClientHandshake::reconnect(&keys.identity, trusted).map_err(|e| e.to_string())?;
+        Ok(Self::new(hs, first))
+    }
+
+    fn new(hs: ClientHandshake, first: Vec<u8>) -> Self {
+        PairingHandshake { hs, first, established: None, host_key: None, paired: false, failure: None }
+    }
+
+    /// The bytes to send before anything else.
+    #[wasm_bindgen(getter, js_name = firstMessage)]
+    #[must_use]
+    pub fn first_message(&self) -> Vec<u8> {
+        self.first.clone()
+    }
+
+    /// Feed what arrived; returns what to send now (possibly nothing).
+    ///
+    /// # Errors
+    /// The handshake failed; [`failure`](Self::failure) names why when it is
+    /// something a person can act on.
+    pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        match self.hs.feed(bytes) {
+            Ok(Step::Continue(out)) => Ok(out),
+            Ok(Step::Done { send, established }) => {
+                self.host_key = Some(established.host_key);
+                self.paired = established.paired;
+                self.established = Some(*established);
+                Ok(send)
+            }
+            Err(e) => {
+                self.failure = failure(&e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// True once the tunnel is open (take it with [`take_tunnel`](Self::take_tunnel)).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn done(&self) -> bool {
+        self.host_key.is_some()
+    }
+
+    /// The open tunnel. It may already hold decrypted bytes.
+    ///
+    /// # Errors
+    /// Before the handshake is done, or a second time.
+    #[wasm_bindgen(js_name = takeTunnel)]
+    pub fn take_tunnel(&mut self) -> Result<Tunnel, String> {
+        self.established
+            .take()
+            .map(|e| Tunnel { session: e.session })
+            .ok_or_else(|| "no tunnel to take".to_owned())
+    }
+
+    /// The host's long-term key (hex), once done — what to remember.
+    #[wasm_bindgen(getter, js_name = hostKeyHex)]
+    #[must_use]
+    pub fn host_key_hex(&self) -> Option<String> {
+        self.host_key.map(|k| to_hex(&k))
+    }
+
+    /// True when this connection paired with the code (so the host key is new
+    /// trust worth saving), false when it reconnected by key.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn paired(&self) -> bool {
+        self.paired
+    }
+
+    /// Why the handshake failed, as a stable code: `wrong-code`, `host-locked`,
+    /// `not-paired`, `unknown-host`, `older-host`, `unsupported` — or
+    /// `undefined` for anything else.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn failure(&self) -> Option<String> {
+        self.failure.map(|f| failure_code(f).to_owned())
+    }
+
+    /// Seconds left when [`failure`](Self::failure) is `host-locked`, else 0.
+    #[wasm_bindgen(getter, js_name = lockedSeconds)]
+    #[must_use]
+    pub fn locked_seconds(&self) -> u32 {
+        match self.failure {
+            Some(Failure::HostLocked { seconds }) => seconds,
+            _ => 0,
+        }
+    }
+
+    /// The failure code to report when the socket closed before
+    /// [`done`](Self::done) — what a close means depends on how far it got
+    /// (`older-host` before any reply, `wrong-code` after the proof).
+    #[wasm_bindgen(js_name = closedFailure)]
+    #[must_use]
+    pub fn closed_failure(&mut self) -> Option<String> {
+        let f = failure(&self.hs.closed());
+        self.failure = f;
+        f.map(|f| failure_code(f).to_owned())
+    }
+}
+
+// ---- v1: for a v0.3 host only ----------------------------------------------------
+
+/// The **v1** handshake (`NNpsk0`, keyed by a hash of the PIN). ⚠️ A recording
+/// of it lets the PIN be guessed offline — use it only when the host can do
+/// nothing better (its bridge answered only `usscreens-e2ee.v1`). Send
+/// [`Handshake::first_message`] as the first thing on the connection, then hand
+/// the peer's reply to [`Handshake::finish`].
 #[wasm_bindgen]
 pub struct Handshake {
     initiator: Option<Initiator>,
@@ -229,6 +444,44 @@ mod tests {
         reader.push(&frame(b"incomplete")[..7]);
         assert!(reader.next_frame().is_none());
         assert_eq!(reader.pending(), 7);
+    }
+
+    #[test]
+    fn stored_keys_round_trip_through_hex() {
+        let keys = PairingKeys::generate().unwrap();
+        let again = PairingKeys::from_hex(&keys.secret_hex(), &keys.public_hex()).unwrap();
+        assert_eq!(again.public_hex(), keys.public_hex());
+        assert!(PairingKeys::from_hex("nope", &keys.public_hex()).is_err());
+    }
+
+    #[test]
+    fn a_v2_opening_starts_with_the_preamble_the_bridge_relays_on() {
+        let keys = PairingKeys::generate().unwrap();
+        let hs = PairingHandshake::pair(1234, &keys).unwrap();
+        assert!(hs.first_message().starts_with(&extender_transport::PREAMBLE));
+        let hs = PairingHandshake::reconnect(&keys, vec!["ab".repeat(32)]).unwrap();
+        assert!(hs.first_message().starts_with(&extender_transport::handshake::OPENING));
+        assert!(PairingHandshake::reconnect(&keys, vec!["xyz".into()]).is_err());
+    }
+
+    #[test]
+    fn a_close_before_any_reply_reads_as_an_older_host() {
+        let keys = PairingKeys::generate().unwrap();
+        let mut hs = PairingHandshake::pair(1234, &keys).unwrap();
+        assert_eq!(hs.closed_failure().as_deref(), Some("older-host"));
+        assert!(!hs.done());
+    }
+
+    /// The host's "locked" reply surfaces as a code and a wait.
+    #[test]
+    fn a_locked_reply_is_reported_with_its_wait() {
+        let keys = PairingKeys::generate().unwrap();
+        let mut hs = PairingHandshake::pair(1234, &keys).unwrap();
+        // u16 len 5, STATUS_LOCKED, 90 s.
+        let reply = [5, 0, 1, 90, 0, 0, 0];
+        assert!(hs.feed(&reply).is_err());
+        assert_eq!(hs.failure().as_deref(), Some("host-locked"));
+        assert_eq!(hs.locked_seconds(), 90);
     }
 
     #[test]

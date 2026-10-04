@@ -18,13 +18,28 @@
 //! What is deliberately **not** here: the responder half. Hosts accept
 //! connections and they all have sockets; only the *client* side needs to run
 //! without one.
+//!
+//! Two client handshakes live here:
+//!
+//! - [`ClientHandshake`] — **v2**, what every current client runs: SPAKE2 over
+//!   the code then `XXpsk0` (pairing), or `XX` with remembered keys
+//!   (reconnecting). See [`crate::handshake`].
+//! - [`Initiator`] — **v1**, `NNpsk0` keyed by a hash of the PIN. Kept only so
+//!   a browser tab can still reach a v0.3 host, which speaks nothing else; a
+//!   recorded v1 handshake lets the PIN be guessed offline, so nothing uses it
+//!   against a host that can do better.
 
 use std::collections::VecDeque;
 use std::io;
 
-use crate::{
-    derive_psk, noise_err, noise_params, MAX_HANDSHAKE_MSG, MAX_PLAINTEXT, PREAMBLE,
+use unisim_pake::{Pake, Role};
+
+use crate::handshake::{
+    self, code_bytes, frame, take_frame, Failure, MODE_KNOWN, MODE_PAIR, OPENING, PAIR_CONTEXT,
+    PSK_LABEL, STATUS_GO, STATUS_LOCKED, VERDICT_NOT_PAIRED, VERDICT_OK,
 };
+use crate::pairing::{Identity, KEY_LEN};
+use crate::{derive_psk, noise_err, noise_params, MAX_HANDSHAKE_MSG, MAX_PLAINTEXT, PREAMBLE};
 
 /// An initiator handshake in progress: created by [`Initiator::start`], finished
 /// by [`Initiator::finish`] once the peer's reply has arrived.
@@ -79,6 +94,261 @@ impl Initiator {
         self.hs.read_message(&body, &mut scratch).map_err(noise_err)?;
         Ok(Session::from_transport(self.hs.into_transport_mode().map_err(noise_err)?))
     }
+}
+
+/// What one [`ClientHandshake::feed`] produced.
+pub enum Step {
+    /// Send `0` (possibly empty) and keep feeding whatever arrives.
+    Continue(Vec<u8>),
+    /// The tunnel is open. Send `send` first (possibly empty), then use the
+    /// session.
+    Done {
+        /// Bytes still to send before anything sealed by the session.
+        send: Vec<u8>,
+        /// The result (boxed: it carries the whole cipher state).
+        established: Box<Established>,
+    },
+}
+
+/// A finished v2 handshake.
+pub struct Established {
+    /// The live tunnel. It may already hold decrypted bytes that arrived with
+    /// the host's verdict.
+    pub session: Session,
+    /// The host's long-term public key, proven in the handshake.
+    pub host_key: [u8; KEY_LEN],
+    /// True when this connection paired with the code; the caller should
+    /// remember [`host_key`](Self::host_key) so the next one needs no code.
+    pub paired: bool,
+}
+
+enum Stage {
+    /// Pairing: sent the SPAKE2 message, waiting for the host's.
+    AwaitPake { pake: Pake, prologue: Vec<u8> },
+    /// Pairing: sent Noise message 1, waiting for message 2.
+    AwaitPairReply { hs: Box<snow::HandshakeState> },
+    /// Reconnecting: sent Noise message 1, waiting for message 2.
+    AwaitKnownReply { hs: Box<snow::HandshakeState>, trusted: Vec<[u8; KEY_LEN]> },
+    /// Handshake done; waiting for the host's one-byte verdict record.
+    AwaitVerdict { session: Session, host_key: [u8; KEY_LEN], paired: bool },
+    /// Finished or failed; feeding again is an error.
+    Over,
+}
+
+/// The **v2** client handshake as a byte-in / byte-out state machine — the one
+/// every current client runs, natively over a socket ([`crate::connect_pair`],
+/// [`crate::connect_known`]) and in a browser over a WebSocket.
+///
+/// Start it with [`pair`](Self::pair) (with the code) or
+/// [`reconnect`](Self::reconnect) (with remembered host keys), send the bytes
+/// that returns **before anything else**, then pass everything that arrives to
+/// [`feed`](Self::feed) and send whatever it hands back, until it says
+/// [`Step::Done`]. If the carrier closes first, report
+/// [`closed`](Self::closed) — what a close *means* depends on how far it got.
+pub struct ClientHandshake {
+    stage: Stage,
+    secret: [u8; KEY_LEN],
+    /// Bytes received and not yet consumed.
+    buf: Vec<u8>,
+    /// Whether anything at all has arrived — a close before that is how a
+    /// v0.3 host refuses a v2 opening.
+    heard: bool,
+}
+
+impl ClientHandshake {
+    /// Begin pairing over `pin` (0 = a host with pairing switched off). The
+    /// result proves both ends know the code without giving a recording
+    /// anything to test codes against.
+    ///
+    /// # Errors
+    /// Only if the handshake messages cannot be built (not input-dependent).
+    pub fn pair(pin: u32, identity: &Identity) -> io::Result<(Self, Vec<u8>)> {
+        let (pake, msg) = Pake::start(Role::Initiator, &code_bytes(pin), PAIR_CONTEXT);
+        let mut first = OPENING.to_vec();
+        first.push(MODE_PAIR);
+        first.extend_from_slice(&frame(&msg)?);
+        let this = ClientHandshake {
+            stage: Stage::AwaitPake { pake, prologue: first.clone() },
+            secret: identity.secret(),
+            buf: Vec::new(),
+            heard: false,
+        };
+        Ok((this, first))
+    }
+
+    /// Begin reconnecting to a host this device has paired with: no code, the
+    /// remembered keys only. `trusted` is every host key this device accepts.
+    ///
+    /// # Errors
+    /// Only if the handshake messages cannot be built (not input-dependent).
+    pub fn reconnect(identity: &Identity, trusted: Vec<[u8; KEY_LEN]>) -> io::Result<(Self, Vec<u8>)> {
+        let mut first = OPENING.to_vec();
+        first.push(MODE_KNOWN);
+        let secret = identity.secret();
+        let mut hs = snow::Builder::new(handshake::known_params()?)
+            .local_private_key(&secret)
+            .prologue(&first)
+            .build_initiator()
+            .map_err(noise_err)?;
+        let mut buf = [0u8; MAX_HANDSHAKE_MSG];
+        let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+        first.extend_from_slice(&frame(&buf[..n])?);
+        let this = ClientHandshake {
+            stage: Stage::AwaitKnownReply { hs: Box::new(hs), trusted },
+            secret,
+            buf: Vec::new(),
+            heard: false,
+        };
+        Ok((this, first))
+    }
+
+    /// Feed bytes from the host; get back what to send, or the open tunnel.
+    ///
+    /// # Errors
+    /// A malformed or unauthenticated reply, or a refusal — with a
+    /// [`Failure`](crate::handshake::Failure) inside when there is one a person
+    /// can act on (wrong code, host locked, not paired). Fatal: start again on a
+    /// fresh connection.
+    pub fn feed(&mut self, bytes: &[u8]) -> io::Result<Step> {
+        if !bytes.is_empty() {
+            self.heard = true;
+        }
+        self.buf.extend_from_slice(bytes);
+        let mut out = Vec::new();
+        loop {
+            match std::mem::replace(&mut self.stage, Stage::Over) {
+                Stage::AwaitPake { pake, mut prologue } => {
+                    let Some(msg) = take_frame(&mut self.buf)? else {
+                        self.stage = Stage::AwaitPake { pake, prologue };
+                        return Ok(Step::Continue(out));
+                    };
+                    let pake_b = host_status(&msg)?;
+                    prologue.extend_from_slice(&frame(&msg)?);
+                    let key = pake.finish(pake_b).map_err(noise_err)?;
+                    let psk = key.derive(PSK_LABEL);
+                    let mut hs = snow::Builder::new(handshake::pair_params()?)
+                        .local_private_key(&self.secret)
+                        .psk(0, &psk)
+                        .prologue(&prologue)
+                        .build_initiator()
+                        .map_err(noise_err)?;
+                    let mut buf = [0u8; MAX_HANDSHAKE_MSG];
+                    let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+                    out.extend_from_slice(&frame(&buf[..n])?);
+                    self.stage = Stage::AwaitPairReply { hs: Box::new(hs) };
+                }
+                Stage::AwaitPairReply { mut hs } => {
+                    let Some(msg) = take_frame(&mut self.buf)? else {
+                        self.stage = Stage::AwaitPairReply { hs };
+                        return Ok(Step::Continue(out));
+                    };
+                    let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
+                    // A reply that does not authenticate came from something
+                    // that does not hold our key — which, here, means it does
+                    // not know the code.
+                    hs.read_message(&msg, &mut scratch).map_err(|_| Failure::WrongCode.into_io())?;
+                    let host_key = remote_static(&hs)?;
+                    let mut buf = [0u8; MAX_HANDSHAKE_MSG];
+                    let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+                    out.extend_from_slice(&frame(&buf[..n])?);
+                    let session = Session::from_transport(hs.into_transport_mode().map_err(noise_err)?);
+                    self.stage = Stage::AwaitVerdict { session, host_key, paired: true };
+                }
+                Stage::AwaitKnownReply { mut hs, trusted } => {
+                    let Some(msg) = take_frame(&mut self.buf)? else {
+                        self.stage = Stage::AwaitKnownReply { hs, trusted };
+                        return Ok(Step::Continue(out));
+                    };
+                    let body = host_status(&msg)?;
+                    let mut scratch = [0u8; MAX_HANDSHAKE_MSG];
+                    hs.read_message(body, &mut scratch).map_err(noise_err)?;
+                    let host_key = remote_static(&hs)?;
+                    // ⚠️ Checked BEFORE message 3, which carries this device's
+                    // own key: a stranger answering at the address learns
+                    // nothing about who is knocking.
+                    if !trusted.contains(&host_key) {
+                        return Err(Failure::UnknownHost.into_io());
+                    }
+                    let mut buf = [0u8; MAX_HANDSHAKE_MSG];
+                    let n = hs.write_message(&[], &mut buf).map_err(noise_err)?;
+                    out.extend_from_slice(&frame(&buf[..n])?);
+                    let session = Session::from_transport(hs.into_transport_mode().map_err(noise_err)?);
+                    self.stage = Stage::AwaitVerdict { session, host_key, paired: false };
+                }
+                Stage::AwaitVerdict { mut session, host_key, paired } => {
+                    if !self.buf.is_empty() {
+                        session.feed(&std::mem::take(&mut self.buf))?;
+                    }
+                    let mut verdict = [0u8; 1];
+                    if session.take(&mut verdict) == 0 {
+                        self.stage = Stage::AwaitVerdict { session, host_key, paired };
+                        return Ok(Step::Continue(out));
+                    }
+                    return match verdict[0] {
+                        VERDICT_OK => Ok(Step::Done {
+                            send: out,
+                            established: Box::new(Established { session, host_key, paired }),
+                        }),
+                        VERDICT_NOT_PAIRED => Err(Failure::NotPaired.into_io()),
+                        other => Err(noise_err(format!("unknown host verdict {other}"))),
+                    };
+                }
+                Stage::Over => return Err(noise_err("this handshake is already over")),
+            }
+        }
+    }
+
+    /// The error to report when the carrier closes before [`Step::Done`]. What
+    /// a close means depends on how far the handshake got:
+    ///
+    /// - before the host said anything → [`Failure::OlderHost`]: a v0.3 host
+    ///   closes on a v2 opening without a word;
+    /// - after our proof of the code → [`Failure::WrongCode`]: the host checked
+    ///   it, it failed, and the host hung up (and counted it);
+    /// - otherwise → a plain connection error.
+    #[must_use]
+    pub fn closed(&self) -> io::Error {
+        match &self.stage {
+            Stage::AwaitPake { .. } | Stage::AwaitKnownReply { .. } if !self.heard => {
+                Failure::OlderHost.into_io()
+            }
+            Stage::AwaitPairReply { .. } => Failure::WrongCode.into_io(),
+            _ => io::Error::new(io::ErrorKind::UnexpectedEof, "the host closed the connection mid-handshake"),
+        }
+    }
+
+    /// Whether this handshake is pairing with a code (as opposed to
+    /// reconnecting with remembered keys).
+    #[must_use]
+    pub fn is_pairing(&self) -> bool {
+        matches!(self.stage, Stage::AwaitPake { .. } | Stage::AwaitPairReply { .. })
+    }
+}
+
+/// Strip the status byte from the host's first reply, turning a refusal into
+/// its [`Failure`].
+fn host_status(msg: &[u8]) -> io::Result<&[u8]> {
+    match msg.split_first() {
+        Some((&STATUS_GO, body)) => Ok(body),
+        Some((&STATUS_LOCKED, rest)) => {
+            let seconds = rest
+                .get(..4)
+                .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            Err(Failure::HostLocked { seconds }.into_io())
+        }
+        Some(_) => Err(Failure::Unsupported.into_io()),
+        None => Err(noise_err("empty reply from the host")),
+    }
+}
+
+fn remote_static(hs: &snow::HandshakeState) -> io::Result<[u8; KEY_LEN]> {
+    let key = hs.get_remote_static().ok_or_else(|| noise_err("the host sent no static key"))?;
+    let mut out = [0u8; KEY_LEN];
+    if key.len() != KEY_LEN {
+        return Err(noise_err("the host's static key has the wrong length"));
+    }
+    out.copy_from_slice(key);
+    Ok(out)
 }
 
 /// A live Noise tunnel: [`Session::seal`] turns plaintext into wire bytes,

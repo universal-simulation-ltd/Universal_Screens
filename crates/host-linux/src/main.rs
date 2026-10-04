@@ -154,6 +154,10 @@ pub(crate) fn serve_loop(
     // One wrong-PIN count for this whole loop: per host, not per address,
     // because the remote-access relay makes every peer look like the same one.
     let mut guard = PinGuard::new();
+    // This host's long-term key and the devices that have paired with it. A
+    // paired device reconnects with its key and no PIN — even after the PIN
+    // changes — until "Paired devices ▸ Forget" (host-ui's pairing panel).
+    let mut store = extender_host_ui::pairing_store();
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
@@ -161,7 +165,9 @@ pub(crate) fn serve_loop(
                 // Locked after too many wrong PINs: close it before the
                 // handshake, so no PIN is tested while the lock lasts.
                 if let Some(refusal) = guard.refuse(Instant::now()) {
-                    drop(stream);
+                    // A current client is told how long to wait; anything else
+                    // is just closed. No code is tested either way.
+                    transport::refuse_locked(stream, refusal.left);
                     if refusal.first {
                         on_event(HostEvent::Error(refusal.message(&peer)));
                     }
@@ -171,11 +177,17 @@ pub(crate) fn serve_loop(
                 // Until the hello is in, a peer has proved nothing: bound it, or
                 // one silent connection holds this loop and nobody else gets in.
                 transport::begin_handshake(&stream);
-                match transport::accept(stream, expected_pin) {
+                match transport::accept_with(stream, expected_pin, &mut store, &peer_addr.ip().to_string()) {
                     Ok(mut conn) => {
                         if !conn.is_encrypted() {
                             eprintln!(
                                 "warning: client {peer} connected without transport encryption (plaintext)"
+                            );
+                        }
+                        if conn.auth() == transport::PeerAuth::LegacyPin {
+                            eprintln!(
+                                "warning: client {peer} uses the v0.3 handshake, which lets a recording of it be \
+                                 brute-forced for the PIN — update that app"
                             );
                         }
                         if let Some(req) = read_hello(&mut conn, &peer, expected_pin, &mut guard) {
@@ -248,7 +260,9 @@ fn read_hello(
             protocol::PROTOCOL_VERSION
         );
     }
-    if expected_pin != 0 && hello.pin != expected_pin {
+    // A v2 peer settled this in the handshake: it proved the code (SPAKE2),
+    // or it is a paired device, which does not send the current PIN at all.
+    if expected_pin != 0 && !stream.auth().settles_pin() && hello.pin != expected_pin {
         eprintln!("client {peer} rejected: wrong pairing PIN");
         // A plaintext peer never runs Noise, so this is where ITS guesses show
         // up. Count them too, or this would be the free way round the lockout.
