@@ -867,8 +867,27 @@ fun ConnectScreen(
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
+        // What the app is for, and which device does what — a stranger who
+        // installed it from the store otherwise sees "Scan to connect" with no
+        // idea that the other half runs on their computer (2026-10-05).
+        Text(
+            "Use this phone as a clicker, trackpad, remote control or second screen for your computer.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
         Button(onClick = startScan, modifier = Modifier.fillMaxWidth()) {
             Text("Scan to connect", style = MaterialTheme.typography.titleMedium)
+        }
+        // First run only: once a computer is saved, they know the drill.
+        if (saved.isEmpty()) {
+            Text(
+                "Open Universal Screens on your Windows PC, Mac or Linux computer and scan the code it shows. " +
+                    "Not on your computer yet? It's free at opensource.unisim.co.uk/screens",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
 
         if (nearby.isNotEmpty()) {
@@ -886,7 +905,7 @@ fun ConnectScreen(
 
         if (visible.isNotEmpty()) {
             Text(
-                "SAVED HOSTS",
+                "SAVED COMPUTERS",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1042,7 +1061,7 @@ fun ConnectScreen(
                 title = { Text("Connect to ${target.name}") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter the 4-digit PIN shown on the host (under “More details”).")
+                        Text("Enter the 4-digit PIN shown in Universal Screens on that computer (under “More details”).")
                         OutlinedTextField(
                             value = nearbyPin,
                             onValueChange = { nearbyPin = it.filter { c -> c.isDigit() }.take(4) },

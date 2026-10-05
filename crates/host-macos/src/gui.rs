@@ -397,6 +397,15 @@ impl HostApp {
                 .strong()
                 .size(15.0),
         );
+        // What the scan is FOR — a stranger opening this window otherwise sees
+        // a QR and no reason to scan it (2026-10-05, first-run pass). The line
+        // above already covers "no app yet": a camera scan lands on
+        // …/screens/connect, which offers the store links.
+        ui.add_space(2.0);
+        ui.label(
+            "Your phone becomes a clicker, trackpad, remote control or second screen \
+             for this Mac.",
+        );
         ui.add_space(10.0);
 
         if self.running && self.address.is_some() {

@@ -403,6 +403,15 @@ impl HostApp {
     fn show_connect(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         step_header(ui, "Universal Screens", "Scan to connect");
         scan_subheader(ui, "Scan directly in the Universal Screens App");
+        // What the scan is FOR, and what to do on a phone without the app — a
+        // stranger opening this window otherwise sees a QR and no reason to
+        // scan it. The camera route lands on …/screens/connect, which offers
+        // the store links (2026-10-05, first-run pass).
+        ui.label(
+            "Your phone becomes a clicker, trackpad, remote control or second screen \
+             for this PC. No app yet? Scan with the phone's camera and it takes you there.",
+        );
+        ui.add_space(4.0);
 
         // Which QR (if any) was tapped this frame to enlarge. Applied to
         // `self.qr_zoom` after the borrow of `self.wifi` below is released.
