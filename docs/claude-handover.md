@@ -4,6 +4,45 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-09 (the browser client is served at /screens/app; the web pages' dead ends built)
+
+**Pushed straight to `main` here and in `backoffice/opensource-portal`. No host
+release.**
+
+- **Browser client live** at `https://opensource.unisim.co.uk/screens/app/`.
+  The portal has no build step, so it holds a BUILT copy made by
+  `scripts/publish-web-client.sh` (wasm-pack `--release`, ~290 KB WASM,
+  `verify-wasm`, copy, `BUILD.txt` with the commit). ⚠️ **Nothing republishes it
+  automatically**: change `apps/web` or `crates/protocol-wasm` and the hosted copy
+  is stale until someone runs the script and pushes the portal.
+- **On https it is Remote-only** (`HOSTED` in `client.js`): the LAN path's `ws://`
+  bridge is refused from an https page (and the portal CSP upgrades it), no
+  released host runs that bridge, and polling `/peers` would trip Chrome's
+  local-network prompt. The PIN field moves beside the code.
+- **Verified** in Playwright (Chromium): the hosted page → the live relay →
+  `extender-web-bridge --room` → `extender-host-windows 127.0.0.1:9100`
+  (headless, so **PIN 0** — a real PIN was not exercised here): SPAKE2 pairing,
+  "end-to-end encrypted" in the log, H.264 decoded and painted.
+- **Portal side** (see its commit): `/screens/connect` has a code box (4 chars =
+  drive a `/screens/receive` tab as trackpad/clicker; 6 = go to
+  `/screens/app/?remote=`); `/screens#remote` is the section the hosts' Remote
+  access panel points at; the hero and receiver section no longer need the phone
+  app. ⚠️ The live `/screens/connect` had been the Worker's old inline trampoline,
+  not `connect.html`, since `run_worker_first` landed (2026-08-28) — deleted.
+
+**Host bugs found, not fixed (they need a release):**
+- **Remote access is one code per host launch.** `remote_active` is set on
+  "Enable remote access" and never cleared (host-windows / host-macos `gui.rs`),
+  so after the session ends the panel keeps showing a dead code; only a restart
+  gives a new one.
+- **The room's 10-minute TTL caps a remote session.** The rendezvous alarm is
+  armed when the first peer joins (the host), so the relay closes the session 10
+  minutes after "Enable remote access", however long it has been in use.
+- **"Cast to a browser screen" points at `/screens/receive`,** which cannot decode
+  video. The receiver now says so when a host joins (it sees the `caps` signal),
+  but the panel's instruction is still wrong.
+- The Linux host has no Remote access at all.
+
 ## Update — 2026-09-29 (v0.3.0 released; knowledge base on iOS and the Windows host's menu)
 
 **All pushed straight to `main`; v0.3.0 tagged and published.**

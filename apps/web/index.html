@@ -276,6 +276,10 @@
   .field label { font-size: .8rem; color: var(--muted); }
   .field input { font: inherit; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--card); color: var(--text); }
   .fields-row { display: flex; gap: .6rem; }
+  /* The Connect button sits beside fields that carry a .6rem bottom margin;
+     without the same margin it hangs that much below the inputs. (The inline
+     margin:0 on the button is why this needs !important.) */
+  #remote-row > #room-connect { margin-bottom: .6rem !important; }
   .fields-row .field:first-child { flex: 1; }
 
   /* ── A 16px floor on every text control, on touch pointers only ────────────
