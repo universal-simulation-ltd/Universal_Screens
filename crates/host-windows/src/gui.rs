@@ -968,7 +968,7 @@ impl HostApp {
                 .response
                 // The disc carries no text, so without this the control is
                 // unnameable — nothing on hover, nothing for assistive tech.
-                .on_hover_text("Profile & settings");
+                .on_hover_text("Profile & tuning");
             });
         });
     }
