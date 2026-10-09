@@ -11,7 +11,36 @@ and milestone plan in [`docs/M7-browser-client.md`](../../docs/M7-browser-client
 - **M7b — protocol WASM shim** ✅ — `crates/protocol-wasm` compiled with
   `wasm-pack`; the canonical Rust `postcard` codec in the browser (no TS drift).
   `verify-wasm.mjs` checks the built artifact against canonical Rust bytes.
-- **M7c+ — decode / render / input / UI** — pending (the real TS client).
+- **M7c+ — decode / render / input / UI** ✅ — `src/client.js` and friends
+  (plain JS modules, no build). Verified 2026-10-09 against a real
+  `extender-host-windows` through the live relay: H.264 decoded and drawn.
+
+## Where it is served
+
+**`https://opensource.unisim.co.uk/screens/app/`** (since 2026-10-09). The
+portal (`backoffice/opensource-portal`) is a static-assets Worker with no build
+step, so it holds a BUILT copy in `public/screens/app/`, made by:
+
+```sh
+scripts/publish-web-client.sh   # wasm-pack --release, verify-wasm, copy, BUILD.txt
+```
+
+then commit + push the portal (its workflow deploys on push). `BUILD.txt` there
+names the Screens commit the copy came from. ⚠️ Nothing republishes it
+automatically: change `apps/web` or `crates/protocol-wasm`, and the hosted copy
+is stale until someone runs the script. (A CI job would need a token that can
+push to the portal repo; none exists.)
+
+On that https copy only **Remote (across networks)** is offered (`HOSTED` in
+`src/client.js`): the LAN path dials a bridge with `ws://`, which a browser
+refuses from an https page (and the portal's CSP upgrades it to `wss://`), no
+released host runs the bridge, and polling `http://<bridge>/peers` from a public
+page would trip Chrome's local-network-access prompt. `node serve.mjs` on
+`localhost` still shows everything.
+
+The host's **Remote access (other networks)** panel sends people to
+`/screens`, whose "Remote (across networks)" section (`#remote`) and
+`/screens/connect` both hand a 6-character code to this page as `?remote=CODE`.
 
 ## One-time toolchain
 

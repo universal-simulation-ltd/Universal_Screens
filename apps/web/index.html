@@ -786,18 +786,25 @@
       <div id="saved-list" hidden></div>
     </div>
 
+    <!-- The LAN path goes through a bridge on this network (ws://). On the
+         hosted copy (https://opensource.unisim.co.uk/screens/app/) a browser
+         refuses ws:// to a LAN address, and no released host runs the bridge,
+         so client.js hides this block there and moves the PIN field down to
+         the remote row. See HOSTED in src/client.js. -->
+    <div id="lan-section">
     <div class="section-label">New connection</div>
     <div class="fields-row">
       <div class="field"><label for="addr">Bridge host:port</label><input id="addr" value="127.0.0.1:9002" /></div>
-      <div class="field" style="max-width:5.5rem"><label for="pin">PIN</label><input id="pin" value="0" inputmode="numeric" title="Not needed for a computer this browser has paired with before — leave it at 0." /></div>
+      <div class="field" id="pin-field" style="max-width:5.5rem"><label for="pin">PIN</label><input id="pin" value="0" inputmode="numeric" title="Not needed for a computer this browser has paired with before — leave it at 0." /></div>
     </div>
     <div id="modes"></div>
+    </div>
 
     <!-- Remote access across networks: the host publishes a code (its "Remote
          access" panel dials the cloud rendezvous); enter it here to view/control
          it from anywhere. Relayed through the cloud, so slower than LAN. -->
     <div class="section-label">Remote (across networks)</div>
-    <div class="fields-row">
+    <div class="fields-row" id="remote-row">
       <div class="field"><label for="room-code">Host code</label><input id="room-code" placeholder="ABCD12" autocomplete="off" autocapitalize="characters" /></div>
       <button type="button" id="room-connect" class="row-btn" style="margin:0; width:auto; align-self:end; padding:.6rem 1rem;">Connect</button>
     </div>

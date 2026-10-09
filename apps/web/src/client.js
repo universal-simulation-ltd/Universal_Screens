@@ -17,6 +17,16 @@ import * as account from "./account.js";
 // receiver page uses.
 const ROOM_BASE = "wss://opensource.unisim.co.uk";
 
+// Served from the web (https://opensource.unisim.co.uk/screens/app/) rather
+// than from `serve.mjs` on this machine. There, only Remote works: the LAN path
+// dials a bridge with ws://, which a browser refuses from an https:// page (and
+// the portal's CSP upgrades it to wss://, which no bridge answers); no released
+// host runs that bridge anyway; and polling http://<bridge>/peers from a public
+// page would trip Chrome's local-network-access prompt every 3 s. So the hosted
+// copy shows the Remote row only, with the PIN beside the code.
+const HOSTED = location.protocol === "https:"
+  && location.hostname !== "localhost" && location.hostname !== "127.0.0.1";
+
 const $ = (id) => document.getElementById(id);
 
 // The three ways to use it, mirroring the mobile apps' mode picker. `capture` is
@@ -218,6 +228,7 @@ function startNearbyPolling() {
 }
 
 function renderSaved() {
+  if (HOSTED) return; // saved entries are LAN addresses — see HOSTED
   const list = saved.load();
   $("saved-section").hidden = list.length === 0;
   const box = $("saved-list");
@@ -650,10 +661,18 @@ async function syncSaved() {
 
 export function boot() {
   renderModes();
-  renderSaved();
   wireAccount();
-  void syncSaved();
-  startNearbyPolling();
+  if (HOSTED) {
+    // Remote only — see HOSTED. Saved connections are LAN addresses, so they
+    // stay hidden too (renderSaved is what would un-hide them).
+    document.body.classList.add("hosted");
+    $("lan-section").hidden = true;
+    $("room-connect").before($("pin-field"));
+  } else {
+    renderSaved();
+    void syncSaved();
+    startNearbyPolling();
+  }
   // A changed bridge address means a different /peers source — refresh now.
   $("addr").addEventListener("change", () => { lastNearbyJson = ""; pollNearby(); });
 
@@ -725,7 +744,9 @@ export function boot() {
   });
 
   ready()
-    .then(() => status(`Ready (protocol v${protocol.protocol_version()}). Start the bridge, then pick a mode.`))
+    .then(() => status(HOSTED
+      ? `Ready (protocol v${protocol.protocol_version()}). Enter the code from the host's Remote access panel, and its PIN.`
+      : `Ready (protocol v${protocol.protocol_version()}). Start the bridge, then pick a mode.`))
     .catch((e) => status(`WASM init failed: ${e}`, "err"));
 
   window.runDecodePipelineSelfTest = runDecodePipelineSelfTest;
