@@ -24,7 +24,7 @@ use extender_host_ui::{
     account_menu_row, show_account_window, UserAccount,
     show_user_count, UserCount,
     show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY,
-    about_panel, connect_url, device_icon, first_free_port, gen_pin, gen_room_code, nearby_orbit,
+    about_panel, connect_url, device_icon, first_free_port, gen_pin, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
     DeviceKind, OwnPinChange, OwnPinEditor, BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL,
     OPENSOURCE_ROOT, OPENSOURCE_URL, OWN_PIN_KEY, RECENT_MAX, SIBLING_APPS,
@@ -102,16 +102,9 @@ struct HostApp {
     renaming_id: Option<u32>,
     /// The recent-connection peer (IP) whose inline rename editor is open.
     renaming_peer: Option<String>,
-    /// "Cast to a browser": the code typed from a receiver tab, and the status of
-    /// the dial-the-room bridge (shared with its background thread).
-    cast_code: String,
-    cast_status: Arc<Mutex<String>>,
-    /// "Remote access": a room code this host publishes for someone on another
-    /// network to reach it (the inverse of Cast — we mint the code and dial the
-    /// rendezvous as sender). Minted lazily; status shared with the dial thread.
-    remote_code: String,
-    remote_status: Arc<Mutex<String>>,
-    remote_active: bool,
+    /// "Remote access": the shared panel (host-ui `remote`), which mints a code,
+    /// dials the rendezvous and drops the code when the session ends.
+    remote: extender_host_ui::RemoteAccessPanel,
     /// The connection QR the user tapped to enlarge for easier scanning (None =
     /// not enlarged). `qr_zoom_armed` guards against the very click that opened
     /// the overlay also closing it on the same frame.
@@ -183,11 +176,7 @@ impl HostApp {
             rename_draft: String::new(),
             renaming_id: None,
             renaming_peer: None,
-            cast_code: String::new(),
-            cast_status: Arc::new(Mutex::new(String::new())),
-            remote_code: String::new(),
-            remote_status: Arc::new(Mutex::new(String::new())),
-            remote_active: false,
+            remote: extender_host_ui::RemoteAccessPanel::default(),
             qr_zoom: None,
             qr_zoom_armed: false,
         }
@@ -566,104 +555,19 @@ impl HostApp {
         });
 
         ui.add_space(8.0);
-        egui::CollapsingHeader::new("Cast to a browser screen").default_open(false).show(ui, |ui| {
-            ui.small(
-                "Open opensource.unisim.co.uk/screens/receive on another screen, \
-                 then enter the code it shows here:",
-            );
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.cast_code).hint_text("CODE").desired_width(90.0));
-                let can_cast = self.running && self.cast_code.trim().len() >= 4;
-                if ui.add_enabled(can_cast, egui::Button::new("Cast")).clicked() {
-                    // Bridge our own listener to the rendezvous room on a thread —
-                    // dial_room blocks until the cast ends; status flows back via the Arc.
-                    let code = self.cast_code.trim().to_uppercase();
-                    let port = self
-                        .address
-                        .as_deref()
-                        .and_then(|a| a.rsplit_once(':').map(|(_, p)| p.to_owned()))
-                        .unwrap_or_else(|| "9000".to_owned());
-                    let host_addr = format!("127.0.0.1:{port}");
-                    let cast_status = self.cast_status.clone();
-                    let ctx2 = ctx.clone();
-                    *cast_status.lock().unwrap() = "Connecting to the browser…".to_owned();
-                    thread::spawn(move || {
-                        let res =
-                            extender_web_bridge::dial_room(extender_web_bridge::DEFAULT_ROOM_URL, &code, &host_addr);
-                        *cast_status.lock().unwrap() = match res {
-                            Ok(()) => "Cast ended.".to_owned(),
-                            Err(e) => format!("Cast failed: {e}"),
-                        };
-                        ctx2.request_repaint();
-                    });
-                }
-            });
-            if !self.running {
-                ui.small("Start the host first, then cast.");
-            }
-            let status = self.cast_status.lock().unwrap().clone();
-            if !status.is_empty() {
-                ui.label(status);
-            }
-        });
-
-        ui.add_space(8.0);
+        // Remote access is also how a screen reaches a browser on the SAME
+        // network: the old "Cast to a browser screen" panel dialled a code from
+        // /screens/receive, which cannot show video, so it is gone (2026-10-10).
         egui::CollapsingHeader::new("Remote access (other networks)").default_open(false).show(ui, |ui| {
-            ui.small(
-                "Let someone on a different network reach this Mac. Share the code below; \
-                 they open opensource.unisim.co.uk/screens and enter it under \
-                 “Remote (across networks)”.",
-            );
-            ui.add_space(4.0);
-            ui.colored_label(BRAND, "⚠ Relayed through the cloud — slower than a local connection.");
-            ui.add_space(4.0);
-
-            if self.remote_active {
-                ui.horizontal(|ui| {
-                    ui.label("Your code:");
-                    ui.label(egui::RichText::new(&self.remote_code).heading().strong());
-                    if ui.small_button("Copy").clicked() {
-                        ui.ctx().copy_text(self.remote_code.clone());
-                    }
-                });
+            let port = if self.running {
+                self.address
+                    .as_deref()
+                    .and_then(|a| a.rsplit_once(':'))
+                    .and_then(|(_, p)| p.parse::<u16>().ok())
             } else {
-                let can_start = self.running;
-                if ui.add_enabled(can_start, egui::Button::new("Enable remote access")).clicked() {
-                    // Mint a code and dial the rendezvous as sender on a thread —
-                    // dial_room blocks until the remote leaves; status via the Arc.
-                    let code = gen_room_code();
-                    self.remote_code = code.clone();
-                    self.remote_active = true;
-                    let port = self
-                        .address
-                        .as_deref()
-                        .and_then(|a| a.rsplit_once(':').map(|(_, p)| p.to_owned()))
-                        .unwrap_or_else(|| "9000".to_owned());
-                    let host_addr = format!("127.0.0.1:{port}");
-                    let remote_status = self.remote_status.clone();
-                    let ctx2 = ctx.clone();
-                    *remote_status.lock().unwrap() = "Waiting for the remote to connect…".to_owned();
-                    thread::spawn(move || {
-                        let res = extender_web_bridge::dial_room(
-                            extender_web_bridge::DEFAULT_ROOM_URL,
-                            &code,
-                            &host_addr,
-                        );
-                        *remote_status.lock().unwrap() = match res {
-                            Ok(()) => "Remote session ended.".to_owned(),
-                            Err(e) => format!("Remote access failed: {e}"),
-                        };
-                        ctx2.request_repaint();
-                    });
-                }
-                if !self.running {
-                    ui.small("Start the host first, then enable remote access.");
-                }
-            }
-            let status = self.remote_status.lock().unwrap().clone();
-            if !status.is_empty() {
-                ui.label(status);
-            }
+                None
+            };
+            self.remote.ui(ui, port);
         });
     }
 

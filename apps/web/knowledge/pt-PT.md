@@ -47,7 +47,7 @@ Cada máquina a que se liga fica guardada, por isso da próxima vez basta um toq
 
 ## A partir de outra rede
 
-Num Mac ou PC com Windows, **Remote access (other networks)** na janela do anfitrião dá-lhe um código. Introduza-o no cliente no browser em **Remote (across networks)**, juntamente com o PIN do anfitrião. A ligação passa pelo servidor de retransmissão da UNI·SIM, por isso conte com mais atraso do que na sua própria rede.
+**Remote access (other networks)** na janela do anfitrião (Mac, Windows ou Linux) dá-lhe um código. Introduza-o no cliente no browser em **Remote (across networks)**, juntamente com o PIN do anfitrião. A ligação passa pelo servidor de retransmissão da UNI·SIM, por isso conte com mais atraso do que na sua própria rede.
 
 ---
 id: the-pin

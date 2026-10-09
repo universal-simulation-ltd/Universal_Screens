@@ -38,9 +38,10 @@ released host runs the bridge, and polling `http://<bridge>/peers` from a public
 page would trip Chrome's local-network-access prompt. `node serve.mjs` on
 `localhost` still shows everything.
 
-The host's **Remote access (other networks)** panel sends people to
-`/screens`, whose "Remote (across networks)" section (`#remote`) and
-`/screens/connect` both hand a 6-character code to this page as `?remote=CODE`.
+The host's **Remote access (other networks)** panel (host-ui `remote.rs`, all
+three hosts) sends people straight here, and its **Copy link** button gives
+`/screens/app/?remote=CODE`. The portal's `/screens#remote` section and
+`/screens/connect` also hand a 6-character code to this page as `?remote=CODE`.
 
 ## One-time toolchain
 

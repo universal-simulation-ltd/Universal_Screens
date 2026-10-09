@@ -47,7 +47,7 @@ Cada máquina à qual você se conecta fica salva, então da próxima vez basta 
 
 ## De outra rede
 
-Em um Mac ou PC com Windows, **Remote access (other networks)** na janela do host fornece um código. Digite-o no cliente no navegador em **Remote (across networks)**, junto com o PIN do host. A conexão passa pelo servidor de retransmissão da UNI·SIM, então espere mais atraso do que na sua própria rede.
+**Remote access (other networks)** na janela do host (Mac, Windows ou Linux) fornece um código. Digite-o no cliente no navegador em **Remote (across networks)**, junto com o PIN do host. A conexão passa pelo servidor de retransmissão da UNI·SIM, então espere mais atraso do que na sua própria rede.
 
 ---
 id: the-pin

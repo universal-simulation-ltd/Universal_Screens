@@ -26,3 +26,7 @@ ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 # Where the install id is kept, per OS.
 dirs = "5"
 
+# Remote access (remote.rs): the host dials the cloud rendezvous and bridges the
+# browser to its own listener. All three hosts use the one panel, so the bridge
+# comes in here rather than in each host.
+extender-web-bridge.workspace = true

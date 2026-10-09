@@ -47,7 +47,7 @@ Jeder Rechner, mit dem Sie sich verbinden, wird gespeichert, beim nächsten Mal 
 
 ## Aus einem anderen Netzwerk
 
-Auf einem Mac oder Windows-PC gibt Ihnen **Remote access (other networks)** im Fenster des Hosts einen Code. Geben Sie ihn im Browser-Client unter **Remote (across networks)** ein, zusammen mit der PIN des Hosts. Die Verbindung läuft über den Relay-Server von UNI·SIM, rechnen Sie also mit mehr Verzögerung als im eigenen Netzwerk.
+**Remote access (other networks)** im Fenster des Hosts (Mac, Windows oder Linux) gibt Ihnen einen Code. Geben Sie ihn im Browser-Client unter **Remote (across networks)** ein, zusammen mit der PIN des Hosts. Die Verbindung läuft über den Relay-Server von UNI·SIM, rechnen Sie also mit mehr Verzögerung als im eigenen Netzwerk.
 
 ---
 id: the-pin

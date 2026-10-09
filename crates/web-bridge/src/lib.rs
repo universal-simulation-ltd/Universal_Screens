@@ -641,6 +641,31 @@ fn set_room_nonblocking(ws: &WebSocket<MaybeTlsStream<TcpStream>>, nonblocking: 
 /// # Errors
 /// Returns an error if the room connection, the host connection, or a forward fails.
 pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> {
+    dial_room_observed(base_url, code, host_addr, &mut || {}).map(|_| ())
+}
+
+/// How a [`dial_room_observed`] room ended without an error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoomEnd {
+    /// The room closed before anyone joined: the relay expires a waiting room
+    /// (10 minutes with nobody else in it), so the code is dead.
+    Unpaired,
+    /// Someone joined and the session then ended (they left, or the host did).
+    Ended,
+}
+
+/// [`dial_room`], plus a callback the moment a peer pairs and an answer to
+/// "did anyone ever join?" — what a host's Remote access panel needs to say
+/// "connected", and to tell an expired code from a finished session.
+///
+/// # Errors
+/// As [`dial_room`].
+pub fn dial_room_observed(
+    base_url: &str,
+    code: &str,
+    host_addr: &str,
+    on_paired: &mut dyn FnMut(),
+) -> io::Result<RoomEnd> {
     install_crypto_provider();
     let url = format!("{}/screens/room?code={}&role=sender", base_url.trim_end_matches('/'), code);
     let (mut ws, _resp) =
@@ -656,12 +681,16 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
                 Some("peer-left") | None => {} // keep waiting
                 Some(_) => {}                  // "waiting" etc.
             },
-            Ok(Message::Close(_)) => return Ok(()),
+            Ok(Message::Close(_)) => return Ok(RoomEnd::Unpaired),
             Ok(_) => {}
+            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                return Ok(RoomEnd::Unpaired)
+            }
             Err(e) => return Err(io::Error::other(format!("room read: {e}"))),
         }
     }
     println!("extender-web-bridge: paired; bridging to host {host_addr}");
+    on_paired();
     // Tell the tab this end can relay an encrypted connection untouched. It has
     // to arrive before the browser's first byte, so it goes out here, right after
     // pairing and before anything else. An older host never sends it and the tab
@@ -682,7 +711,7 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
     // opens with the transport preamble gets its bytes passed through untouched,
     // and the Worker sees only Noise records.
     let first = first_room_binary(&mut ws, &mut host_writer)?;
-    let Some(first) = first else { return Ok(()) }; // peer left before speaking
+    let Some(first) = first else { return Ok(RoomEnd::Ended) }; // peer left before speaking
     let relay = Relay::for_first_message(&first);
     host_writer.write_all(&relay.upstream(&first))?;
     host_writer.flush()?;
@@ -713,7 +742,7 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
                 Err(TryRecvError::Disconnected) => {
                     let _ = ws.flush();
                     let _ = ws.close(None);
-                    return Ok(());
+                    return Ok(RoomEnd::Ended);
                 }
             }
         }
@@ -732,12 +761,12 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
             Ok(Message::Text(t)) => {
                 if signal_type(&t) == Some("peer-left") {
                     let _ = host_writer.shutdown(std::net::Shutdown::Both);
-                    return Ok(());
+                    return Ok(RoomEnd::Ended);
                 }
             }
             Ok(Message::Close(_)) => {
                 let _ = host_writer.shutdown(std::net::Shutdown::Both);
-                return Ok(());
+                return Ok(RoomEnd::Ended);
             }
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -745,7 +774,7 @@ pub fn dial_room(base_url: &str, code: &str, host_addr: &str) -> io::Result<()> 
             }
             Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
                 let _ = host_writer.shutdown(std::net::Shutdown::Both);
-                return Ok(());
+                return Ok(RoomEnd::Ended);
             }
             Err(e) => return Err(io::Error::other(format!("room read: {e}"))),
         }

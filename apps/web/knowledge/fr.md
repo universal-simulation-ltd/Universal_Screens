@@ -47,7 +47,7 @@ Chaque machine à laquelle vous vous connectez est enregistrée : la fois suivan
 
 ## Depuis un autre réseau
 
-Sur un Mac ou un PC Windows, **Remote access (other networks)** dans la fenêtre de l'hôte vous donne un code. Saisissez-le dans le client navigateur sous **Remote (across networks)**, avec le code PIN de l'hôte. La connexion passe par le serveur relais d'UNI·SIM : attendez-vous à plus de latence que sur votre propre réseau.
+**Remote access (other networks)** dans la fenêtre de l'hôte (Mac, Windows ou Linux) vous donne un code. Saisissez-le dans le client navigateur sous **Remote (across networks)**, avec le code PIN de l'hôte. La connexion passe par le serveur relais d'UNI·SIM : attendez-vous à plus de latence que sur votre propre réseau.
 
 ---
 id: the-pin

@@ -47,7 +47,7 @@ Bağlandığınız her makine kaydedilir, böylece bir sonraki sefer tek dokunu�
 
 ## Başka bir ağdan
 
-Bir Mac ya da Windows PC'de, ana bilgisayarın penceresindeki **Remote access (other networks)** size bir kod verir. Bu kodu ana bilgisayarın PIN'iyle birlikte tarayıcı istemcisinde **Remote (across networks)** altına girin. Bağlantı UNI·SIM'in aktarma sunucusu üzerinden geçer, bu yüzden kendi ağınızdakinden daha fazla gecikme bekleyin.
+Ana bilgisayarın penceresindeki (Mac, Windows ya da Linux) **Remote access (other networks)** size bir kod verir. Bu kodu ana bilgisayarın PIN'iyle birlikte tarayıcı istemcisinde **Remote (across networks)** altına girin. Bağlantı UNI·SIM'in aktarma sunucusu üzerinden geçer, bu yüzden kendi ağınızdakinden daha fazla gecikme bekleyin.
 
 ---
 id: the-pin

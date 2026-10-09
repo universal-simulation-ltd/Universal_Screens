@@ -47,7 +47,7 @@ Each machine you connect to is saved, so next time it is one tap. In the phone a
 
 ## From another network
 
-On a Mac or Windows PC, **Remote access (other networks)** in the host's window gives you a code. Enter it in the browser client under **Remote (across networks)**, with the host's PIN. The connection is relayed through UNI·SIM's server, so expect more lag than on your own network.
+**Remote access (other networks)** in the host's window (Mac, Windows or Linux) gives you a code. Enter it in the browser client under **Remote (across networks)**, with the host's PIN. The connection is relayed through UNI·SIM's server, so expect more lag than on your own network.
 
 ---
 id: the-pin

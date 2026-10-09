@@ -1483,6 +1483,7 @@ dependencies = [
  "extender-discovery",
  "extender-protocol",
  "extender-transport",
+ "extender-web-bridge",
  "getrandom 0.2.17",
  "ureq",
 ]

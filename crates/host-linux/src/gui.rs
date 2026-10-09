@@ -82,6 +82,9 @@ struct HostApp {
     /// "Paired devices": who reconnects without the PIN, and Forget. See
     /// host-ui's `pairing` module.
     paired_panel: extender_host_ui::PairedDevicesPanel,
+    /// "Remote access": the shared panel the Windows and macOS hosts use, so
+    /// the code's lifetime and the copy cannot drift by platform.
+    remote: extender_host_ui::RemoteAccessPanel,
     /// Latest lifecycle line from the accept loop.
     status: String,
     events: Option<Receiver<String>>,
@@ -118,6 +121,7 @@ impl HostApp {
             own_pin,
             own_pin_editor: OwnPinEditor::default(),
             paired_panel: extender_host_ui::PairedDevicesPanel::default(),
+            remote: extender_host_ui::RemoteAccessPanel::default(),
             status: "Not started".to_owned(),
             events: None,
             uinput: inject::uinput_status(),
@@ -300,6 +304,18 @@ impl eframe::App for HostApp {
                         }
                     });
                 }
+
+                ui.add_space(10.0);
+                // Remote access: the dial-out bridge to the cloud rendezvous.
+                // Nothing in it is platform code (web-bridge has no cfg at
+                // all), and the host side is a loopback connection to the
+                // listener above, so it costs this lean window one fold.
+                egui::CollapsingHeader::new("Remote access (other networks)")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let port = self.running.then_some(self.port);
+                        self.remote.ui(ui, port);
+                    });
 
                 ui.add_space(10.0);
                 ui.separator();

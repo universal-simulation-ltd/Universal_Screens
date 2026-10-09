@@ -44,6 +44,9 @@ pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
 pub mod pairing;
 pub use pairing::{pairing_store, PairedDevicesPanel};
 
+pub mod remote;
+pub use remote::{RemoteAccessPanel, REMOTE_CLIENT_URL};
+
 use std::net::TcpListener;
 
 use eframe::egui;
@@ -104,13 +107,15 @@ pub const SIBLING_APPS: &[(&str, &str, &str)] = &[
 /// real thing. It previously listed *features* ("Universal navbar with Actions &
 /// Profile menus"), which is not what a "what's new" menu is for.
 pub const CHANGELOG: &[&str] = &[
+    "• Remote access offers a fresh code after each session, and sessions last past 10 minutes",
+    "• Remote access on Linux too",
+    "• Pairing with SPAKE2: a recorded session can't be used to crack the PIN",
     "• Wrong PINs slow down: repeated guesses make the host wait, up to 5 minutes",
     "• Choose your own PIN, so saved devices reconnect after a restart",
     "• Windows installer — per-user, no admin prompt",
     "• Encrypted connections over the LAN (Noise protocol)",
     "• Nearby hosts appear automatically — tap, enter PIN, connect",
     "• Click the connect QR to blow it up across the window",
-    "• Cast to a browser screen — no install on the receiver",
 ];
 
 pub fn pe(s: &str) -> String {
