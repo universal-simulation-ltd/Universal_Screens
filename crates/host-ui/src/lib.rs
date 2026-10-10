@@ -23,8 +23,9 @@
 //! rather than a third copy of this one. Wiring that in would mean growing it to
 //! match, which is the opposite of the point.
 //!
-//! It does take [`about_panel`] (2026-08-29), and the PIN — [`gen_pin`],
-//! [`startup_pin`] and [`OwnPinEditor`] (2026-09-11). The distinction is worth
+//! It does take [`about_panel`] (2026-08-29), the PIN — [`gen_pin`],
+//! [`startup_pin`] and [`OwnPinEditor`] (2026-09-11) — and the user count
+//! ([`UserCount`] + [`user_count_label`], 2026-10-10, drawn as a footer). The distinction is worth
 //! holding onto — layout may differ per platform, but a *claim about the
 //! product* (where your screen goes, the licence, the version) must not, and
 //! three hand-written About boxes is exactly how it would end up doing so. The
@@ -36,7 +37,7 @@ pub mod account;
 pub use account::{account_menu_row, show_account_window, UserAccount};
 
 pub mod user_count;
-pub use user_count::{show_user_count, UserCount};
+pub use user_count::{show_user_count, user_count_label, UserCount};
 
 pub mod knowledge;
 pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};

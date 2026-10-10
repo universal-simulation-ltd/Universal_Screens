@@ -14,9 +14,13 @@
 //! symptom of a missing udev rule is a phone that connects, says "connected",
 //! and moves no slides.
 //!
-//! ⚠️ **It takes exactly TWO things from `host-ui`: `about_panel`** (added
-//! 2026-08-29 with the suite-wide "About this app") **and the PIN** —
-//! `startup_pin` and `OwnPinEditor` (2026-09-11). That is not the adoption
+//! ⚠️ **It takes exactly THREE things from `host-ui`: `about_panel`** (added
+//! 2026-08-29 with the suite-wide "About this app"), **the PIN** —
+//! `startup_pin` and `OwnPinEditor` (2026-09-11) — **and the user count**
+//! (`UserCount` + `user_count_label`, 2026-10-10), the "There are X total users
+//! (Y live)" line every app in the suite shows. Here it is a footer, because
+//! there is no profile menu to end with; the beat, the wording and the click
+//! are the other hosts' exactly, so the figures cannot disagree by platform. That is not the adoption
 //! described above and does not start it — the chrome is still this file's own.
 //! The panel is shared because it makes *claims about the product* (what
 //! happens to your screen, the licence, the version), and a claim that can
@@ -30,10 +34,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use eframe::egui;
 
-use extender_host_ui::{about_panel, startup_pin, OwnPinChange, OwnPinEditor, OWN_PIN_KEY};
+use extender_host_ui::{
+    about_panel, startup_pin, user_count_label, OwnPinChange, OwnPinEditor, UserCount,
+    OWN_PIN_KEY,
+};
 
 use crate::inject::{self, UinputStatus};
 use crate::{capture, firewall, wifi, HostEvent};
@@ -102,6 +110,10 @@ struct HostApp {
     /// Cached QR textures, keyed by the payload they were built from, so the
     /// codes aren't re-rasterised every frame.
     qr_cache: Vec<(String, egui::TextureHandle)>,
+    /// "There are X total users (Y live)" — the presence beat (platform
+    /// `linux`) and the count, on host-ui's background thread. Always as a
+    /// guest: this window has no Universal ID sign-in. See host-ui/user_count.rs.
+    user_count: UserCount,
 }
 
 impl HostApp {
@@ -131,6 +143,7 @@ impl HostApp {
             peers: Arc::new(Mutex::new(Vec::new())),
             mdns_ad: None,
             qr_cache: Vec::new(),
+            user_count: UserCount::start(),
         }
     }
 
@@ -238,6 +251,27 @@ impl eframe::App for HostApp {
                 self.status = line;
             }
         }
+
+        // The suite's user-count line, as a footer pinned below the scroll
+        // area (the other hosts end their profile menu with it; this window
+        // has none). Nothing — not even an empty strip — until a real number
+        // arrives, so a host with no route out looks exactly as before. Click
+        // to switch between the whole suite and Screens alone.
+        if self.user_count.line().is_some() {
+            egui::TopBottomPanel::bottom("user_count")
+                .show_separator_line(true)
+                .show(ctx, |ui| {
+                    ui.add_space(3.0);
+                    ui.vertical_centered(|ui| {
+                        user_count_label(ui, &self.user_count, ui.visuals().dark_mode);
+                    });
+                    ui.add_space(3.0);
+                });
+        }
+        // The figure arrives from a background thread, which cannot wake egui;
+        // a frame a second is what lets it (and a click's re-read) show up
+        // without the user moving the mouse.
+        ctx.request_repaint_after(Duration::from_secs(1));
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {

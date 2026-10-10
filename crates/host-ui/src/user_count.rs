@@ -232,20 +232,31 @@ impl UserCount {
 /// because clicking it switches to the suite-wide figure, and nothing at all
 /// while there is no number to show.
 pub fn show_user_count(ui: &mut egui::Ui, counts: &UserCount, dark: bool) {
+    if counts.line().is_none() {
+        return;
+    }
+    ui.separator();
+    user_count_label(ui, counts, dark);
+}
+
+/// The line on its own, with no rule above it — for the Linux host, whose lean
+/// window has no profile menu and shows it as a footer instead. Same text,
+/// same click, same silence while there is no number.
+pub fn user_count_label(ui: &mut egui::Ui, counts: &UserCount, dark: bool) {
     let Some(text) = counts.line() else { return };
     let muted = if dark {
         egui::Color32::from_rgb(0x94, 0xa3, 0xb8)
     } else {
         egui::Color32::from_rgb(0x64, 0x74, 0x8b)
     };
-    ui.separator();
+    let hint = if counts.suite.load(Ordering::Relaxed) {
+        "Click for Universal Screens only"
+    } else {
+        "Click for every UNI·SIM app"
+    };
     let label = egui::Label::new(egui::RichText::new(text).size(10.0).color(muted))
         .sense(egui::Sense::click());
-    if ui
-        .add(label)
-        .on_hover_text("Click for every UNI·SIM app")
-        .clicked()
-    {
+    if ui.add(label).on_hover_text(hint).clicked() {
         counts.toggle();
     }
 }
