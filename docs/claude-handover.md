@@ -4,6 +4,44 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-10 (v0.4.0 released; the four Remote access bugs fixed)
+
+**Pushed straight to `main` here (`16375b0` fixes, `e674326` version, tag
+`v0.4.0`) and in `backoffice/opensource-portal` (`03c2594` relay + copy,
+`e972513` checksums).** Closes the "Host bugs found, not fixed" list below.
+
+- **One Remote access panel for all three hosts:** `crates/host-ui/src/remote.rs`
+  (`RemoteAccessPanel`). The dial thread sets it back to idle whenever the room
+  ends, fails or expires, so a fresh code is offered with no restart.
+  `web-bridge::dial_room_observed` adds an `on_paired` callback ("Connected")
+  and `RoomEnd::{Unpaired, Ended}` (expired code vs finished session);
+  `dial_room` keeps its signature.
+- **Relay:** `src/rendezvous.js` re-arms its alarm by room state: 10 min while
+  one peer waits (first join, or after a peer leaves), 12 h once paired, none
+  when empty. Fixed server-side, so v0.3.0 hosts' sessions also stop dying at
+  10 min. Verified live: a paired room joined at t=1 s was still relaying at
+  712 s; an idle room closed `room expired` at 611 s. Beam's 13 e2e pass
+  against it.
+- **"Cast to a browser screen" removed** from the Windows/macOS hosts (it
+  dialled a `/screens/receive` code; that page cannot show video). Remote
+  access covers the same network too, and has **Copy link**
+  (`/screens/app/?remote=CODE`). The phone apps' "Cast to a browser screen"
+  (phone drives a receiver tab) is a different feature and is untouched.
+- **Linux host has Remote access** (the same panel in its window). Verified in
+  Docker (Xvfb, so X11 protocol only): the GUI drew, Enable gave a code, the
+  hosted `/screens/app/` paired with the real PIN over SPAKE2, decoded H.264
+  and showed the Linux host's screen; after disconnect the panel offered
+  "Enable remote access again" and a second code worked too.
+- **v0.4.0** carries SPAKE2 / handshake v2 (`3eb66e2`). All three release
+  workflows and Tests green; the release has the DMG, `Setup-0.4.0.exe` and
+  the AppImage, each with `.sha256`, marked Latest. A `workflow_dispatch` run
+  of the macOS workflow on `main` was used to prove the macOS host compiles
+  BEFORE tagging, since nothing on Windows can.
+
+**Not verified:** the macOS and Windows panels on screen (compiled only; the
+code is the shared panel the Linux run exercised); a real Linux desktop or
+Wayland session; input injection on Linux (no `/dev/uinput` in a container).
+
 ## Update — 2026-10-09 (the browser client is served at /screens/app; the web pages' dead ends built)
 
 **Pushed straight to `main` here and in `backoffice/opensource-portal`. No host
