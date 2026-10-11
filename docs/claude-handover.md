@@ -15,6 +15,12 @@ republished (opensource-portal `78badf0`, `BUILD.txt` @ `dd746f6`); the live
 `/screens/app/` serves it. The entry below says it was not republished: that
 is now out of date.
 
+Release runs (all green): Linux 38170620800, macOS 38170620755, Windows
+38170620748, Tests 38170620072. The release has the AppImage, DMG and
+`Setup-0.4.1.exe`, each with `.sha256` (hashes re-checked against the
+downloads), marked Latest. The portal's `/screens` "Verify your download" block
+is on v0.4.1 (opensource-portal `ae97f59`).
+
 ## Update — 2026-10-11 (paired devices named; browser "Forget this computer"; float warnings; publish script for Windows)
 
 **Pushed straight to `main`. No host release cut, and the hosted browser client
