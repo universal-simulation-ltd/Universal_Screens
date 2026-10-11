@@ -29,8 +29,8 @@ was NOT republished** (its copy at `/screens/app` is still `16375b0`).
   (tungstenite's callback type).
 - **`scripts/publish-web-client.ps1`** (Windows twin; not run — no pwsh on the
   Mac). Both scripts now build with `--remap-path-prefix`, so the public WASM
-  no longer embeds the builder's home folder (the live one says
-  `C:\Users\inbox\.cargo\...`). Byte-identical publishes across machines are
+  no longer embeds the builder's home folder (the live one, built on the
+  Windows box, still does). Byte-identical publishes across machines are
   still impossible (wasm-opt/toolchain/path separators differ).
 
 **Next:** cut a host tag for these + `6371d7c`; republish the browser client
