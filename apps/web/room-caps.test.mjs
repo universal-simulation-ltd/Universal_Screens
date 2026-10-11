@@ -199,5 +199,26 @@ function fakeSecure(pin, hostHandshake) {
   A(p({ hostHandshake: 0, pinned: true }) === "refuse", "nor plaintext for one");
 }
 
+// --- 7. "Forget this computer" (pairing.forgetHost) ----------------------------
+{
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+  };
+  const { rememberHost, forgetHost, isTrustedHost, trustedHosts, markV2, isPinnedV2 } = await import("./src/pairing.js");
+  const a = "a".repeat(64), b = "b".repeat(64);
+  rememberHost(a);
+  rememberHost(b);
+  markV2("remote:ABC123");
+  forgetHost(a);
+  A(!isTrustedHost(a) && isTrustedHost(b), "forgets that computer only; the others stay paired");
+  A(trustedHosts().length === 1, "and leaves exactly the one");
+  A(isPinnedV2("remote:ABC123"), "keeps the v2 pin, so a forgotten host still can't be downgraded");
+  forgetHost("not-a-key");
+  A(isTrustedHost(b), "an unknown key changes nothing");
+  globalThis.localStorage = undefined;
+}
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exitCode = failures ? 1 : 0;

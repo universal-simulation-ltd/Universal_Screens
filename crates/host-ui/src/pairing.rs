@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use extender_transport::{PairedPeer, PairingStore};
+use extender_protocol::ClientPlatform;
+use extender_transport::{PairedPeer, PairingStore, PeerAuth};
 
 /// The host's pairing file name. A client on the same machine uses
 /// `client-pairing.txt` beside it.
@@ -38,6 +39,32 @@ pub fn pairing_store() -> PairingStore {
             eprintln!("paired devices unavailable ({e}); every device will need the PIN");
             PairingStore::ephemeral().expect("the OS random number generator is unavailable")
         }
+    }
+}
+
+/// Put a paired device's name on its line in the list.
+///
+/// The handshake that remembers a device runs before its hello, so it can only
+/// file it under its address; the hello then says what the device is called.
+/// `label` is the name the host already uses for it (the hello's device name,
+/// or its platform's label when it sent none). Called for every v2 session, so
+/// a renamed phone is relabelled the next time it connects. Best effort: a
+/// failure leaves the address, which is what the list showed before.
+pub fn name_paired_device(store: &mut PairingStore, auth: PeerAuth, platform: ClientPlatform, label: &str) {
+    let Some(key) = auth.key() else { return };
+    if let Err(e) = store.rename(&key, &paired_label(platform, label)) {
+        eprintln!("could not name the paired device ({e})");
+    }
+}
+
+/// The name for the paired list. Only the browser client reports no platform,
+/// and it sends no device name either, so the generic "Universal Screens" a
+/// virtual display would get reads better here as what it is.
+fn paired_label(platform: ClientPlatform, label: &str) -> String {
+    if platform == ClientPlatform::Unknown && label == platform.device_label() {
+        "Web browser".to_owned()
+    } else {
+        label.to_owned()
     }
 }
 
@@ -153,6 +180,23 @@ mod tests {
         assert_eq!(civil_date(0), "1970-01-01");
         assert_eq!(civil_date(951_782_400), "2000-02-29");
         assert_eq!(civil_date(1_791_072_000), "2026-10-04");
+    }
+
+    #[test]
+    fn a_browser_is_named_as_one() {
+        assert_eq!(paired_label(ClientPlatform::Unknown, "Universal Screens"), "Web browser");
+        assert_eq!(paired_label(ClientPlatform::Android, "Pixel 8"), "Pixel 8");
+        assert_eq!(paired_label(ClientPlatform::Ios, "iOS device"), "iOS device");
+    }
+
+    #[test]
+    fn naming_needs_a_v2_key() {
+        let mut store = PairingStore::ephemeral().unwrap();
+        store.remember([3u8; 32], "10.0.0.7").unwrap();
+        name_paired_device(&mut store, PeerAuth::LegacyPin, ClientPlatform::Android, "Pixel 8");
+        assert_eq!(store.peers()[0].label, "10.0.0.7", "a v1 peer has no key to name");
+        name_paired_device(&mut store, PeerAuth::Known { key: [3u8; 32] }, ClientPlatform::Android, "Pixel 8");
+        assert_eq!(store.peers()[0].label, "Pixel 8");
     }
 
     #[test]

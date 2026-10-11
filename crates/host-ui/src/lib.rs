@@ -43,7 +43,7 @@ pub mod knowledge;
 pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
 
 pub mod pairing;
-pub use pairing::{pairing_store, PairedDevicesPanel};
+pub use pairing::{name_paired_device, pairing_store, PairedDevicesPanel};
 
 pub mod remote;
 pub use remote::{RemoteAccessPanel, REMOTE_CLIENT_URL};
@@ -520,7 +520,7 @@ pub fn nearby_orbit(
                 centre + radius * egui::vec2(a0.cos(), a0.sin()),
                 centre + radius * egui::vec2(a1.cos(), a1.sin()),
             ],
-            egui::Stroke::new(1.2, muted.gamma_multiply(0.5)),
+            egui::Stroke::new(1.2_f32, muted.gamma_multiply(0.5)),
         );
     }
 
@@ -532,7 +532,7 @@ pub fn nearby_orbit(
 
     // Centre node: this machine.
     painter.circle_filled(centre, 26.0, card);
-    painter.circle_stroke(centre, 26.0, egui::Stroke::new(1.5, BRAND));
+    painter.circle_stroke(centre, 26.0, egui::Stroke::new(1.5_f32, BRAND));
     painter.text(centre - egui::vec2(0.0, 4.0), egui::Align2::CENTER_CENTER, "🖥", egui::FontId::proportional(20.0), ink);
     painter.text(centre + egui::vec2(0.0, 15.0), egui::Align2::CENTER_CENTER, centre_label, egui::FontId::proportional(9.0), muted);
 
@@ -555,7 +555,7 @@ pub fn nearby_orbit(
         }
 
         painter.circle_filled(pos, node_r, card);
-        painter.circle_stroke(pos, node_r, egui::Stroke::new(if hot { 2.0 } else { 1.2 }, if hot { BRAND } else { muted }));
+        painter.circle_stroke(pos, node_r, egui::Stroke::new(if hot { 2.0_f32 } else { 1.2_f32 }, if hot { BRAND } else { muted }));
         painter.text(pos - egui::vec2(0.0, 3.0), egui::Align2::CENTER_CENTER, "📡", egui::FontId::proportional(16.0), ink);
 
         // Label pill under the node — the name, plus the address on hover.

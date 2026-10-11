@@ -620,6 +620,14 @@
     cursor: pointer;
   }
   .topbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* A phone has room for four short buttons on one line, not four long ones:
+     "Forget this computer" shortens to "Forget" and the padding tightens. */
+  @media (max-width: 560px) {
+    .topbar { gap: .35rem; padding-left: .5rem; padding-right: .5rem; }
+    .topbar button { padding: .35rem .5rem; white-space: nowrap; }
+    .topbar .wide { display: none; }
+  }
+  @media (max-width: 400px) { .topbar button { font-size: .85rem; } }
   /* Stage fills the whole session view; the bar floats over its top edge. */
   #stage { position: relative; flex: 1; min-height: 0; }
   #screen { width: 100%; height: 100%; display: block; background: #000; outline: none; touch-action: none; }
@@ -986,6 +994,9 @@
       <span class="spacer"></span>
       <button id="btn-lock" hidden>Lock cursor</button>
       <button id="btn-fullscreen">Fullscreen</button>
+      <!-- Shown only for a computer this browser is paired with (client.js
+           showForget): it drops that host's key, so the PIN is asked next time. -->
+      <button id="btn-forget" hidden title="Ask for this computer's PIN next time" aria-label="Forget this computer">Forget<span class="wide"> this computer</span></button>
       <button id="btn-disconnect" class="primary">Disconnect</button>
     </div>
     <div id="stage">

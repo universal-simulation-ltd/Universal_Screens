@@ -146,6 +146,15 @@ impl PeerAuth {
     pub fn settles_pin(self) -> bool {
         matches!(self, PeerAuth::Paired { .. } | PeerAuth::Known { .. })
     }
+
+    /// The peer's long-term key, for a v2 peer (paired now or remembered).
+    #[must_use]
+    pub fn key(self) -> Option<[u8; pairing::KEY_LEN]> {
+        match self {
+            PeerAuth::Paired { key } | PeerAuth::Known { key } => Some(key),
+            PeerAuth::Plaintext | PeerAuth::LegacyPin => None,
+        }
+    }
 }
 
 /// The **v1** Noise handshake pattern + crypto suite. `NNpsk0`:

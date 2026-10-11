@@ -129,6 +129,7 @@ pub(crate) fn serve_loop(
                     read_hello(&mut conn, &peer, expected_pin, &mut guard)
                 {
                     let _ = conn.end_handshake();
+                    extender_host_ui::name_paired_device(&mut store, conn.auth(), platform, &name);
                     // Identify this host so the client can label/icon the connection.
                     if let Ok(mut writer) = conn.try_clone() {
                         let _ = protocol::write_framed(

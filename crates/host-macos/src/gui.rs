@@ -952,7 +952,7 @@ impl eframe::App for HostApp {
                 self.show_navbar(ctx, ui);
                 let y = ui.max_rect().bottom() + 6.0;
                 let screen = ctx.screen_rect();
-                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0, border));
+                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0_f32, border));
             });
 
         // Footer: "With ❤ from UNISIM.co.uk" + security info button.
@@ -968,7 +968,7 @@ impl eframe::App for HostApp {
             .show(ctx, |ui| {
                 let y = ui.max_rect().top() - 6.0;
                 let screen = ctx.screen_rect();
-                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0, border));
+                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0_f32, border));
 
                 let muted = if dark {
                     egui::Color32::from_rgb(0x9a, 0x9a, 0xa6)

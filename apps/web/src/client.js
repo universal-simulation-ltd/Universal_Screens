@@ -10,6 +10,7 @@ import { H264Decoder } from "./decoder.js";
 import { CanvasRenderer } from "./renderer.js";
 import { InputController } from "./input.js";
 import * as saved from "./saved.js";
+import * as pairing from "./pairing.js";
 import * as account from "./account.js";
 
 // The cloud rendezvous that relays a host ↔ this browser across networks (M8).
@@ -323,6 +324,7 @@ async function connect(addr, mode, targetHost = null) {
     $("host-label").textContent = targetHost ?? addr;
     log(`connected — ${mode.label} (protocol v${protocol.protocol_version()})`, "ok");
     logEncryption(transport);
+    showForget(transport);
     connSucceed(attemptId, `${mode.label} — ${targetHost ?? addr}`);
   };
   transport.onClose = () => {
@@ -398,6 +400,7 @@ async function connectRoom(code, mode) {
     $("host-label").textContent = `Remote ${room}`;
     log(`paired over the cloud relay — ${mode.label} (may be slower than LAN)`, "ok");
     logEncryption(transport);
+    showForget(transport);
     connSucceed(attemptId, `${mode.label} — remote ${room}`);
   };
   transport.onPeerLeft = () => { log("host left the room", "dim"); disconnect(); };
@@ -453,6 +456,24 @@ function logEncryption(t) {
   }
 }
 
+/// "Forget this computer" is offered only for a host this browser is paired
+/// with — the key a v2 handshake just proved, and one it still trusts.
+function showForget(t) {
+  $("btn-forget").hidden = !pairing.isTrustedHost(t?.secure?.hostKeyHex);
+}
+
+/// Drop the connected host's key and end the session: next time this browser
+/// pairs with the PIN again. The host keeps its own record of this browser
+/// until its Paired devices ▸ Forget is used.
+function forgetThisComputer() {
+  const hex = transport?.secure?.hostKeyHex;
+  if (!pairing.isTrustedHost(hex)) return;
+  if (!confirm("Forget this computer? This browser will ask for its PIN next time you connect.")) return;
+  pairing.forgetHost(hex);
+  disconnect();
+  status("Forgotten — this browser will ask for that computer's PIN next time.", "ok");
+}
+
 // Send the ClientHello and start forwarding input — shared by the LAN and the
 // cross-network room path (both expose the same `sendHello`/`send` surface).
 function sendHelloAndAttach(mode) {
@@ -500,6 +521,7 @@ function disconnect() {
   decoder?.close();
   transport?.close();
   transport = decoder = renderer = input = null;
+  $("btn-forget").hidden = true;
   if (document.fullscreenElement) document.exitFullscreen?.();
   document.body.classList.remove("in-session");
   renderSaved();
@@ -730,6 +752,7 @@ export function boot() {
   $("conn-home").addEventListener("click", connHide);
 
   $("btn-disconnect").addEventListener("click", disconnect);
+  $("btn-forget").addEventListener("click", forgetThisComputer);
   $("btn-fullscreen").addEventListener("click", () => {
     if (document.fullscreenElement) document.exitFullscreen?.();
     else $("session-view").requestFullscreen?.();

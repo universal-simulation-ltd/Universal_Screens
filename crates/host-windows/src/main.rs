@@ -148,10 +148,11 @@ pub(crate) fn serve_loop(
                                  brute-forced for the PIN — update that app"
                             );
                         }
-                        if let Some((platform, mode)) =
+                        if let Some((platform, mode, name)) =
                             read_hello(&mut conn, &peer, expected_pin, &mut guard)
                         {
                             let _ = conn.end_handshake();
+                            extender_host_ui::name_paired_device(&mut store, conn.auth(), platform, &name);
                             on_event(HostEvent::Connected { peer: peer.clone(), platform });
                             if let Err(e) = serve(conn, mode) {
                                 on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
@@ -180,16 +181,17 @@ pub(crate) fn serve_loop(
 }
 
 /// Read and log the client's [`ClientHello`], tolerating a protocol-version skew
-/// the same way the macOS host does. Returns the client's [`ClientPlatform`], or
-/// `None` (and logs) on a missing or garbled hello so the caller skips this
-/// client. The advertised size is irrelevant here — without capture there's no
-/// display geometry to size.
+/// the same way the macOS host does. Returns the client's [`ClientPlatform`],
+/// mode and name (its device name, or its platform's label when it sent none —
+/// for the paired-devices list), or `None` (and logs) on a missing or garbled
+/// hello so the caller skips this client. The advertised size is irrelevant
+/// here — without capture there's no display geometry to size.
 fn read_hello(
     stream: &mut Conn,
     peer: &str,
     expected_pin: u32,
     guard: &mut PinGuard,
-) -> Option<(ClientPlatform, CaptureMode)> {
+) -> Option<(ClientPlatform, CaptureMode, String)> {
     let hello: ClientHello = match protocol::read_framed(stream) {
         Ok(h) => h,
         Err(e) => {
@@ -215,11 +217,16 @@ fn read_hello(
         return None;
     }
     guard.record_success();
+    let name = if hello.device_name.trim().is_empty() {
+        hello.platform.device_label().to_owned()
+    } else {
+        hello.device_name.clone()
+    };
     println!(
-        "client {peer} hello: {}x{}, mode {:?}, platform {:?}",
+        "client {peer} hello: {}x{}, mode {:?}, platform {:?}, device {name:?}",
         hello.width, hello.height, hello.capture_mode, hello.platform
     );
-    Some((hello.platform, hello.capture_mode))
+    Some((hello.platform, hello.capture_mode, name))
 }
 
 /// A request to the snapshot thread (which owns the downstream writer).

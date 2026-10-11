@@ -15,8 +15,9 @@
 # Usage (from anywhere):
 #   scripts/publish-web-client.sh [PORTAL_PUBLIC_SCREENS_APP_DIR]
 # Default target: ../../backoffice/opensource-portal/public/screens/app
-# (the umbrella checkout's layout). Needs: rustup target wasm32-unknown-unknown,
-# wasm-pack.
+# (the umbrella checkout's layout, where this repo is Universal_Apps/Universal_Screens).
+# Needs: rustup target wasm32-unknown-unknown, wasm-pack, node.
+# Windows: scripts/publish-web-client.ps1 does the same; keep the two in step.
 
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,6 +30,10 @@ fi
 
 cd "$REPO"
 # Release, not --dev: ~290 KB of WASM instead of ~1.3 MB.
+# The remaps keep the builder's home folder out of the public WASM (panic
+# locations name source files), and make two machines' builds closer to equal.
+CARGO_SRC="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$CARGO_SRC=/cargo/registry/src --remap-path-prefix=$REPO=/Universal_Screens" \
 wasm-pack build crates/protocol-wasm --release --target web \
   --out-dir ../../apps/web/pkg --out-name extender_protocol
 

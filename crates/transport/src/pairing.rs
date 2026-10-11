@@ -205,6 +205,31 @@ impl PairingStore {
         self.save()
     }
 
+    /// Give an already-paired `key` a new label — the device name its hello
+    /// carried, which arrives after the handshake that remembered it under its
+    /// address. The pairing time is kept, and a key that is not on the list
+    /// (forgotten meanwhile in the host window) is left off it. Saves only when
+    /// something changed. Returns whether it did.
+    ///
+    /// # Errors
+    /// If the file cannot be re-read or written.
+    pub fn rename(&mut self, key: &[u8; KEY_LEN], label: &str) -> io::Result<bool> {
+        let label: String = label.chars().filter(|c| !c.is_control()).take(120).collect();
+        let label = label.trim();
+        if label.is_empty() {
+            return Ok(false);
+        }
+        // Pick up a "Forget" made since the handshake, so it is not undone.
+        self.reload()?;
+        let Some(peer) = self.peers.iter_mut().find(|p| &p.key == key) else { return Ok(false) };
+        if peer.label == label {
+            return Ok(false);
+        }
+        label.clone_into(&mut peer.label);
+        self.save()?;
+        Ok(true)
+    }
+
     /// Forget every paired device (the identity is kept), and save.
     ///
     /// # Errors
@@ -358,6 +383,30 @@ mod tests {
         reopened.forget_all().unwrap();
         store.reload().unwrap();
         assert!(store.peers().is_empty(), "a forget elsewhere reaches a reload");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn rename_labels_a_paired_device_and_keeps_its_pairing_time() {
+        let path = temp_path("rename");
+        let mut store = PairingStore::open(&path).unwrap();
+        store.remember([7u8; 32], "192.168.1.20").unwrap();
+        let paired_at = store.peers()[0].paired_at;
+
+        assert!(store.rename(&[7u8; 32], "James's Pixel\n").unwrap());
+        assert!(!store.rename(&[7u8; 32], "James's Pixel").unwrap(), "unchanged: no write");
+        assert!(!store.rename(&[7u8; 32], "  ").unwrap(), "a blank name keeps the old label");
+        assert!(!store.rename(&[8u8; 32], "Stranger").unwrap(), "an unpaired key is not added");
+
+        let reopened = PairingStore::open(&path).unwrap();
+        assert_eq!(reopened.peers().len(), 1);
+        assert_eq!(reopened.peers()[0].label, "James's Pixel");
+        assert_eq!(reopened.peers()[0].paired_at, paired_at);
+
+        // A "Forget" made elsewhere since this store last read the file wins.
+        PairingStore::open(&path).unwrap().forget_all().unwrap();
+        assert!(!store.rename(&[7u8; 32], "Back again").unwrap());
+        assert!(PairingStore::open(&path).unwrap().peers().is_empty());
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 

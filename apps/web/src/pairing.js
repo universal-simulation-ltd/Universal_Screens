@@ -82,6 +82,20 @@ export function isPinnedV2(target) {
   return Array.isArray(seen) && seen.includes(target);
 }
 
+/// Whether this tab trusts the host with public key `hex`.
+export function isTrustedHost(hex) {
+  return typeof hex === "string" && trustedHosts().includes(hex);
+}
+
+/// "Forget this computer": stop trusting one host, so this tab asks for its PIN
+/// next time. The v2 pin (`markV2`) stays — forgetting a host is no reason to
+/// let it be talked down to the v1 handshake. The host still remembers this
+/// browser until someone uses its own Paired devices ▸ Forget.
+export function forgetHost(hex) {
+  const s = read();
+  write({ ...s, hosts: trustedHosts().filter((h) => h !== hex) });
+}
+
 /// Forget every paired host on this browser (the key pair is kept).
 export function forgetHosts() {
   const s = read();

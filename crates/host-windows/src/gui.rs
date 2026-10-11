@@ -959,7 +959,7 @@ impl eframe::App for HostApp {
                 // A 1px slate bottom border spanning the full width, like the web bar.
                 let y = ui.max_rect().bottom() + 6.0;
                 let screen = ctx.screen_rect();
-                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0, border));
+                ui.painter().hline(screen.x_range(), y, egui::Stroke::new(1.0_f32, border));
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {

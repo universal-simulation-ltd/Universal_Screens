@@ -192,6 +192,7 @@ pub(crate) fn serve_loop(
                         }
                         if let Some(req) = read_hello(&mut conn, &peer, expected_pin, &mut guard) {
                             let _ = conn.end_handshake();
+                            extender_host_ui::name_paired_device(&mut store, conn.auth(), req.platform, &req.label);
                             on_event(HostEvent::Connected {
                                 peer: peer.clone(),
                                 platform: req.platform,

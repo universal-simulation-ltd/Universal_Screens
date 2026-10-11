@@ -22,11 +22,21 @@ portal (`backoffice/opensource-portal`) is a static-assets Worker with no build
 step, so it holds a BUILT copy in `public/screens/app/`, made by:
 
 ```sh
-scripts/publish-web-client.sh   # wasm-pack --release, verify-wasm, copy, BUILD.txt
+scripts/publish-web-client.sh          # from the repo root (macOS / Linux)
 ```
 
-then commit + push the portal (its workflow deploys on push). `BUILD.txt` there
-names the Screens commit the copy came from. ⚠️ Nothing republishes it
+or on Windows:
+
+```powershell
+.\scripts\publish-web-client.ps1       # from the repo root
+```
+
+Each runs wasm-pack `--release`, `verify-wasm.mjs`, then replaces the portal's
+`public/screens/app/` (by default `../../backoffice/opensource-portal/public/screens/app`
+from this repo, i.e. the umbrella checkout; pass another path as the one
+argument) with `index.html`, `src/*.js`, `pkg/extender_protocol{.js,_bg.wasm}`,
+`knowledge/*.md` and a `BUILD.txt`. Then commit + push the portal (its workflow
+deploys on push). `BUILD.txt` there names the Screens commit the copy came from. ⚠️ Nothing republishes it
 automatically: change `apps/web` or `crates/protocol-wasm`, and the hosted copy
 is stale until someone runs the script. (A CI job would need a token that can
 push to the portal repo; none exists.)

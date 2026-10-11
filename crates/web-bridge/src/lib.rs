@@ -467,6 +467,9 @@ pub fn proxy_connection(ws_stream: TcpStream, host_addr: &str) -> io::Result<()>
 /// lived in `proxy_browser` alone, `proxy_connection` — a public entry point,
 /// and the one the tests drive — silently never offered encryption, so a tab
 /// reaching it would have stayed plaintext for no reason anyone could see.
+// The callback's large `Err` (an HTTP error response) is tungstenite's
+// signature, not ours to shrink.
+#[allow(clippy::result_large_err)]
 fn accept_negotiating(
     stream: TcpStream,
     mut inspect: impl FnMut(&tungstenite::handshake::server::Request),

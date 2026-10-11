@@ -4,6 +4,38 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-11 (paired devices named; browser "Forget this computer"; float warnings; publish script for Windows)
+
+**Pushed straight to `main`. No host release cut, and the hosted browser client
+was NOT republished** (its copy at `/screens/app` is still `16375b0`).
+
+- **Host paired list shows device names.** The v2 handshake remembers a device
+  under its IP before its hello arrives; each host now calls
+  `extender_host_ui::name_paired_device` after the hello, which relabels the
+  key with the hello's device name (or the platform label; a browser, which
+  sends neither, is "Web browser") via the new `PairingStore::rename` (keeps
+  `paired_at`, reloads first so a Forget in the window is not undone). The
+  Windows host's `read_hello` now returns the name too. `PeerAuth::key()` added.
+- **Browser "Forget this computer"** in the session bar, shown only when the
+  connected host's key is trusted (`pairing.forgetHost`/`isTrustedHost`). Drops
+  that key (the v2 pin stays), disconnects, says so. "Forget" alone under
+  560 px so the bar fits at 360 px. Verified in Chromium against the
+  `e2ee_testbed` (PIN 1234): button shows after pairing, hosts list 1 → 0.
+  **Android not done** — its pairing store lives in Rust core behind JNI with
+  no forget call; it needs a core fn + JNI export + Kotlin menu + strings.
+- **`float_literal_f32_fallback` warnings** (newer rustc in CI; 1.96 is
+  silent) cleared with `_f32` suffixes in host-ui + both hosts' `gui.rs`;
+  `clippy::result_large_err` allowed on web-bridge's `accept_negotiating`
+  (tungstenite's callback type).
+- **`scripts/publish-web-client.ps1`** (Windows twin; not run — no pwsh on the
+  Mac). Both scripts now build with `--remap-path-prefix`, so the public WASM
+  no longer embeds the builder's home folder (the live one says
+  `C:\Users\inbox\.cargo\...`). Byte-identical publishes across machines are
+  still impossible (wasm-opt/toolchain/path separators differ).
+
+**Next:** cut a host tag for these + `6371d7c`; republish the browser client
+(run the script, push the portal) to ship Forget this computer.
+
 ## Update — 2026-10-10 (v0.4.0 released; the four Remote access bugs fixed)
 
 **Pushed straight to `main` here (`16375b0` fixes, `e674326` version, tag
