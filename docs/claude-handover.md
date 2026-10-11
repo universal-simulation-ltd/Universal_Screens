@@ -4,6 +4,17 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-11 (v0.4.1 released; browser client republished)
+
+James approved the release. **Tag `v0.4.1`** (workspace version bump only, as
+for v0.4.0). It carries the Linux host's user-count footer (`6371d7c`) and the
+paired-devices names + f32 warning fixes (`b9843c5`). The macOS workflow was
+dispatched on `main` first (run 38170430569, green) to prove the Mac host
+compiles before tagging. The browser client with "Forget this computer" is
+republished (opensource-portal `78badf0`, `BUILD.txt` @ `dd746f6`); the live
+`/screens/app/` serves it. The entry below says it was not republished: that
+is now out of date.
+
 ## Update — 2026-10-11 (paired devices named; browser "Forget this computer"; float warnings; publish script for Windows)
 
 **Pushed straight to `main`. No host release cut, and the hosted browser client
