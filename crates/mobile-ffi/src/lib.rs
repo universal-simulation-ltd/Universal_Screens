@@ -15,6 +15,7 @@
 //! `*mut ExtenderEvent` must be released with [`extender_event_free`], and the
 //! session with [`extender_session_free`].
 
+use std::cell::Cell;
 use std::ffi::{c_char, CStr};
 use std::ptr;
 use std::sync::mpsc::{self, Sender};
@@ -22,7 +23,20 @@ use std::sync::mpsc::{self, Sender};
 use extender_core::protocol::{
     self, Button, CaptureMode, ClientHello, Codec, Gesture, Input, TouchPhase,
 };
-use extender_core::{set_pairing_location, PairingLocation, Session, StreamEvent};
+use extender_core::{
+    connect_problem, set_pairing_location, ConnectProblem, PairingLocation, Session, StreamEvent,
+};
+
+thread_local! {
+    /// Why this thread's last [`extender_session_connect`] failed: (problem
+    /// code, seconds to wait), or (0, 0) after a success. Per thread, so two
+    /// overlapping attempts never read each other's answer.
+    static LAST_PROBLEM: Cell<(i32, u32)> = const { Cell::new((0, 0)) };
+}
+
+fn set_last_problem(problem: Option<ConnectProblem>) {
+    LAST_PROBLEM.with(|p| p.set(problem.map_or((0, 0), |p| (p.code(), p.seconds()))));
+}
 
 /// Opaque session handle returned by [`extender_session_connect`].
 pub struct ExtenderSession {
@@ -119,7 +133,8 @@ pub unsafe extern "C" fn extender_set_pairing_dir(dir: *const c_char) {
 /// host can use to label the virtual display; pass null or "" for none.
 ///
 /// Returns an opaque session pointer, or null on a null/invalid `addr` or a
-/// connection/handshake failure. Free it with [`extender_session_free`].
+/// connection/handshake failure ([`extender_last_connect_problem`] then says
+/// why). Free it with [`extender_session_free`].
 ///
 /// # Safety
 /// `addr` must be a valid pointer to a NUL-terminated C string (or null).
@@ -134,9 +149,11 @@ pub unsafe extern "C" fn extender_session_connect(
     device_name: *const c_char,
 ) -> *mut ExtenderSession {
     if addr.is_null() {
+        set_last_problem(Some(ConnectProblem::BadAddress));
         return ptr::null_mut();
     }
     let Ok(addr) = unsafe { CStr::from_ptr(addr) }.to_str() else {
+        set_last_problem(Some(ConnectProblem::BadAddress));
         return ptr::null_mut();
     };
     // Optional: null or invalid UTF-8 → no name (host falls back to a platform label).
@@ -162,10 +179,28 @@ pub unsafe extern "C" fn extender_session_connect(
         device_name,
     };
     let (input_tx, input_rx) = mpsc::channel();
-    match Session::connect(addr, &hello, input_rx) {
+    let result = Session::connect(addr, &hello, input_rx);
+    set_last_problem(result.as_ref().err().map(connect_problem));
+    match result {
         Ok(session) => Box::into_raw(Box::new(ExtenderSession { session, input_tx })),
         Err(_) => ptr::null_mut(),
     }
+}
+
+/// Why the last [`extender_session_connect`] ON THIS THREAD returned null: 1 =
+/// other, 2 = bad address, 3 = unreachable, 4 = no answer, 5 = dropped, 6 =
+/// wrong code, 7 = host locked, 8 = needs the code, 9 = unknown host, 10 =
+/// older host, 11 = unsupported; 0 after a success. The shell shows its own
+/// translated sentence for each — no Rust error text reaches the screen.
+#[no_mangle]
+pub extern "C" fn extender_last_connect_problem() -> i32 {
+    LAST_PROBLEM.with(|p| p.get().0)
+}
+
+/// For problem 7 (host locked): seconds until the host takes another code.
+#[no_mangle]
+pub extern "C" fn extender_last_connect_wait_seconds() -> u32 {
+    LAST_PROBLEM.with(|p| p.get().1)
 }
 
 /// Block until the next stream event, returning an owned event pointer, or null
@@ -631,6 +666,39 @@ mod tests {
 
         // Stream ends after the host closes; next event is null.
         assert!(unsafe { extender_session_next_event(session) }.is_null());
+        unsafe { extender_session_free(session) };
+    }
+
+    /// A failed connect says why through `extender_last_connect_problem`, and a
+    /// later success clears it.
+    #[test]
+    fn ffi_reports_why_a_connect_failed() {
+        extender_core::set_pairing_location(extender_core::PairingLocation::Nowhere);
+        // Bind then drop: very likely nothing is listening there now.
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+        let c_addr = CString::new(closed).unwrap();
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 800, 600, 2, 0, ptr::null()) };
+        assert!(session.is_null());
+        assert_eq!(extender_last_connect_problem(), 3, "unreachable");
+
+        let session = unsafe { extender_session_connect(ptr::null(), 800, 600, 2, 0, ptr::null()) };
+        assert!(session.is_null());
+        assert_eq!(extender_last_connect_problem(), 2, "bad address");
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            let conn = extender_transport::accept(sock, 0).unwrap();
+            let mut r = BufReader::new(conn);
+            let _hello: ClientHello = protocol::read_framed(&mut r).unwrap();
+        });
+        let c_addr = CString::new(addr).unwrap();
+        let session = unsafe { extender_session_connect(c_addr.as_ptr(), 800, 600, 2, 0, ptr::null()) };
+        assert!(!session.is_null());
+        assert_eq!(extender_last_connect_problem(), 0, "a success clears it");
+        assert_eq!(extender_last_connect_wait_seconds(), 0);
+        host.join().unwrap();
         unsafe { extender_session_free(session) };
     }
 

@@ -15,9 +15,21 @@ object ExtenderNative {
     /** Where to keep the pairing keys, so a paired computer reconnects with no code. Call once at start with `filesDir.absolutePath`. */
     external fun nativeSetPairingDir(dir: String)
 
+    /** The addresses of the computers this phone is paired with, one per line ("" = none). */
+    external fun nativePairedHosts(): String
+
+    /** "Forget this computer": drop the pairing with [addr] so its PIN is asked next time. True if one was dropped. */
+    external fun nativeForgetHost(addr: String): Boolean
+
     /** captureMode: 0 = virtual second screen, 1 = mirror the host's primary display, 2 = control-only (clicker). pin: host pairing code (0 = none). deviceName: label for the screen this phone adds on the host ("" = host default). */
     external fun nativeConnect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int, deviceName: String): Long
     external fun nativeFree(handle: Long)
+
+    /** Why the last [nativeConnect] ON THIS THREAD returned 0 — a [ConnectProblem] code (0 = it didn't). */
+    external fun nativeLastConnectProblem(): Int
+
+    /** For [ConnectProblem.HOST_LOCKED]: seconds until the computer takes another PIN. */
+    external fun nativeLastConnectWaitSeconds(): Int
 
     /** Advance the stream; returns 0 = Start, 1 = Frame, -1 = ended. */
     external fun nativeNextEvent(handle: Long): Int

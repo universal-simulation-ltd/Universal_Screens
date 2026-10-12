@@ -35,13 +35,23 @@ class ExtenderSession private constructor(private var handle: Long) : InputTarge
         const val MODE_MIRROR = 1
         const val MODE_CONTROL_ONLY = 2 // input only, no video (clicker)
 
-        /** Blocking connect; returns null on failure. Call off the main thread.
+        /** Blocking connect: the session, or why there is none. Call off the main thread.
          *  [deviceName] labels the screen this phone adds on the host ("" = default). */
-        fun connect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int = 0, deviceName: String = ""): ExtenderSession? {
+        fun connect(addr: String, width: Int, height: Int, captureMode: Int, pin: Int = 0, deviceName: String = ""): Outcome {
             val handle = ExtenderNative.nativeConnect(addr, width, height, captureMode, pin, deviceName)
-            return if (handle != 0L) ExtenderSession(handle) else null
+            if (handle != 0L) return Outcome(ExtenderSession(handle), null)
+            // ⚠️ Read straight away, on this same thread: the core keeps the
+            // reason per thread, so an overlapping attempt can't swap it.
+            val failure = ConnectFailure(
+                ConnectProblem.from(ExtenderNative.nativeLastConnectProblem()),
+                ExtenderNative.nativeLastConnectWaitSeconds(),
+            )
+            return Outcome(null, failure)
         }
     }
+
+    /** A connect's result: [session] when it worked, else [failure] says why. */
+    class Outcome(val session: ExtenderSession?, val failure: ConnectFailure?)
 
     /** Pump downstream events to [sink] on a background thread (video modes only). */
     fun startPump(sink: FrameSink) {

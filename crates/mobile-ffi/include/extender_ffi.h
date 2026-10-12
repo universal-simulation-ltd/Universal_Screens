@@ -72,6 +72,25 @@ ExtenderSession *extender_session_connect(const char *addr, uint32_t width,
                                           uint32_t height, uint32_t capture_mode,
                                           uint32_t pin, const char *device_name);
 
+/* Why the last extender_session_connect ON THIS THREAD returned NULL (read it
+ * on the same thread, straight after). 0 after a success. The shell maps each
+ * to its own translated sentence; never show Rust's error text. */
+#define EXTENDER_PROBLEM_NONE 0
+#define EXTENDER_PROBLEM_OTHER 1
+#define EXTENDER_PROBLEM_BAD_ADDRESS 2  /* the address can't be looked up */
+#define EXTENDER_PROBLEM_UNREACHABLE 3  /* nothing accepted the connection */
+#define EXTENDER_PROBLEM_NO_ANSWER 4    /* accepted, then silence */
+#define EXTENDER_PROBLEM_DROPPED 5      /* the host hung up during setup */
+#define EXTENDER_PROBLEM_WRONG_CODE 6
+#define EXTENDER_PROBLEM_HOST_LOCKED 7  /* see extender_last_connect_wait_seconds */
+#define EXTENDER_PROBLEM_NEEDS_CODE 8   /* not paired (or forgotten); no code given */
+#define EXTENDER_PROBLEM_UNKNOWN_HOST 9 /* not a computer this device paired with */
+#define EXTENDER_PROBLEM_OLDER_HOST 10  /* host runs v0.3 or older: update it */
+#define EXTENDER_PROBLEM_UNSUPPORTED 11 /* a different handshake version */
+int32_t extender_last_connect_problem(void);
+/* For EXTENDER_PROBLEM_HOST_LOCKED: seconds until the host takes another code. */
+uint32_t extender_last_connect_wait_seconds(void);
+
 /* Block for the next event; NULL when the stream ends. Free with
  * extender_event_free. */
 ExtenderEvent *extender_session_next_event(ExtenderSession *session);

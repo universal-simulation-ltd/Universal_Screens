@@ -105,6 +105,12 @@ object ConnectionStore {
         save(context, load(context).map { if (it.addr == addr) it.copy(customName = name.trim()) else it })
     }
 
+    /** Drop the PIN saved with [addr] — "Forget this computer" — so tapping its
+     *  row asks for the code instead of quietly pairing again with the old one. */
+    fun clearPin(context: Context, addr: String) {
+        save(context, load(context).map { if (it.addr == addr) it.copy(pin = 0) else it })
+    }
+
     /** Replace the whole list — what a sync from the account writes back. */
     fun replaceAll(context: Context, list: List<SavedConnection>) {
         save(context, list)

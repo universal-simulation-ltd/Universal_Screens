@@ -97,6 +97,8 @@ struct ContentView: View {
     @State private var currentAddr = ""
     @State private var currentPin: Int = 0
     @State private var status = ""
+    /// Why the last attempt failed, for the failure screen's explanation.
+    @State private var failure: ConnectFailure?
     /// Address + PIN gathered from a scan/deep-link, waiting for a mode choice.
     @State private var pending: (addr: String, pin: Int)?
     /// Where the current attempt is: idle (no feedback), connecting (the spinner),
@@ -166,6 +168,7 @@ struct ContentView: View {
                 phase: .failed,
                 addr: currentAddr,
                 mode: mode,
+                failure: failure,
                 onRetry: { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
                 onHome: { phase = .idle }
             )
@@ -234,8 +237,9 @@ struct ContentView: View {
         let deviceName = ConnectionStore.effectiveDeviceName()
         let startedAt = Date()
         DispatchQueue.global(qos: .userInitiated).async {
-            let s = ExtenderSession.connect(addr: addr, mode: capture, pin: UInt32(pin),
-                                            deviceName: deviceName)
+            let outcome = ExtenderSession.connect(addr: addr, mode: capture, pin: UInt32(pin),
+                                                  deviceName: deviceName)
+            let s = outcome.session
             // Hold "Connecting…" for a beat before showing the verdict, so both
             // verdicts are legible however fast the answer came back.
             let remaining = minConnectingSeconds - Date().timeIntervalSince(startedAt)
@@ -254,6 +258,7 @@ struct ContentView: View {
                                             pin: pin)
                 }
                 session = s
+                failure = outcome.failure
                 // The verdict is a screen of its own now, not a line of small text
                 // on the home page that an attempt could scroll straight past.
                 phase = s == nil ? .failed : .connected
@@ -393,6 +398,8 @@ struct ConnectionStatusScreen: View {
     let phase: ConnectPhase
     let addr: String
     let mode: Mode
+    /// Why it failed (the `.failed` phase), explained in the reader's language.
+    var failure: ConnectFailure? = nil
     /// Backs out of a connection that's taking too long (e.g. the host is off the
     /// network), instead of waiting out the connect timeout.
     var onCancel: () -> Void = {}
@@ -405,6 +412,8 @@ struct ConnectionStatusScreen: View {
     /// both are flipped on in `.onAppear` so the animation runs on entry.
     @State private var pulsing = false
     @State private var popped = false
+    /// The knowledge base's language choice, which the failure text follows.
+    @AppStorage(Knowledge.languageKey) private var savedLanguage = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -444,8 +453,7 @@ struct ConnectionStatusScreen: View {
             }
             if phase == .failed {
                 Spacer().frame(height: 12)
-                Text("Check that the host app is running and showing its code, that the "
-                     + "PIN matches, and that both devices are on the same Wi-Fi.")
+                Text(ConnectMessages.body(Knowledge.language(saved: savedLanguage), failure))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -472,7 +480,7 @@ struct ConnectionStatusScreen: View {
     private var title: String {
         switch phase {
         case .connected: "Connected"
-        case .failed:    "Connection failed"
+        case .failed:    ConnectMessages.title(Knowledge.language(saved: savedLanguage))
         default:         "Connecting…"
         }
     }

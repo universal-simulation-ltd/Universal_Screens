@@ -12,14 +12,30 @@
 //! The Kotlin side is `com.universalsim.extender.ExtenderNative` — its package +
 //! class name are encoded in every exported symbol below, so keep them in sync.
 
+use std::cell::Cell;
 use std::sync::mpsc::{self, Sender};
 
 use extender_core::protocol::{self, Button, CaptureMode, Gesture, Input, TouchPhase};
-use extender_core::{set_pairing_location, ClientHello, Codec, PairingLocation, Session, StreamEvent};
+use extender_core::{
+    connect_problem, forget_host, paired_hosts, set_pairing_location, ClientHello, Codec, ConnectProblem,
+    PairingLocation, Session, StreamEvent,
+};
 
 use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jbyteArray, jfloat, jint, jlong};
+use jni::sys::{jboolean, jbyteArray, jfloat, jint, jlong, jstring};
 use jni::JNIEnv;
+
+thread_local! {
+    /// Why this thread's last `nativeConnect` failed: (problem code, seconds to
+    /// wait), or (0, 0) after a success. Per thread, so two overlapping connect
+    /// attempts (a cancel then a retry) never read each other's answer — the
+    /// Kotlin side reads it on the same thread straight after the connect.
+    static LAST_PROBLEM: Cell<(i32, u32)> = const { Cell::new((0, 0)) };
+}
+
+fn set_last_problem(problem: Option<ConnectProblem>) {
+    LAST_PROBLEM.with(|p| p.set(problem.map_or((0, 0), |p| (p.code(), p.seconds()))));
+}
 
 /// Behind the `jlong` handle Kotlin holds: the session, the input sender, and the
 /// "current" event most recently fetched by [`nativeNextEvent`].
@@ -73,9 +89,35 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeSetPa
     }
 }
 
+/// The addresses of the computers this phone is paired with, one per line
+/// (empty when none). A saved row offers "Forget this computer" only when its
+/// address is on the list.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativePairedHosts<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    env.new_string(paired_hosts().join("\n")).map_or(std::ptr::null_mut(), |s| s.into_raw())
+}
+
+/// "Forget this computer": drop the pairing with the host at `addr`, so the
+/// next connection to it needs its code. Returns whether anything was
+/// forgotten; false also when the pairing file could not be written.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeForgetHost<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    addr: JString<'local>,
+) -> jboolean {
+    let Ok(addr) = env.get_string(&addr) else { return 0 };
+    let addr: String = addr.into();
+    u8::from(forget_host(&addr).unwrap_or(false))
+}
+
 // ---- session lifecycle ---------------------------------------------------
 
-/// Connect and return a handle (0 on failure). `capture_mode`: 0 = virtual
+/// Connect and return a handle (0 on failure; then `nativeLastConnectProblem`
+/// says why). `capture_mode`: 0 = virtual
 /// second screen, 1 = mirror the host's primary display, 2 = control-only
 /// (input only, no video — the clicker). `pin` is the host's 4-digit pairing
 /// code (0 = none).
@@ -91,6 +133,7 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
     device_name: JString<'local>,
 ) -> jlong {
     let Ok(addr) = env.get_string(&addr) else {
+        set_last_problem(Some(ConnectProblem::Other));
         return 0;
     };
     let addr: String = addr.into();
@@ -111,7 +154,9 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
         device_name,
     };
     let (input_tx, input_rx) = mpsc::channel();
-    match Session::connect(&addr, &hello, input_rx) {
+    let result = Session::connect(&addr, &hello, input_rx);
+    set_last_problem(result.as_ref().err().map(connect_problem));
+    match result {
         Ok(session) => Box::into_raw(Box::new(AndroidSession {
             session,
             input_tx,
@@ -125,6 +170,29 @@ pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeConne
         })) as jlong,
         Err(_) => 0,
     }
+}
+
+/// Why the last `nativeConnect` ON THIS THREAD returned 0: a
+/// `ConnectProblem` code (1 = other, 2 = bad address, 3 = unreachable, 4 = no
+/// answer, 5 = dropped, 6 = wrong code, 7 = host locked, 8 = needs the code,
+/// 9 = unknown host, 10 = older host, 11 = unsupported), or 0 after a success.
+/// The app turns it into a sentence in the reader's language; no Rust error
+/// text crosses to the UI.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeLastConnectProblem(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    LAST_PROBLEM.with(|p| p.get().0)
+}
+
+/// For problem 7 (host locked): seconds until the host takes another code.
+#[no_mangle]
+pub extern "system" fn Java_com_universalsim_extender_ExtenderNative_nativeLastConnectWaitSeconds(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    LAST_PROBLEM.with(|p| i32::try_from(p.get().1).unwrap_or(i32::MAX))
 }
 
 /// Disconnect and free the session.

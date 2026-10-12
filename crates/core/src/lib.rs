@@ -292,13 +292,29 @@ fn open_tunnel(
     if !store.peers().is_empty() {
         let stream = dial(addr, connect_timeout, handshake_timeout)?;
         match transport::connect_known(stream, store.identity(), store.peer_keys()) {
-            Ok((conn, _)) => return Ok(conn),
+            Ok((conn, host_key)) => {
+                // File the host under the address it answered at now, so a
+                // computer whose address changed is still the one "Forget
+                // this computer" finds on its saved row.
+                if let Err(e) = store.rename(&host_key, addr) {
+                    eprintln!("could not update the pairing with {addr}: {e}");
+                }
+                return Ok(conn);
+            }
             Err(e) if matches!(transport::failure(&e), Some(Failure::NotPaired | Failure::UnknownHost)) => {}
             Err(e) => return Err(e),
         }
     }
     let stream = dial(addr, connect_timeout, handshake_timeout)?;
-    let (conn, host_key) = transport::connect_pair(stream, pin, store.identity())?;
+    let (conn, host_key) = match transport::connect_pair(stream, pin, store.identity()) {
+        Ok(paired) => paired,
+        // No code was given and the host wants one: say that, rather than
+        // "wrong code" for a code nobody typed.
+        Err(e) if pin == 0 && transport::failure(&e) == Some(Failure::WrongCode) => {
+            return Err(Failure::NotPaired.into_io());
+        }
+        Err(e) => return Err(e),
+    };
     // Pairing with no code (a host that lets anyone in) proves nothing about
     // who answered, so it earns no trust.
     if pin != 0 {
@@ -326,17 +342,202 @@ fn dial(addr: &str, connect_timeout: Duration, handshake_timeout: Duration) -> i
 /// turn. Mirrors [`TcpStream::connect`] (which also tries every resolved address)
 /// but caps each attempt with [`TcpStream::connect_timeout`], so an unreachable
 /// host fails within `timeout` instead of after the (much longer) OS default.
+///
+/// Its errors carry a [`DialFailed`], so [`connect_problem`] can tell "that is
+/// not an address" and "nothing answered there" apart from a handshake failure.
 fn tcp_connect_within(addr: &str, timeout: Duration) -> io::Result<TcpStream> {
+    let resolved = addr.to_socket_addrs().map_err(|e| DialFailed::wrap(e, true))?;
     let mut last_err: Option<io::Error> = None;
-    for socket_addr in addr.to_socket_addrs()? {
+    for socket_addr in resolved {
         match TcpStream::connect_timeout(&socket_addr, timeout) {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, format!("could not resolve host {addr:?}"))
-    }))
+    Err(match last_err {
+        Some(e) => DialFailed::wrap(e, false),
+        None => DialFailed::wrap(
+            io::Error::new(io::ErrorKind::InvalidInput, format!("could not resolve host {addr:?}")),
+            true,
+        ),
+    })
+}
+
+/// A failure to reach the host at all, before any handshake: the address did
+/// not resolve (`bad_address`), or nothing accepted the connection. Wrapped
+/// inside the `io::Error` so the kind and message stay the original's.
+#[derive(Debug)]
+struct DialFailed {
+    bad_address: bool,
+    source: io::Error,
+}
+
+impl DialFailed {
+    fn wrap(source: io::Error, bad_address: bool) -> io::Error {
+        io::Error::new(source.kind(), DialFailed { bad_address, source })
+    }
+}
+
+impl std::fmt::Display for DialFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for DialFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+/// Why a connect failed, in terms a person can act on. Every client shell
+/// shows its own (translated) sentence for each one, so the Rust error text
+/// never reaches a screen. The numbers are what the FFI layers hand across —
+/// see [`ConnectProblem::code`] — and must never be reused for a new meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectProblem {
+    /// Anything not covered below.
+    Other,
+    /// The address is not one that can be looked up (a typo, a stale name).
+    BadAddress,
+    /// Nothing accepted the connection: the host app is not running, the
+    /// computer is off or asleep, it is on another network, or a firewall.
+    Unreachable,
+    /// Something accepted the connection but never answered: the wrong port,
+    /// or a firewall that lets the connection open and then drops it.
+    NoAnswer,
+    /// The host hung up part-way through setting up.
+    Dropped,
+    /// The code does not match the one the host shows.
+    WrongCode,
+    /// The host is pausing after too many wrong codes.
+    HostLocked {
+        /// Seconds until it takes another attempt.
+        seconds: u32,
+    },
+    /// The host needs its code: this device never paired with it, or one of
+    /// the two ends has forgotten the other, and no code was given.
+    NeedsCode,
+    /// The far end proved a key this device has not paired with.
+    UnknownHost,
+    /// The host runs an older Universal Screens (v0.3 or before).
+    OlderHost,
+    /// The host speaks a different version of the handshake.
+    Unsupported,
+}
+
+impl ConnectProblem {
+    /// The stable number the FFI layers carry: 1 = other, 2 = bad address,
+    /// 3 = unreachable, 4 = no answer, 5 = dropped, 6 = wrong code, 7 = host
+    /// locked, 8 = needs the code, 9 = unknown host, 10 = older host,
+    /// 11 = unsupported. (0 is left for "no problem".)
+    #[must_use]
+    pub fn code(self) -> i32 {
+        match self {
+            ConnectProblem::Other => 1,
+            ConnectProblem::BadAddress => 2,
+            ConnectProblem::Unreachable => 3,
+            ConnectProblem::NoAnswer => 4,
+            ConnectProblem::Dropped => 5,
+            ConnectProblem::WrongCode => 6,
+            ConnectProblem::HostLocked { .. } => 7,
+            ConnectProblem::NeedsCode => 8,
+            ConnectProblem::UnknownHost => 9,
+            ConnectProblem::OlderHost => 10,
+            ConnectProblem::Unsupported => 11,
+        }
+    }
+
+    /// Seconds to wait before trying again, for [`ConnectProblem::HostLocked`];
+    /// 0 otherwise.
+    #[must_use]
+    pub fn seconds(self) -> u32 {
+        match self {
+            ConnectProblem::HostLocked { seconds } => seconds,
+            _ => 0,
+        }
+    }
+}
+
+/// Classify an error from [`Session::connect`].
+#[must_use]
+pub fn connect_problem(e: &io::Error) -> ConnectProblem {
+    if let Some(f) = transport::failure(e) {
+        return match f {
+            Failure::WrongCode => ConnectProblem::WrongCode,
+            Failure::HostLocked { seconds } => ConnectProblem::HostLocked { seconds },
+            Failure::NotPaired => ConnectProblem::NeedsCode,
+            Failure::UnknownHost => ConnectProblem::UnknownHost,
+            Failure::OlderHost => ConnectProblem::OlderHost,
+            Failure::Unsupported => ConnectProblem::Unsupported,
+        };
+    }
+    if let Some(dial) = e.get_ref().and_then(|inner| inner.downcast_ref::<DialFailed>()) {
+        return if dial.bad_address { ConnectProblem::BadAddress } else { ConnectProblem::Unreachable };
+    }
+    match e.kind() {
+        // The handshake deadline: the read timeout reads as WouldBlock on
+        // unix (Android, iOS) and TimedOut on Windows.
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => ConnectProblem::NoAnswer,
+        io::ErrorKind::UnexpectedEof
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe => ConnectProblem::Dropped,
+        _ => ConnectProblem::Other,
+    }
+}
+
+// ---- remembered hosts -------------------------------------------------------
+//
+// On the client each paired host is remembered under the address it was last
+// reached at (the label of its entry in the pairing file), which is how a
+// shell's saved-computer row finds its pairing.
+
+/// The addresses of the hosts this client is paired with. Empty when there is
+/// no pairing file (nothing paired yet, or pairing keys are kept nowhere).
+#[must_use]
+pub fn paired_hosts() -> Vec<String> {
+    pairing_path().map(|path| paired_hosts_at(&path)).unwrap_or_default()
+}
+
+fn paired_hosts_at(path: &std::path::Path) -> Vec<String> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    PairingStore::open(path)
+        .map(|store| store.peers().iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// "Forget this computer": stop trusting the host paired at `addr`, so the
+/// next connection to it needs its code again. This device's own key is kept,
+/// and so is every other pairing. Returns whether anything was forgotten.
+///
+/// ⚠️ The host still lists this device until its own "Forget paired devices"
+/// is used — this only stops THIS end reconnecting without the code.
+///
+/// # Errors
+/// If the pairing file cannot be read or written.
+pub fn forget_host(addr: &str) -> io::Result<bool> {
+    match pairing_path() {
+        Some(path) => forget_host_at(&path, addr),
+        None => Ok(false),
+    }
+}
+
+fn forget_host_at(path: &std::path::Path, addr: &str) -> io::Result<bool> {
+    // No file means nothing is paired; do not create one (and a new identity)
+    // just to forget nothing.
+    if !path.exists() {
+        return Ok(false);
+    }
+    let mut store = PairingStore::open(path)?;
+    let keys: Vec<_> = store.peers().iter().filter(|p| p.label == addr).map(|p| p.key).collect();
+    let mut forgot = false;
+    for key in keys {
+        forgot |= store.forget(&key)?;
+    }
+    Ok(forgot)
 }
 
 /// Drain the input channel onto the socket until the channel closes (caller done)
@@ -485,6 +686,7 @@ mod tests {
             &mut PairingStore::ephemeral().unwrap(),
         );
         assert!(result.is_err(), "a silent peer must fail the handshake, not hang");
+        assert_eq!(connect_problem(&result.err().unwrap()), ConnectProblem::NoAnswer);
         assert!(
             start.elapsed() < Duration::from_secs(2),
             "connect should fail promptly via the handshake timeout, took {:?}",
@@ -563,14 +765,118 @@ mod tests {
         let first = connect_with(&addr, 4321, &mut client).unwrap();
         assert!(matches!(first.next_event(), Some(StreamEvent::HostInfo { .. })));
         assert_eq!(client.peers().len(), 1, "the client remembers the host it paired");
+        assert_eq!(client.peers()[0].label, addr, "filed under the address it paired at");
+        // As if the host had since moved: the reconnect files it under the
+        // address it answers at now.
+        let host_key = client.peers()[0].key;
+        client.rename(&host_key, "192.0.2.9:9000").unwrap();
 
         // New host PIN, and the client offers none: the keys are enough.
         let second = connect_with(&addr, 0, &mut client).unwrap();
         assert!(matches!(second.next_event(), Some(StreamEvent::HostInfo { .. })));
 
+        assert_eq!(client.peers()[0].label, addr, "relabelled on reconnect");
+
         let (_, auths) = host.join().unwrap();
         assert!(matches!(auths[0], Some(transport::PeerAuth::Paired { .. })));
         assert!(matches!(auths[1], Some(transport::PeerAuth::Known { .. })));
+    }
+
+    /// A host that takes one connection at `pin` and then goes away.
+    fn one_shot_host(pin: u32) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let host = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut store = PairingStore::ephemeral().unwrap();
+            let _ = transport::accept_with(sock, pin, &mut store, "test");
+        });
+        (addr, host)
+    }
+
+    #[test]
+    fn a_wrong_code_and_a_missing_code_are_told_apart() {
+        let (addr, host) = one_shot_host(4321);
+        let err = connect_with(&addr, 1234, &mut PairingStore::ephemeral().unwrap()).err().unwrap();
+        assert_eq!(connect_problem(&err), ConnectProblem::WrongCode, "{err}");
+        host.join().unwrap();
+
+        // No code at all (a forgotten host, tapped from its saved row): the
+        // host wants its code, which is not the same thing as a wrong one.
+        let (addr, host) = one_shot_host(4321);
+        let err = connect_with(&addr, 0, &mut PairingStore::ephemeral().unwrap()).err().unwrap();
+        assert_eq!(connect_problem(&err), ConnectProblem::NeedsCode, "{err}");
+        host.join().unwrap();
+    }
+
+    #[test]
+    fn nothing_listening_and_a_bad_address_are_classified() {
+        // Bind then drop, so the port is very likely closed.
+        let addr = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+        let err = connect_with(&addr, 0, &mut PairingStore::ephemeral().unwrap()).err().unwrap();
+        assert_eq!(connect_problem(&err), ConnectProblem::Unreachable, "{err}");
+
+        let err = connect_with("not an address", 0, &mut PairingStore::ephemeral().unwrap()).err().unwrap();
+        assert_eq!(connect_problem(&err), ConnectProblem::BadAddress, "{err}");
+    }
+
+    #[test]
+    fn problem_codes_are_stable() {
+        let all = [
+            ConnectProblem::Other,
+            ConnectProblem::BadAddress,
+            ConnectProblem::Unreachable,
+            ConnectProblem::NoAnswer,
+            ConnectProblem::Dropped,
+            ConnectProblem::WrongCode,
+            ConnectProblem::HostLocked { seconds: 8 },
+            ConnectProblem::NeedsCode,
+            ConnectProblem::UnknownHost,
+            ConnectProblem::OlderHost,
+            ConnectProblem::Unsupported,
+        ];
+        let codes: Vec<i32> = all.iter().map(|p| p.code()).collect();
+        assert_eq!(codes, (1..=11).collect::<Vec<_>>(), "the shells map these numbers");
+        assert_eq!(ConnectProblem::HostLocked { seconds: 8 }.seconds(), 8);
+        assert_eq!(ConnectProblem::WrongCode.seconds(), 0);
+    }
+
+    // ---- "Forget this computer" ---------------------------------------------
+
+    fn temp_pairing_file(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("screens-core-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join(PAIRING_FILE)
+    }
+
+    #[test]
+    fn forget_host_drops_that_computer_only_and_keeps_this_device_key() {
+        let path = temp_pairing_file("forget");
+        let mut store = PairingStore::open(&path).unwrap();
+        let me = store.identity().public();
+        store.remember([7u8; 32], "192.168.1.20:9000").unwrap();
+        store.remember([9u8; 32], "192.168.1.30:9000").unwrap();
+        assert_eq!(paired_hosts_at(&path), vec!["192.168.1.20:9000", "192.168.1.30:9000"]);
+
+        assert!(forget_host_at(&path, "192.168.1.20:9000").unwrap());
+        assert!(!forget_host_at(&path, "192.168.1.20:9000").unwrap(), "already forgotten");
+        assert!(!forget_host_at(&path, "10.0.0.1:9000").unwrap(), "never paired");
+
+        let after = PairingStore::open(&path).unwrap();
+        assert!(!after.is_paired(&[7u8; 32]), "the forgotten computer needs its code again");
+        assert!(after.is_paired(&[9u8; 32]), "every other pairing is kept");
+        assert_eq!(after.identity().public(), me, "this device keeps its own key");
+        assert_eq!(paired_hosts_at(&path), vec!["192.168.1.30:9000"]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn forget_host_with_no_pairing_file_creates_nothing() {
+        let path = temp_pairing_file("forget-none");
+        assert!(!forget_host_at(&path, "192.168.1.20:9000").unwrap());
+        assert!(!path.exists(), "no identity is minted just to forget nothing");
+        assert!(paired_hosts_at(&path).is_empty());
     }
 
     #[test]

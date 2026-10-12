@@ -4,6 +4,34 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-12 (Android "Forget this computer"; mobile connect errors explained)
+
+**Pushed straight to `main`. No release cut; nothing installed on a device.**
+
+- **Android "Forget this computer"** in a saved row's ⋯ menu, shown only when
+  the phone holds a pairing for that address. Confirms, then drops the pairing
+  (`extender_core::forget_host` → `PairingStore::forget`, JNI
+  `nativeForgetHost`) AND the PIN saved with the row, so the next connect asks
+  for the code. The row stays; Delete removes it. Rows learn which addresses
+  are paired from `nativePairedHosts`. The client now refiles a host under the
+  address it answered at on every known reconnect (`rename` in `open_tunnel`),
+  so a host whose IP changed is still found by its row.
+- **Connect failures say why, in the reader's language** (Android + iOS). The
+  core classifies every connect error (`ConnectProblem`, stable codes 1–11:
+  bad address, unreachable, no answer, dropped, wrong code, host locked +
+  seconds, needs the code, unknown host, older host, unsupported, other). The
+  FFIs keep the last one per thread (`nativeLastConnectProblem` /
+  `extender_last_connect_problem`), and `Messages.kt` / `ConnectMessages` (in
+  `ExtenderSession.swift`) turn it into a sentence in the KB's eight
+  languages. A connect with no code to a host that wants one now reports
+  "needs the code", not "wrong code". The failure title + explanation are the
+  only translated parts; the rest of both mobile UIs is still English.
+- Verified: `cargo test` (core, transport, mobile-ffi, android-jni), clippy
+  clean, `cargo ndk` for 3 ABIs, `./gradlew assembleDebug`, and an iOS
+  simulator build. **Not seen on a device** — rebuild the `.so` / xcframework
+  before testing (the old ones lack the new symbols; the Android menu just
+  stays hidden with a stale `.so`).
+
 ## Update — 2026-10-11 (v0.4.1 released; browser client republished)
 
 James approved the release. **Tag `v0.4.1`** (workspace version bump only, as

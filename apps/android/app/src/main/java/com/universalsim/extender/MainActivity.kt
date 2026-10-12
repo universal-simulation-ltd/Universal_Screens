@@ -266,6 +266,8 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
     var currentAddr by remember { mutableStateOf("") }
     var currentPin by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
+    // Why the last attempt failed, for the failure screen's explanation.
+    var failure by remember { mutableStateOf<ConnectFailure?>(null) }
     // Credentials gathered (addr, pin) and awaiting a mode choice; null = not picking.
     var pending by remember { mutableStateOf<Pair<String, Int>?>(null) }
     // Where the current attempt is: IDLE (no feedback), CONNECTING (the spinner),
@@ -328,7 +330,8 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
         thread {
             // Width/height advertise the phone panel; the host mirrors at its own
             // native size, so exact values here are not critical.
-            val s = ExtenderSession.connect(addr, 1920, 1080, capture, pin, deviceName)
+            val outcome = ExtenderSession.connect(addr, 1920, 1080, capture, pin, deviceName)
+            val s = outcome.session
             // Hold "Connecting…" for a beat before showing the verdict, so both
             // verdicts are legible however fast the answer came back.
             val remaining = MIN_CONNECTING_MS - (System.currentTimeMillis() - startedAt)
@@ -351,6 +354,7 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     accountScope.launch { Account.remember(context, addr) }
                 }
                 session = s
+                failure = outcome.failure
                 // The verdict is a screen of its own now, not a line of small text
                 // on the home page that an attempt could scroll straight past.
                 phase = if (s != null) ConnectPhase.CONNECTED else ConnectPhase.FAILED
@@ -482,6 +486,7 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     phase = ConnectPhase.FAILED,
                     addr = currentAddr,
                     mode = mode,
+                    failure = failure,
                     onRetry = { doConnect(currentAddr, mode, currentPin, lastRememberMode) },
                     onHome = { phase = ConnectPhase.IDLE },
                 )
@@ -565,10 +570,15 @@ fun ConnectionStatusScreen(
     phase: ConnectPhase,
     addr: String,
     mode: Mode,
+    failure: ConnectFailure? = null,
     onCancel: () -> Unit = {},
     onRetry: () -> Unit = {},
     onHome: () -> Unit = {},
 ) {
+    // A failure is explained in the reader's language (Messages.kt), never in
+    // the Rust core's own error text.
+    val context = LocalContext.current
+    val failureWords = remember(failure) { Messages.connectFailure(Knowledge.language(context), failure) }
     // A Surface (rather than a bare Column) both paints the backdrop opaque and
     // swallows touches, which matters for the "Connected" pass: the live mode UI
     // is composed underneath it and must not be tappable through the overlay.
@@ -616,7 +626,7 @@ fun ConnectionStatusScreen(
             Text(
                 when (phase) {
                     ConnectPhase.CONNECTED -> "Connected"
-                    ConnectPhase.FAILED -> "Connection failed"
+                    ConnectPhase.FAILED -> failureWords.title
                     else -> "Connecting…"
                 },
                 style = MaterialTheme.typography.headlineSmall,
@@ -642,8 +652,7 @@ fun ConnectionStatusScreen(
             if (phase == ConnectPhase.FAILED) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Check that the host app is running and showing its code, that the " +
-                        "PIN matches, and that both devices are on the same Wi-Fi.",
+                    failureWords.body,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -793,7 +802,15 @@ fun ConnectScreen(
     // Saved-host rename: the host being renamed (drives the dialog) + the draft.
     var renaming by remember { mutableStateOf<SavedConnection?>(null) }
     var renameDraft by remember { mutableStateOf("") }
-    fun reload() { saved = ConnectionStore.load(context) }
+    // The computers this phone holds a pairing with (by address): only their
+    // rows offer "Forget this computer". Re-read with the list.
+    var paired by remember { mutableStateOf(pairedHosts()) }
+    // The saved host whose "Forget this computer" is awaiting confirmation.
+    var forgetting by remember { mutableStateOf<SavedConnection?>(null) }
+    fun reload() {
+        saved = ConnectionStore.load(context)
+        paired = pairedHosts()
+    }
 
     // Nearby hosts, browsed over DNS-SD while this screen is visible. Tapping
     // one asks for the host's PIN (it's on the host under More details — the QR
@@ -922,6 +939,7 @@ fun ConnectScreen(
                     },
                     onRename = { renameDraft = c.customName; renaming = c },
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
+                    onForget = if (c.addr in paired) ({ forgetting = c }) else null,
                     onDelete = {
                         ConnectionStore.delete(context, c.addr)
                         accountScope.launch { Account.forget(context, c.addr) }
@@ -1019,6 +1037,29 @@ fun ConnectScreen(
         if (showKnowledge) KnowledgeBaseDialog(onDismiss = { showKnowledge = false })
         joinStatus?.let { Text(it) }
         if (status.isNotEmpty()) Text(status)
+
+        // "Forget this computer": confirm, then drop the pairing (and the PIN
+        // saved with the row), so the next connection asks for the code. The
+        // row itself stays; Delete is what removes it.
+        forgetting?.let { target ->
+            val words = Messages.forget(Knowledge.language(context))
+            AlertDialog(
+                onDismissRequest = { forgetting = null },
+                title = { Text(words.title) },
+                text = { Text(words.body) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        ExtenderNative.nativeForgetHost(target.addr)
+                        ConnectionStore.clearPin(context, target.addr)
+                        forgetting = null
+                        reload()
+                    }) { Text(words.confirm) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { forgetting = null }) { Text(words.cancel) }
+                },
+            )
+        }
 
         // Rename dialog for a saved host.
         renaming?.let { target ->
@@ -1214,7 +1255,8 @@ private fun ModeOption(mode: Mode, onClick: () -> Unit) {
 }
 
 /** One saved host: a card — tap to quick-connect (in its remembered mode); an
- *  overflow menu holds Rename / Hide / Delete (mirrors the iOS ellipsis menu). */
+ *  overflow menu holds Rename / Hide / Delete (mirrors the iOS ellipsis menu),
+ *  plus "Forget this computer" when [onForget] is given (a paired host). */
 @Composable
 private fun SavedConnectionRow(
     conn: SavedConnection,
@@ -1222,7 +1264,9 @@ private fun SavedConnectionRow(
     onRename: () -> Unit,
     onToggleHide: () -> Unit,
     onDelete: () -> Unit,
+    onForget: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -1274,6 +1318,12 @@ private fun SavedConnectionRow(
                         text = { Text(if (conn.hidden) "Unhide" else "Hide") },
                         onClick = { menuOpen = false; onToggleHide() },
                     )
+                    if (onForget != null) {
+                        DropdownMenuItem(
+                            text = { Text(Messages.forget(Knowledge.language(context)).menu) },
+                            onClick = { menuOpen = false; onForget() },
+                        )
+                    }
                     DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
                 }
             }
@@ -2182,3 +2232,9 @@ fun CastClickerScreen(target: InputTarget) {
 private fun runOnUi(block: () -> Unit) {
     android.os.Handler(android.os.Looper.getMainLooper()).post(block)
 }
+
+/** The addresses this phone holds a pairing with, from the Rust core's
+ *  pairing file (a small text file, so reading it on a list refresh is cheap). */
+private fun pairedHosts(): Set<String> =
+    runCatching { ExtenderNative.nativePairedHosts() }.getOrDefault("")
+        .split('\n').filter { it.isNotBlank() }.toSet()

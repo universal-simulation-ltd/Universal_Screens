@@ -230,6 +230,23 @@ impl PairingStore {
         Ok(true)
     }
 
+    /// Forget one paired device (the identity and everyone else are kept), and
+    /// save. The file is re-read first, so a pairing made elsewhere since this
+    /// store last read it is not lost. Returns whether `key` was on the list.
+    ///
+    /// # Errors
+    /// If the file cannot be re-read or written.
+    pub fn forget(&mut self, key: &[u8; KEY_LEN]) -> io::Result<bool> {
+        self.reload()?;
+        let before = self.peers.len();
+        self.peers.retain(|p| &p.key != key);
+        if self.peers.len() == before {
+            return Ok(false);
+        }
+        self.save()?;
+        Ok(true)
+    }
+
     /// Forget every paired device (the identity is kept), and save.
     ///
     /// # Errors
@@ -407,6 +424,23 @@ mod tests {
         PairingStore::open(&path).unwrap().forget_all().unwrap();
         assert!(!store.rename(&[7u8; 32], "Back again").unwrap());
         assert!(PairingStore::open(&path).unwrap().peers().is_empty());
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn forget_drops_one_device_and_keeps_the_rest() {
+        let path = temp_path("forget-one");
+        let mut store = PairingStore::open(&path).unwrap();
+        let identity = store.identity().public();
+        store.remember([7u8; 32], "192.168.1.20:9000").unwrap();
+        store.remember([9u8; 32], "192.168.1.30:9000").unwrap();
+
+        assert!(store.forget(&[7u8; 32]).unwrap());
+        assert!(!store.forget(&[7u8; 32]).unwrap(), "already gone: nothing to do");
+        let reopened = PairingStore::open(&path).unwrap();
+        assert!(!reopened.is_paired(&[7u8; 32]));
+        assert!(reopened.is_paired(&[9u8; 32]));
+        assert_eq!(reopened.identity().public(), identity, "the identity is kept");
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
