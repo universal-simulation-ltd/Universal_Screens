@@ -123,7 +123,6 @@ Sua tela nunca é enviada para a UNI·SIM. Na sua rede, ela vai direto do host p
 
 ## O que vai para a UNI·SIM, e quando
 
-- **A contagem de usuários, só se você ativar.** O cliente no navegador pode mostrar quantas pessoas usam o Screens. Ela fica desativada até você marcar **Show how many people use Screens** em Advanced; aí ele envia um ID aleatório que é trocado todo dia, nunca a sua conta. Os apps para celular e os hosts no computador não enviam contagem nenhuma. Nada sobre sua tela, seu PIN ou suas máquinas faz parte disso.
 - **Seu Universal ID, se você entrar na conta.** O artigo sobre entrar na conta lista exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Ela é criptografada de ponta a ponta, então o servidor não consegue lê-la.
 - **Cast to a browser screen.** Quando o app para celular controla uma aba do navegador dessa forma, os comandos de touchpad e de passador de slides passam pelo mesmo servidor. Eles vão protegidos no caminho, mas não são criptografados de ponta a ponta. Nenhuma imagem da sua tela é enviada.

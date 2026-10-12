@@ -123,7 +123,6 @@ Ekranınız hiçbir zaman UNI·SIM'e yüklenmez. Kendi ağınızda, ana bilgisay
 
 ## UNI·SIM'e gidenler ve ne zaman
 
-- **Kullanıcı sayısı, yalnızca siz açarsanız.** Tarayıcı istemcisi Screens'i kaç kişinin kullandığını gösterebilir. Advanced altındaki **Show how many people use Screens** kutusunu işaretleyene kadar kapalıdır; işaretlediğinizde her gün yenilenen rastgele bir kimlik gönderir, hesabınızı asla göndermez. Telefon uygulamaları ve bilgisayardaki ana bilgisayarlar hiç sayım göndermez. Ekranınız, PIN'iniz ya da makineleriniz hakkında hiçbir şey bunun parçası değildir.
 - **Oturum açarsanız Universal ID'niz.** Oturum açma hakkındaki makale neyin saklandığını tam olarak listeler.
 - **Uzaktan erişim.** Uzak kodlu bir oturum UNI·SIM'in aktarma sunucusundan geçer. Uçtan uca şifrelidir, bu yüzden sunucu onu okuyamaz.
 - **Cast to a browser screen.** Telefon uygulaması bu yolla bir tarayıcı sekmesini yönettiğinde, dokunmatik yüzey ve sunum kumandası komutları aynı sunucudan geçer. Yolda korunurlar ama uçtan uca şifreli değildirler. Ekranınızın hiçbir görüntüsü gönderilmez.

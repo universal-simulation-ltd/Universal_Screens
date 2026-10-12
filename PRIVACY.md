@@ -8,8 +8,8 @@ welcome to go and read it.
 
 The short version: **your screen goes only to the device you paired with,
 encrypted end to end with your PIN.** Out of the box, Screens sends UNI·SIM
-nothing about you. Two extras can send something, and both are off until you
-switch them on.
+nothing about you, and it never counts its users. One extra can send
+something, and it is off until you switch it on.
 
 ---
 
@@ -63,7 +63,7 @@ connections' IP addresses while they are open.
 
 ---
 
-## The two things you can switch on
+## The one thing you can switch on
 
 ### Signing in, and syncing your saved computers
 
@@ -94,17 +94,13 @@ The desktop hosts sign in for identity only: they have no list of computers to
 sync, because they are the computer. See
 [`crates/host-ui/src/account.rs`](crates/host-ui/src/account.rs).
 
-### The user count (browser client only)
+### No user count
 
-Under **Advanced**, the browser client offers **Show how many people use
-Screens**, unticked. Only if you tick it does the page tell our server, every
-45 seconds while it is on screen, that Screens is in use, so it can show how
-many people use it. That message holds the app's name, the word `web`, and a
-random ID that is **replaced every day**. It never carries your account, even
-when you are signed in. See [`apps/web/src/userCount.js`](apps/web/src/userCount.js).
-
-**The Android and iPhone apps and the desktop hosts send no user count and no
-usage data at all.**
+None of the Screens apps counts its users: not the browser client, not the
+Android or iPhone app, and not the desktop hosts. They send no usage data at
+all. (Until 2026-10-12 the browser client had an opt-in **Show how many
+people use Screens** box under Advanced; it is gone, along with the code that
+sent the count.)
 
 ---
 

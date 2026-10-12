@@ -123,7 +123,6 @@ Il tuo schermo non viene mai caricato su UNI·SIM. Sulla tua rete va direttament
 
 ## Cosa va a UNI·SIM, e quando
 
-- **Il conteggio degli utenti, solo se lo attivi.** Il client browser può mostrare quante persone usano Screens. È disattivato finché non spunti **Show how many people use Screens** in Advanced; allora invia un ID casuale che viene sostituito ogni giorno, mai il tuo account. Le app per il telefono e gli host sul computer non inviano alcun conteggio. Non contiene nulla sul tuo schermo, sul PIN o sui tuoi computer.
 - **Il tuo Universal ID, se accedi.** L'articolo sull'accesso elenca esattamente cosa viene conservato.
 - **L'accesso remoto.** Una sessione con codice remoto passa dal server di inoltro di UNI·SIM. È cifrata end-to-end, quindi il server non può leggerla.
 - **Cast to a browser screen.** Quando l'app per il telefono comanda così una scheda del browser, i suoi comandi di touchpad e telecomando passano dallo stesso server. Sono protetti lungo il percorso, ma non sono cifrati end-to-end. Nessuna immagine del tuo schermo viene inviata.

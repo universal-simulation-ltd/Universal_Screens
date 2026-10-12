@@ -123,7 +123,6 @@ Su pantalla nunca se sube a UNI·SIM. En su propia red, va directamente del host
 
 ## Lo que va a UNI·SIM, y cuándo
 
-- **El recuento de usuarios, solo si usted lo activa.** El cliente de navegador puede mostrar cuántas personas usan Screens. Está desactivado hasta que marque **Show how many people use Screens** en Advanced; entonces envía un identificador aleatorio que se sustituye cada día, nunca su cuenta. Las aplicaciones para el teléfono y los hosts del ordenador no envían ningún recuento. No incluye nada sobre su pantalla, su PIN ni sus equipos.
 - **Su Universal ID, si inicia sesión.** El artículo sobre el inicio de sesión detalla exactamente qué se guarda.
 - **El acceso remoto.** Una sesión con código remoto pasa por el servidor de retransmisión de UNI·SIM. Está cifrada de extremo a extremo, así que el servidor no puede leerla.
 - **Cast to a browser screen.** Cuando la aplicación para el teléfono controla así una pestaña del navegador, sus órdenes de panel táctil y de mando pasan por el mismo servidor. Van protegidas por el camino, pero no están cifradas de extremo a extremo. No se envía ninguna imagen de su pantalla.

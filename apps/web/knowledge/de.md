@@ -123,7 +123,6 @@ Ihr Bildschirm wird nie zu UNI·SIM hochgeladen. In Ihrem eigenen Netzwerk geht 
 
 ## Was an UNI·SIM geht, und wann
 
-- **Die Nutzerzahl, nur wenn Sie sie einschalten.** Der Browser-Client kann anzeigen, wie viele Menschen Screens nutzen. Das ist ausgeschaltet, bis Sie **Show how many people use Screens** unter Advanced ankreuzen; dann sendet er eine zufällige ID, die jeden Tag ersetzt wird, nie Ihr Konto. Die Handy-Apps und die Hosts auf dem Computer senden überhaupt keine Zählung. Nichts über Ihren Bildschirm, Ihre PIN oder Ihre Rechner ist Teil davon.
 - **Ihre Universal ID, wenn Sie sich anmelden.** Der Artikel zur Anmeldung nennt genau, was gespeichert wird.
 - **Fernzugriff.** Eine Sitzung mit Fernzugriffscode läuft über den Relay-Server von UNI·SIM. Sie ist Ende-zu-Ende verschlüsselt, der Server kann sie also nicht lesen.
 - **Cast to a browser screen.** Wenn die Handy-App auf diese Weise einen Browser-Tab steuert, laufen ihre Touchpad- und Clicker-Befehle über denselben Server. Sie sind auf dem Weg geschützt, aber nicht Ende-zu-Ende verschlüsselt. Es wird kein Bild Ihres Bildschirms gesendet.
