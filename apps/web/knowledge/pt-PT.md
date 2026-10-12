@@ -123,7 +123,7 @@ O seu ecrã nunca é enviado para a UNI·SIM. Na sua própria rede, vai diretame
 
 ## O que vai para a UNI·SIM, e quando
 
-- **A contagem de utilizadores.** O Screens envia um ID de instalação aleatório, para poder mostrar quantas pessoas o utilizam. Com sessão iniciada, indica também a conta, para que os seus dispositivos contem como uma só pessoa. Nada sobre o seu ecrã, o seu PIN ou as suas máquinas faz parte disso.
+- **A contagem de utilizadores, só se a ativar.** O cliente no browser pode mostrar quantas pessoas utilizam o Screens. Está desativada até assinalar **Show how many people use Screens** em Advanced; aí envia um ID aleatório que é substituído todos os dias, nunca a sua conta. As apps para telemóvel e os anfitriões no computador não enviam qualquer contagem. Nada sobre o seu ecrã, o seu PIN ou as suas máquinas faz parte disso.
 - **O seu Universal ID, se iniciar sessão.** O artigo sobre o início de sessão indica exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Está encriptada ponto a ponto, por isso o servidor não a consegue ler.
 - **Cast to a browser screen.** Quando a app para telemóvel controla assim um separador do browser, os comandos de touchpad e de apresentação passam pelo mesmo servidor. Vão protegidos pelo caminho, mas não estão encriptados ponto a ponto. Não é enviada nenhuma imagem do seu ecrã.
@@ -138,20 +138,20 @@ O código QR do anfitrião é um endereço web. Se o ler com a câmara do telem�
 id: signing-in
 group: Privacidade e segurança
 title: Para que serve iniciar sessão?
-summary: É opcional. Com sessão iniciada, as suas máquinas guardadas acompanham-no, mas nunca os PIN.
+summary: É opcional. Com sessão iniciada, pode optar por sincronizar as suas máquinas guardadas, mas nunca os PIN.
 ---
-Nada na ligação às suas máquinas exige uma conta. Iniciar sessão com o seu Universal ID serve apenas para que um telemóvel ou browser novo já conheça as suas máquinas.
+Nada na ligação às suas máquinas exige uma conta. Iniciar sessão com o seu Universal ID permite que um telemóvel ou browser novo já conheça as suas máquinas, mas só se optar por sincronizá-las.
 
 ## O que é sincronizado
 
-A app para telemóvel e o cliente no browser guardam as suas máquinas na sua conta. Para cada uma, trata-se de:
+A sincronização está desativada até assinalar **Sync saved computers to my account** na janela de início de sessão da app Android ou do cliente no browser. Iniciar sessão, por si só, não envia nenhuma das suas máquinas. Depois de ativada, para cada máquina guardada trata-se de:
 
 - o endereço na sua rede
 - o nome e o sistema operativo da própria máquina
 - o nome que lhe deu, se existir
 - quando se ligou pela última vez
 
-Eliminar uma máquina guardada com sessão iniciada remove-a também da sua conta.
+Eliminar uma máquina guardada com a sincronização ativada remove-a também da sua conta. Desmarque a caixa e a sincronização para, e as suas máquinas guardadas são eliminadas da sua conta; ficam no dispositivo.
 
 ## O que não é
 
@@ -161,7 +161,7 @@ Eliminar uma máquina guardada com sessão iniciada remove-a também da sua cont
 
 ## No computador
 
-O anfitrião inicia sessão apenas para o identificar. Não tem uma lista de máquinas para sincronizar, porque ele próprio é a máquina: as ligações recentes pertencem a esse computador, não a si. Iniciar sessão aí permite que a contagem de utilizadores trate o seu computador, o seu telemóvel e o seu browser como uma só pessoa.
+O anfitrião inicia sessão apenas para o identificar. Não tem uma lista de máquinas para sincronizar, porque ele próprio é a máquina: as ligações recentes pertencem a esse computador, não a si. O anfitrião não envia contagem de utilizadores nem dados de utilização.
 
 ## Onde se criam as contas
 

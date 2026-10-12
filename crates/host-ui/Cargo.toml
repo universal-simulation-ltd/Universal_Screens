@@ -19,11 +19,10 @@ eframe = { version = "0.29", features = ["persistence"] }
 # The pairing PIN is the secret SPAKE2 pairs over, so it comes from the OS RNG — see
 # `gen_pin`. Already in the lockfile via extender-transport.
 getrandom = "0.2"
-# The live user count (user_count.rs) — the hosts' ONE call to a UNI·SIM
-# server. ureq is blocking and tiny, which suits a 45-second beat on its own
-# thread; rustls is already in the tree via extender-transport.
+# Optional Universal ID sign-in (account.rs). ureq is blocking and tiny, and
+# rustls is already in the tree via extender-transport.
 ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
-# Where the install id is kept, per OS.
+# Where the session and pairing files are kept, per OS.
 dirs = "5"
 
 # Remote access (remote.rs): the host dials the cloud rendezvous and bridges the

@@ -123,7 +123,7 @@ Ihr Bildschirm wird nie zu UNI·SIM hochgeladen. In Ihrem eigenen Netzwerk geht 
 
 ## Was an UNI·SIM geht, und wann
 
-- **Die Nutzerzahl.** Screens sendet eine zufällige Installations-ID, um anzeigen zu können, wie viele Menschen es nutzen. Wenn Sie angemeldet sind, nennt sie auch das Konto, damit Ihre Geräte als eine Person zählen. Nichts über Ihren Bildschirm, Ihre PIN oder Ihre Rechner ist Teil davon.
+- **Die Nutzerzahl, nur wenn Sie sie einschalten.** Der Browser-Client kann anzeigen, wie viele Menschen Screens nutzen. Das ist ausgeschaltet, bis Sie **Show how many people use Screens** unter Advanced ankreuzen; dann sendet er eine zufällige ID, die jeden Tag ersetzt wird, nie Ihr Konto. Die Handy-Apps und die Hosts auf dem Computer senden überhaupt keine Zählung. Nichts über Ihren Bildschirm, Ihre PIN oder Ihre Rechner ist Teil davon.
 - **Ihre Universal ID, wenn Sie sich anmelden.** Der Artikel zur Anmeldung nennt genau, was gespeichert wird.
 - **Fernzugriff.** Eine Sitzung mit Fernzugriffscode läuft über den Relay-Server von UNI·SIM. Sie ist Ende-zu-Ende verschlüsselt, der Server kann sie also nicht lesen.
 - **Cast to a browser screen.** Wenn die Handy-App auf diese Weise einen Browser-Tab steuert, laufen ihre Touchpad- und Clicker-Befehle über denselben Server. Sie sind auf dem Weg geschützt, aber nicht Ende-zu-Ende verschlüsselt. Es wird kein Bild Ihres Bildschirms gesendet.
@@ -138,20 +138,20 @@ Der QR-Code des Hosts ist eine Webadresse. Wenn Sie ihn mit der Kamera des Handy
 id: signing-in
 group: Datenschutz und Sicherheit
 title: Was bringt die Anmeldung?
-summary: Sie ist freiwillig. Angemeldet folgen Ihnen Ihre gespeicherten Rechner, Ihre PINs aber nie.
+summary: Sie ist freiwillig. Angemeldet können Sie Ihre gespeicherten Rechner synchronisieren lassen, Ihre PINs aber nie.
 ---
-Zum Verbinden brauchen Sie kein Konto. Die Anmeldung mit Ihrer Universal ID dient nur dazu, dass ein neues Handy oder ein neuer Browser Ihre Rechner bereits kennt.
+Zum Verbinden brauchen Sie kein Konto. Mit der Anmeldung über Ihre Universal ID kennt ein neues Handy oder ein neuer Browser Ihre Rechner bereits, aber nur, wenn Sie sie synchronisieren lassen.
 
 ## Was synchronisiert wird
 
-Die Handy-App und der Browser-Client speichern Ihre Rechner bei Ihrem Konto. Für jeden sind das:
+Die Synchronisierung ist ausgeschaltet, bis Sie im Anmeldefenster der Android-App oder des Browser-Clients **Sync saved computers to my account** ankreuzen. Die Anmeldung allein sendet keinen Ihrer Rechner. Ist sie eingeschaltet, sind das für jeden gespeicherten Rechner:
 
 - seine Adresse in Ihrem Netzwerk
 - der eigene Name und das Betriebssystem des Rechners
 - der Name, den Sie ihm gegeben haben, falls vorhanden
 - wann Sie zuletzt verbunden waren
 
-Wenn Sie einen gespeicherten Rechner angemeldet löschen, wird er auch aus Ihrem Konto entfernt.
+Wenn Sie einen gespeicherten Rechner bei eingeschalteter Synchronisierung löschen, wird er auch aus Ihrem Konto entfernt. Entfernen Sie das Häkchen, endet die Synchronisierung, und Ihre gespeicherten Rechner werden aus Ihrem Konto gelöscht; auf dem Gerät bleiben sie.
 
 ## Was nicht
 
@@ -161,7 +161,7 @@ Wenn Sie einen gespeicherten Rechner angemeldet löschen, wird er auch aus Ihrem
 
 ## Auf dem Computer
 
-Der Host meldet sich nur zur Identifizierung an. Er hat keine Liste von Rechnern zu synchronisieren, denn er ist selbst der Rechner: Seine letzten Verbindungen gehören zu diesem Computer, nicht zu Ihnen. Eine Anmeldung dort lässt die Nutzerzahl Ihren Computer, Ihr Handy und Ihren Browser als eine Person zählen.
+Der Host meldet sich nur zur Identifizierung an. Er hat keine Liste von Rechnern zu synchronisieren, denn er ist selbst der Rechner: Seine letzten Verbindungen gehören zu diesem Computer, nicht zu Ihnen. Der Host sendet weder eine Nutzerzahl noch Nutzungsdaten.
 
 ## Wo Konten angelegt werden
 

@@ -6,9 +6,9 @@
 //! (`screens_saved_hosts`, migration 0178), because those are the clients that
 //! keep a list of machines to connect TO. A host IS the machine — its
 //! `RecentConn` list is who connected to it, which belongs to this computer and
-//! not to a person — so there is nothing here to follow an account around. What
-//! signing in does do is make the live user count treat your laptop, your phone
-//! and your browser as one person rather than three.
+//! not to a person — so there is nothing here to follow an account around.
+//! The desktop hosts send no usage or presence data to UNI·SIM at all; signing
+//! in only talks to the sign-in service.
 //!
 //! The flow is the suite's email one-time code, **login only**: a Universal ID
 //! is created on the hub (app.unisim.co.uk), never here, so a typo cannot mint
@@ -28,7 +28,7 @@ use eframe::egui;
 const SUPABASE_URL: &str = "https://rygfxgalojojppxmhddo.supabase.co";
 const SUPABASE_ANON: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5Z2Z4Z2Fsb2pvanBweG1oZGRvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NTY4MjUsImV4cCI6MjA5NDMzMjgyNX0.hLy_vt9vY_rdPKF3nL32yAuMCD604E3CH5VM7D7CaNE";
 
-/// `<config dir>/UniversalScreens/session.json`, beside the install id.
+/// `<config dir>/UniversalScreens/session.json`.
 fn session_path() -> Option<std::path::PathBuf> {
     let dir = dirs::config_dir()?.join("UniversalScreens");
     std::fs::create_dir_all(&dir).ok()?;
@@ -37,8 +37,7 @@ fn session_path() -> Option<std::path::PathBuf> {
 
 /// Read one string field out of a flat JSON object. The three shapes this file
 /// parses are GoTrue's and its own, and two of them have four fields between
-/// them — not worth a JSON dependency in the hosts (the same call `user_count`
-/// makes).
+/// them — not worth a JSON dependency in the hosts.
 fn field(body: &str, name: &str) -> Option<String> {
     let key = format!("\"{name}\"");
     let at = body.find(&key)? + key.len();
@@ -148,7 +147,7 @@ enum Msg {
 /// is at, and whatever the last attempt said.
 pub struct UserAccount {
     session: Arc<Mutex<Option<Session>>>,
-    /// Shared with `UserCount` so a signed-in beat goes as the account.
+    /// The signed-in access token, kept beside the session.
     token: Arc<Mutex<Option<String>>>,
     pub show: bool,
     email: String,
@@ -173,8 +172,7 @@ impl UserAccount {
         let session = Arc::new(Mutex::new(restored));
         let (tx, rx) = channel();
         // A stored access token is minutes old at best — refresh once on start
-        // so the first beat of this run goes as the account rather than as a
-        // guest for the first 45 seconds.
+        // so the session stays valid.
         {
             let session = session.clone();
             let token = token.clone();
@@ -226,7 +224,7 @@ impl UserAccount {
         }
     }
 
-    /// The token handle to hand `UserCount::start_with`.
+    /// The signed-in access token handle.
     pub fn token(&self) -> Arc<Mutex<Option<String>>> {
         self.token.clone()
     }
@@ -360,8 +358,7 @@ pub fn show_account_window(ctx: &egui::Context, account: &mut UserAccount) {
                     ui.label(format!("Signed in as {email}."));
                     ui.label(
                         egui::RichText::new(
-                            "Your devices count as one person in the user count. Nothing about \
-                             sharing this screen needs an account.",
+                            "Nothing about sharing this screen needs an account.",
                         )
                         .small()
                         .weak(),

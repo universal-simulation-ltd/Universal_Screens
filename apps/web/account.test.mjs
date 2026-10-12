@@ -24,9 +24,10 @@ const SESSION = {
 }
 
 /** A localStorage that lives in a Map, plus a recording fetch. */
-function harness({ signedIn = true, remote = [] } = {}) {
+function harness({ signedIn = true, remote = [], sync = true } = {}) {
   const store = new Map()
   if (signedIn) store.set('universal-screens.session', JSON.stringify(SESSION))
+  if (sync) store.set('universal-screens.sync-saved', '1')
   globalThis.localStorage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),
@@ -135,6 +136,59 @@ console.log('\nforget')
     assert.ok(del, 'no delete sent')
     assert.match(del.url, /addr=eq\.a%20b%3A9002/)
   })
+}
+
+console.log('\nsync is off by default')
+{
+  const { account, calls } = await load({ remote: [], sync: false })
+  check('syncEnabled() starts false', () => assert.equal(account.syncEnabled(), false))
+  const merged = await account.syncSaved([{ addr: 'a:9002', lastConnected: 1 }])
+  await account.remember({ addr: 'b:9002', lastConnected: 2 })
+  await account.forget('a:9002')
+  check('signed in but not opted in: syncSaved answers null', () => assert.equal(merged, null))
+  check('…and nothing at all was sent', () => assert.equal(calls.length, 0))
+}
+
+console.log('\nturning sync off')
+{
+  const { account, calls, store } = await load({ remote: [] })
+  const { deleted } = await account.setSyncEnabled(false)
+  const del = calls.find((c) => c.method === 'DELETE')
+  check('deletes every row for this account', () => {
+    assert.ok(del, 'no delete sent')
+    assert.match(del.url, /screens_saved_hosts\?user_id=eq\.user-1$/)
+    assert.equal(del.headers.Authorization, 'Bearer access-token')
+  })
+  check('reports the delete as done', () => assert.equal(deleted, true))
+  check('the choice is forgotten (off is the default)', () => assert.equal(store.has('universal-screens.sync-saved'), false))
+  calls.length = 0
+  await account.remember({ addr: 'b:9002', lastConnected: 2 })
+  check('nothing is uploaded afterwards', () => assert.equal(calls.length, 0))
+}
+
+console.log('\nturning sync off while offline')
+{
+  const { account, store } = await load({ remote: [] })
+  globalThis.fetch = async () => { throw new Error('offline') }
+  const { deleted } = await account.setSyncEnabled(false)
+  check('says the delete is still to do', () => assert.equal(deleted, false))
+  check('…and keeps it pending for this account', () => assert.equal(store.get('universal-screens.sync-purge-pending'), 'user-1'))
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => { calls.push({ url: String(url), method: init.method ?? 'GET' }); return { ok: true, text: async () => '[]' } }
+  const merged = await account.syncSaved([{ addr: 'a:9002', lastConnected: 1 }])
+  check('the next sync attempt finishes the delete and uploads nothing', () => {
+    assert.equal(merged, null)
+    assert.deepEqual(calls.map((c) => c.method), ['DELETE'])
+    assert.equal(store.has('universal-screens.sync-purge-pending'), false)
+  })
+}
+
+console.log('\nsigning out resets the choice')
+{
+  const { account, store } = await load({ remote: [] })
+  await account.signOut()
+  check('syncEnabled() is false again', () => assert.equal(account.syncEnabled(), false))
+  check('…and not stored', () => assert.equal(store.has('universal-screens.sync-saved'), false))
 }
 
 const failed = results.filter((r) => !r).length

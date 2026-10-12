@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Apple's privacy manifest, required for App Store submission.
+
+  The iPhone app collects nothing. It has no account, no user count and no
+  analytics: nothing is sent to UNI·SIM's servers (PRIVACY.md).
+
+  What it does send, and only where you point it:
+  - On your own network: your screen, input and the device name you chose go
+    straight to the computer you paired with, encrypted end to end with the PIN.
+  - "Cast to a browser" / remote codes: the same encrypted stream passes through
+    the rendezvous relay at opensource.unisim.co.uk, which cannot read it and
+    keeps nothing once the session ends.
+
+  Nothing is used for tracking, and there are no third-party SDKs.
+
+  Required-reason APIs: UserDefaults holds this app's own settings and saved
+  computers (CA92.1).
+
+  Keep this in step with the App Store Connect privacy answers and PRIVACY.md.
+-->
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- The app's own settings and saved computers. CA92.1. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+</dict>
+</plist>

@@ -123,7 +123,7 @@ Su pantalla nunca se sube a UNI·SIM. En su propia red, va directamente del host
 
 ## Lo que va a UNI·SIM, y cuándo
 
-- **El recuento de usuarios.** Screens envía un identificador de instalación aleatorio para poder mostrar cuántas personas lo usan. Si ha iniciado sesión, también indica la cuenta, para que sus dispositivos cuenten como una sola persona. No incluye nada sobre su pantalla, su PIN ni sus equipos.
+- **El recuento de usuarios, solo si usted lo activa.** El cliente de navegador puede mostrar cuántas personas usan Screens. Está desactivado hasta que marque **Show how many people use Screens** en Advanced; entonces envía un identificador aleatorio que se sustituye cada día, nunca su cuenta. Las aplicaciones para el teléfono y los hosts del ordenador no envían ningún recuento. No incluye nada sobre su pantalla, su PIN ni sus equipos.
 - **Su Universal ID, si inicia sesión.** El artículo sobre el inicio de sesión detalla exactamente qué se guarda.
 - **El acceso remoto.** Una sesión con código remoto pasa por el servidor de retransmisión de UNI·SIM. Está cifrada de extremo a extremo, así que el servidor no puede leerla.
 - **Cast to a browser screen.** Cuando la aplicación para el teléfono controla así una pestaña del navegador, sus órdenes de panel táctil y de mando pasan por el mismo servidor. Van protegidas por el camino, pero no están cifradas de extremo a extremo. No se envía ninguna imagen de su pantalla.
@@ -138,20 +138,20 @@ El código QR del host es una dirección web. Si lo escanea con la cámara del p
 id: signing-in
 group: Privacidad y seguridad
 title: ¿Para qué sirve iniciar sesión?
-summary: Es opcional. Con la sesión iniciada, sus equipos guardados le acompañan, pero nunca sus PIN.
+summary: Es opcional. Con la sesión iniciada, puede elegir sincronizar sus equipos guardados, pero nunca sus PIN.
 ---
-Para conectarse a sus equipos no hace falta ninguna cuenta. Iniciar sesión con su Universal ID solo sirve para que un teléfono o navegador nuevo ya conozca sus equipos.
+Para conectarse a sus equipos no hace falta ninguna cuenta. Iniciar sesión con su Universal ID permite que un teléfono o navegador nuevo ya conozca sus equipos, pero solo si usted decide sincronizarlos.
 
 ## Qué se sincroniza
 
-La aplicación para el teléfono y el cliente de navegador guardan sus equipos con su cuenta. De cada uno se guarda:
+La sincronización está desactivada hasta que marque **Sync saved computers to my account** en la ventana de inicio de sesión de la aplicación para Android o del cliente de navegador. Iniciar sesión por sí solo no envía ninguno de sus equipos. Una vez activada, de cada equipo guardado se envía:
 
 - su dirección en su red
 - el nombre y el sistema operativo del propio equipo
 - el nombre que usted le puso, si lo hay
 - cuándo se conectó por última vez
 
-Si elimina un equipo guardado con la sesión iniciada, también se elimina de su cuenta.
+Si elimina un equipo guardado con la sincronización activada, también se elimina de su cuenta. Si desmarca la casilla, la sincronización se detiene y sus equipos guardados se eliminan de su cuenta; se quedan en el dispositivo.
 
 ## Qué no
 
@@ -161,7 +161,7 @@ Si elimina un equipo guardado con la sesión iniciada, también se elimina de su
 
 ## En el ordenador
 
-El host inicia sesión solo para identificarle. No tiene una lista de equipos que sincronizar, porque él mismo es el equipo: sus conexiones recientes pertenecen a ese ordenador, no a usted. Iniciar sesión en él permite que el recuento de usuarios cuente su ordenador, su teléfono y su navegador como una sola persona.
+El host inicia sesión solo para identificarle. No tiene una lista de equipos que sincronizar, porque él mismo es el equipo: sus conexiones recientes pertenecen a ese ordenador, no a usted. El host no envía ningún recuento de usuarios ni datos de uso.
 
 ## Dónde se crean las cuentas
 

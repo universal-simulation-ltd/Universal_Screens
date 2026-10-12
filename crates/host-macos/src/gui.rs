@@ -22,7 +22,6 @@ use crate::{serve_loop, HostEvent};
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
     account_menu_row, show_account_window, UserAccount,
-    show_user_count, UserCount,
     show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY,
     about_panel, connect_url, device_icon, first_free_port, gen_pin, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
@@ -45,12 +44,8 @@ struct RecentConn {
 }
 
 struct HostApp {
-    /// The live user count in the profile menu — beats on its own thread, and
-    /// is the hosts' only call to a UNI·SIM server. See host-ui/user_count.rs.
-    user_count: UserCount,
     /// Signing in is optional and identity-only on a host: there is no saved
-    /// list here to follow an account (see host-ui/account.rs). What it does
-    /// is make the user count treat this machine and your phone as one person.
+    /// list here to follow an account (see host-ui/account.rs).
     account: UserAccount,
     auto_connect: bool,
     dark_mode: Option<bool>,
@@ -146,9 +141,6 @@ impl HostApp {
                 storage.and_then(|s| eframe::get_value::<String>(s, KB_LANGUAGE_KEY)),
             ),
             show_pc_info: false,
-            // Started from the account's token handle, so a sign-in shows up
-            // on the next beat rather than on the next run.
-            user_count: UserCount::start_with(account.token()),
             account,
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
@@ -779,11 +771,6 @@ impl HostApp {
                     // Optional, and identity-only on a host — see
                     // host-ui/account.rs for why there is nothing here to sync.
                     account_menu_row(ui, &mut self.account);
-                    // Last in the menu, as in every other app in the suite:
-                    // "There are X total users (Y live)". Click for the whole
-                    // suite. Draws nothing until a number arrives, so a host
-                    // with no route out shows no empty rule.
-                    show_user_count(ui, &self.user_count, dark);
                 })
                 .response
                 // The disc carries no text, so without this the control is

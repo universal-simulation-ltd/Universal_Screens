@@ -123,7 +123,7 @@ Ekranınız hiçbir zaman UNI·SIM'e yüklenmez. Kendi ağınızda, ana bilgisay
 
 ## UNI·SIM'e gidenler ve ne zaman
 
-- **Kullanıcı sayısı.** Screens, kaç kişinin kullandığını gösterebilmek için rastgele bir kurulum kimliği gönderir. Oturum açtıysanız hangi hesap olduğunu da bildirir, böylece cihazlarınız tek kişi sayılır. Ekranınız, PIN'iniz ya da makineleriniz hakkında hiçbir şey bunun parçası değildir.
+- **Kullanıcı sayısı, yalnızca siz açarsanız.** Tarayıcı istemcisi Screens'i kaç kişinin kullandığını gösterebilir. Advanced altındaki **Show how many people use Screens** kutusunu işaretleyene kadar kapalıdır; işaretlediğinizde her gün yenilenen rastgele bir kimlik gönderir, hesabınızı asla göndermez. Telefon uygulamaları ve bilgisayardaki ana bilgisayarlar hiç sayım göndermez. Ekranınız, PIN'iniz ya da makineleriniz hakkında hiçbir şey bunun parçası değildir.
 - **Oturum açarsanız Universal ID'niz.** Oturum açma hakkındaki makale neyin saklandığını tam olarak listeler.
 - **Uzaktan erişim.** Uzak kodlu bir oturum UNI·SIM'in aktarma sunucusundan geçer. Uçtan uca şifrelidir, bu yüzden sunucu onu okuyamaz.
 - **Cast to a browser screen.** Telefon uygulaması bu yolla bir tarayıcı sekmesini yönettiğinde, dokunmatik yüzey ve sunum kumandası komutları aynı sunucudan geçer. Yolda korunurlar ama uçtan uca şifreli değildirler. Ekranınızın hiçbir görüntüsü gönderilmez.
@@ -138,20 +138,20 @@ Ana bilgisayarın QR kodu bir web adresidir. Kodu telefonun kendi kamerasıyla t
 id: signing-in
 group: Gizlilik ve güvenlik
 title: Oturum açmak ne işe yarar?
-summary: İsteğe bağlıdır. Oturum açtığınızda kayıtlı makineleriniz sizinle gelir, PIN'leriniz asla.
+summary: İsteğe bağlıdır. Oturum açtığınızda kayıtlı makinelerinizi eşitlemeyi seçebilirsiniz, PIN'lerinizi asla.
 ---
-Bağlanmak için hiçbir hesap gerekmez. Universal ID'nizle oturum açmanın tek amacı, yeni bir telefonun ya da tarayıcının makinelerinizi zaten tanımasıdır.
+Bağlanmak için hiçbir hesap gerekmez. Universal ID'nizle oturum açmak, yeni bir telefonun ya da tarayıcının makinelerinizi zaten tanımasını sağlar, ama yalnızca onları eşitlemeyi seçerseniz.
 
 ## Neler eşitlenir
 
-Telefon uygulaması ve tarayıcı istemcisi kayıtlı makinelerinizi hesabınızda saklar. Her biri için bunlar şunlardır:
+Android uygulamasının ya da tarayıcı istemcisinin oturum açma penceresinde **Sync saved computers to my account** kutusunu işaretleyene kadar eşitleme kapalıdır. Yalnızca oturum açmak makinelerinizin hiçbirini göndermez. Açıldığında, her kayıtlı makine için bunlar şunlardır:
 
 - ağınızdaki adresi
 - makinenin kendi adı ve işletim sistemi
 - varsa ona verdiğiniz ad
 - en son ne zaman bağlandığınız
 
-Oturumunuz açıkken kayıtlı bir makineyi silmek, onu hesabınızdan da kaldırır.
+Eşitleme açıkken kayıtlı bir makineyi silmek, onu hesabınızdan da kaldırır. Kutunun işaretini kaldırırsanız eşitleme durur ve kayıtlı makineleriniz hesabınızdan silinir; cihazda kalırlar.
 
 ## Neler eşitlenmez
 
@@ -161,7 +161,7 @@ Oturumunuz açıkken kayıtlı bir makineyi silmek, onu hesabınızdan da kaldı
 
 ## Bilgisayarda
 
-Ana bilgisayar yalnızca kimliğinizi belirlemek için oturum açar. Eşitlenecek bir makine listesi yoktur, çünkü makinenin kendisidir: son bağlantıları size değil, o bilgisayara aittir. Orada oturum açmak, kullanıcı sayısının bilgisayarınızı, telefonunuzu ve tarayıcınızı tek kişi saymasını sağlar.
+Ana bilgisayar yalnızca kimliğinizi belirlemek için oturum açar. Eşitlenecek bir makine listesi yoktur, çünkü makinenin kendisidir: son bağlantıları size değil, o bilgisayara aittir. Ana bilgisayar kullanıcı sayısı ya da kullanım verisi göndermez.
 
 ## Hesaplar nerede oluşturulur
 

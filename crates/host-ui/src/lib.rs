@@ -24,8 +24,7 @@
 //! match, which is the opposite of the point.
 //!
 //! It does take [`about_panel`] (2026-08-29), the PIN — [`gen_pin`],
-//! [`startup_pin`] and [`OwnPinEditor`] (2026-09-11) — and the user count
-//! ([`UserCount`] + [`user_count_label`], 2026-10-10, drawn as a footer). The distinction is worth
+//! [`startup_pin`] and [`OwnPinEditor`] (2026-09-11). The distinction is worth
 //! holding onto — layout may differ per platform, but a *claim about the
 //! product* (where your screen goes, the licence, the version) must not, and
 //! three hand-written About boxes is exactly how it would end up doing so. The
@@ -35,9 +34,6 @@
 
 pub mod account;
 pub use account::{account_menu_row, show_account_window, UserAccount};
-
-pub mod user_count;
-pub use user_count::{show_user_count, user_count_label, UserCount};
 
 pub mod knowledge;
 pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
@@ -411,12 +407,12 @@ pub fn about_panel(ui: &mut egui::Ui, version: &str) {
          nor the relay behind a remote code can read what is on it.",
     );
     ui.small("Full detail, including what is NOT locked down, is under the 🔒 button.");
-    // ⚠️ Say what DOES leave, now that something does (2026-09-17: the user
-    // count, and a Universal ID). A host syncs no list — see account.rs.
+    // ⚠️ Say what DOES leave. The host sends no usage data (no user count since
+    // 2026-10-12); only an optional sign-in. It syncs no list — see account.rs.
+    // Keep in step with PRIVACY.md.
     ui.small(
-        "Your screen is never uploaded to UNI·SIM. All this host tells us is that a Screens \
-         client is in use, for the count at the foot of the profile menu — and who you are, \
-         if you sign in.",
+        "Your screen is never uploaded to UNI·SIM, and this host sends us no usage data. \
+         Signing in is optional and only tells us who you are.",
     );
     ui.add_space(8.0);
 

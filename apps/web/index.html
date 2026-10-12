@@ -417,7 +417,11 @@
   .footer { margin-top: 1.5rem; text-align: center; }
   .link-btn { background: none; border: none; color: var(--muted); font: inherit; font-size: .82rem; text-decoration: underline; cursor: pointer; }
   /* The user count sits under Advanced, quiet, and is a button only because
-     tapping it switches to the suite-wide figure. */
+     tapping it switches to the suite-wide figure. It only exists while
+     "Show how many people use Screens" is ticked (off by default). */
+  .opt-row { display: flex; align-items: flex-start; gap: .5rem; margin: .4rem .5rem; font-size: .84rem; color: var(--text); cursor: pointer; text-align: left; }
+  .opt-row input { margin-top: .2rem; flex: none; }
+  .opt-row small { display: block; color: var(--muted); font-size: .72rem; line-height: 1.4; margin-top: .15rem; }
   .saved-note { margin: .4rem .25rem 0; font-size: .72rem; color: var(--muted); }
   .user-count { display: block; width: 100%; margin-top: .9rem; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: .72rem; cursor: pointer; }
 
@@ -841,13 +845,14 @@
               <label><input type="radio" name="appearance" value="system" /><span>Match my device</span></label>
             </div>
           </div>
+          <!-- Off by default: nothing is sent until this is ticked. See src/userCount.js. -->
+          <label class="opt-row"><input type="checkbox" id="user-count-opt" /><span>Show how many people use Screens<small>Sends an anonymous random ID, replaced every day, so the count can include you. Never your account.</small></span></label>
           <button type="button" id="kb-open">📖 Knowledge base</button>
           <button type="button" id="about-open">ℹ About this app</button>
         </div>
       </div>
-      <!-- "There are X total users (Y live)" — the line every suite app ends
-           its menu with. Tap it for the whole suite. Hidden until a real
-           number arrives, which on a LAN with no route out is never. -->
+      <!-- "There are X total users (Y live)". Tap it for the whole suite.
+           Hidden unless the box above is ticked and a real number arrives. -->
       <button type="button" id="user-count" class="user-count" hidden></button>
     </div>
   </main>
@@ -887,7 +892,7 @@
         </svg>
       </button>
       <h2 id="account-title">Sign in</h2>
-      <p id="account-intro">Your saved machines follow your Universal ID. Connecting never needs an account — this is only so a new phone or laptop already knows your machines.</p>
+      <p id="account-intro">Sign in with your Universal ID, the same account as every other UNI·SIM app. Connecting never needs an account.</p>
       <p id="account-msg" hidden></p>
 
       <div id="account-signed-out">
@@ -904,6 +909,8 @@
       </div>
 
       <div id="account-signed-in" hidden>
+        <!-- Off by default: until this is ticked, no saved computer is uploaded. -->
+        <label class="opt-row" style="margin:0 0 .8rem"><input type="checkbox" id="account-sync" /><span>Sync saved computers to my account<small>Sends each saved computer's network address, name, operating system and your nickname for it, so your other devices know them. Never your PIN. Turning this off deletes them from your account.</small></span></label>
         <button type="button" class="quiet" id="account-signout">Sign out</button>
       </div>
     </div>
@@ -962,11 +969,8 @@
            crates/transport/src/lib.rs for the Noise tunnel that makes the PIN
            encryption rather than just a gate. -->
       <p>It goes to the device you paired with, and to nobody else. The connection is encrypted end to end with your PIN as the key, so neither your network nor the relay behind a remote code can read what is on it.</p>
-      <!-- ⚠️ This used to read "Nothing is uploaded to UNI·SIM, and there is
-           no account." Both halves stopped being true on 2026-09-17, when
-           Screens gained the live user count and a Universal ID. What IS still
-           true is that your screen is not part of it. -->
-      <p class="about-note">Your screen is never uploaded to UNI·SIM. Signed out, all this app tells us is that a Screens client is in use, for the user count at the bottom of Advanced. Sign in and your saved machines are kept with your Universal ID — their addresses and the names you gave them, never your PIN.</p>
+      <!-- Keep in step with PRIVACY.md: both extras below are off by default. -->
+      <p class="about-note">Your screen is never uploaded to UNI·SIM. Out of the box this app sends us nothing. Two things are yours to switch on: the user count under Advanced (an anonymous ID, replaced daily), and, once signed in, syncing your saved computers to your Universal ID (their addresses, names and your nicknames, never your PIN).</p>
 
       <h3>Open source</h3>
       <p>Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.</p>
@@ -1027,7 +1031,7 @@
     import { boot } from "./src/client.js";
     import { startUserCount } from "./src/userCount.js";
     boot();
-    startUserCount(document.getElementById("user-count"));
+    startUserCount(document.getElementById("user-count"), document.getElementById("user-count-opt"));
   </script>
   <!-- Separate from the module above, so the knowledge base still opens if the
        WASM codec fails to load. -->

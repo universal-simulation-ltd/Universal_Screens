@@ -254,7 +254,7 @@ function renderSaved() {
     row.addEventListener("click", (e) => {
       if (e.target.classList.contains("del")) {
         saved.remove(h.addr);
-        // Signed in, forget it everywhere; signed out this device only — the
+        // Syncing, forget it everywhere; otherwise this device only — the
         // hint under the list says which, so nobody is surprised by a machine
         // that comes back.
         void account.forget(h.addr);
@@ -280,9 +280,9 @@ function renderSaved() {
   // there are no tombstones (see account.js).
   const note = document.createElement("p");
   note.className = "saved-note";
-  note.textContent = account.account()
-    ? "Kept with your Universal ID — × forgets a machine on every device you sign in on."
-    : "Kept on this device only. Sign in to have them follow you.";
+  note.textContent = account.account() && account.syncEnabled()
+    ? "Synced to your Universal ID — × forgets a machine on every device you sign in on."
+    : "Kept on this device only.";
   box.appendChild(note);
 }
 
@@ -590,7 +590,7 @@ export async function runDecodePipelineSelfTest() {
  * The Universal ID control in the bar, and the dialog behind it.
  *
  * Signing in is optional and changes nothing about connecting; what it buys is
- * the saved-machine list following the account (James, 2026-09-17). Everything
+ * the saved-machine list following the account, opt-in. Everything
  * here fails quietly — this client is routinely used on a LAN with no way out.
  */
 function wireAccount() {
@@ -601,6 +601,8 @@ function wireAccount() {
   const codeField = $("account-code-field");
   const submit = $("account-submit");
   const backBtn = $("account-back");
+  // "Sync saved computers to my account" — unticked until the person ticks it.
+  const syncBox = $("account-sync");
   let stage = "email";
 
   const say = (text, bad = false) => {
@@ -616,8 +618,9 @@ function wireAccount() {
     $("account-signed-out").hidden = !!who;
     $("account-title").textContent = who ? "Your Universal ID" : "Sign in";
     $("account-intro").textContent = who
-      ? `Signed in as ${who.email}. Your saved machines are kept with this account.`
-      : "Your saved machines follow your Universal ID. Connecting never needs an account — this is only so a new phone or laptop already knows your machines.";
+      ? `Signed in as ${who.email}.`
+      : "Sign in with your Universal ID, the same account as every other UNI·SIM app. Connecting never needs an account.";
+    syncBox.checked = !!who && account.syncEnabled();
   }
 
   function toEmailStage() {
@@ -661,6 +664,25 @@ function wireAccount() {
       say(String(err.message ?? err), true);
     } finally {
       submit.disabled = false;
+    }
+  });
+
+  syncBox.addEventListener("change", async () => {
+    syncBox.disabled = true;
+    try {
+      if (syncBox.checked) {
+        const { merged } = await account.setSyncEnabled(true, saved.load());
+        if (merged) saved.replaceAll(merged);
+        say(merged ? "Your saved computers now sync to this account." : "Sync is on. It will catch up when this device can reach the internet.");
+      } else {
+        const { deleted } = await account.setSyncEnabled(false);
+        say(deleted
+          ? "Sync is off. Your saved computers were removed from your account and stay on this device."
+          : "Sync is off. They will be removed from your account the next time this device can reach the internet.");
+      }
+      renderSaved();
+    } finally {
+      syncBox.disabled = false;
     }
   });
 

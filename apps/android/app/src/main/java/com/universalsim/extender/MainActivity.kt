@@ -345,8 +345,9 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     // Remember the host for quick reconnect; store the mode only if
                     // the user asked to. OS/name fill in once HostInfo arrives.
                     ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
-                    // Signed in, this machine is the account's too. No-op
-                    // otherwise, and the PIN is never part of it (Account.kt).
+                    // Signed in with sync on, this machine is the account's
+                    // too. No-op otherwise, and the PIN is never part of it
+                    // (Account.kt).
                     accountScope.launch { Account.remember(context, addr) }
                 }
                 session = s
@@ -1008,15 +1009,11 @@ fun ConnectScreen(
             TextButton(onClick = { showKnowledge = true }) { Text("📖  Knowledge base") }
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
 
-            // Universal ID — optional, and nothing about connecting needs it:
-            // what it buys is the saved machines following the account
-            // (James, 2026-09-17). See Account.kt.
+            // Universal ID — optional, and nothing about connecting needs it.
+            // Saved machines follow the account only if "Sync saved computers
+            // to my account" is ticked in its dialog (off by default). See
+            // Account.kt.
             AccountRow(onSynced = { reload() })
-
-            // "There are X total users (Y live)", last under Advanced — the
-            // same place the browser client and the desktop hosts put it. Tap
-            // for the whole suite. See UserCount.kt.
-            UserCountLine(modifier = Modifier.fillMaxWidth())
         }
         if (showAbout) AboutAppDialog(onDismiss = { showAbout = false })
         if (showKnowledge) KnowledgeBaseDialog(onDismiss = { showKnowledge = false })

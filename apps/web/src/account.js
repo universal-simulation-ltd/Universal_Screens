@@ -1,6 +1,6 @@
-// A Universal ID in the browser client — sign in, stay signed in, and let the
-// saved-machine list follow the account (James, 2026-09-17: "go ahead with
-// screens account", choosing "Identity + saved hosts follow you").
+// A Universal ID in the browser client — sign in, stay signed in, and (only if
+// you tick "Sync saved computers to my account") let the saved-machine list
+// follow the account.
 //
 // Screens has no `@unisim/sdk` on any client and no bundler on this one, so
 // this is GoTrue's REST API written out directly. The flow is the suite's
@@ -22,6 +22,11 @@
 // (migration 0178) has no column for it. Sync carries the address, the
 // machine's name and OS, and your nickname for it — nothing else.
 //
+// ⚠️ **Sync is opt-in and off by default.** Signing in alone uploads nothing:
+// until the person ticks the box, `syncSaved`, `remember` and `forget` make no
+// request at all and the list stays on this device. Unticking it stops syncing
+// and deletes the rows already uploaded for this account.
+//
 // The session is kept in localStorage under this app's own key, deliberately
 // NOT the suite's shared one: this page is served over plain http:// from a
 // host on a LAN, which is a different origin from every other suite app and
@@ -32,6 +37,27 @@ const SUPABASE_ANON =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5Z2Z4Z2Fsb2pvanBweG1oZGRvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NTY4MjUsImV4cCI6MjA5NDMzMjgyNX0.hLy_vt9vY_rdPKF3nL32yAuMCD604E3CH5VM7D7CaNE'
 
 const SESSION_KEY = 'universal-screens.session'
+/** "1" once the person has ticked "Sync saved computers to my account". */
+const SYNC_KEY = 'universal-screens.sync-saved'
+/** The account id whose uploaded rows still need deleting (sync was turned
+ *  off while the delete could not get through). Retried on the next sync. */
+const PURGE_KEY = 'universal-screens.sync-purge-pending'
+
+function readKey(key) {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+function writeKey(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+  } catch { /* private mode — the choice lasts as long as the page does */ }
+}
+let syncMemory = readKey(SYNC_KEY) === '1'
+
+/** Whether saved computers sync to the account. Off unless the person ticked it. */
+export function syncEnabled() {
+  return syncMemory
+}
 
 /** Read the stored session, or null. */
 function stored() {
@@ -135,6 +161,10 @@ export function account() {
 export async function signOut() {
   const current = memory
   store(null)
+  // The sync choice belongs to the person who made it: the next account to
+  // sign in on this device starts with it off.
+  syncMemory = false
+  writeKey(SYNC_KEY, null)
   if (!current) return
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
@@ -176,12 +206,16 @@ async function rest(path, { method = 'GET', body, prefer } = {}) {
  * Returns the merged list (most recent first), or null when signed out or
  * offline — the caller then just keeps showing what it had.
  *
+ * Null too while sync is off — nothing is read or written then.
+ *
  * ⚠️ There are no tombstones: deleting a saved machine while signed OUT only
  * affects that device, and the row comes back on the next sync. Deleting while
- * signed in calls `forget()` and is gone everywhere. The connect screen says
- * so rather than pretending otherwise.
+ * signed in with sync on calls `forget()` and is gone everywhere. The connect
+ * screen says so rather than pretending otherwise.
  */
 export async function syncSaved(local) {
+  await retryPurge()
+  if (!syncMemory) return null
   const remote = await rest('screens_saved_hosts?select=addr,hostname,os,custom_name,last_connected')
   if (remote === null) return null
 
@@ -222,8 +256,10 @@ export async function syncSaved(local) {
   return [...merged.values()].sort((a, b) => b.lastConnected - a.lastConnected)
 }
 
-/** Save (or refresh) one machine against the account. No-op signed out. */
+/** Save (or refresh) one machine against the account. No-op signed out or
+ *  with sync off. */
 export async function remember(host) {
+  if (!syncMemory) return
   const s = await session()
   if (!s) return
   await rest('screens_saved_hosts?on_conflict=user_id,addr', {
@@ -240,15 +276,44 @@ export async function remember(host) {
   })
 }
 
-/** Drop one machine from the account. No-op signed out. */
+/** Drop one machine from the account. No-op signed out or with sync off. */
 export async function forget(addr) {
-  if (!memory) return
+  if (!memory || !syncMemory) return
   await rest(`screens_saved_hosts?addr=eq.${encodeURIComponent(addr)}`, { method: 'DELETE' })
 }
 
-/** The access token for the presence beat, so a signed-in visit counts as the
- *  account rather than as this browser. Null signed out. */
-export async function accessToken() {
+/** Delete every saved computer uploaded for the signed-in account. True when
+ *  the server confirmed it. Row-Level Security limits it to this account's
+ *  rows; the filter is there because PostgREST refuses an unfiltered delete. */
+async function deleteAllSaved() {
   const s = await session()
-  return s?.access_token ?? null
+  if (!s?.user_id) return false
+  const res = await rest(`screens_saved_hosts?user_id=eq.${encodeURIComponent(s.user_id)}`, { method: 'DELETE' })
+  return res !== null
+}
+
+/** Finish a delete that could not get through when sync was turned off. */
+async function retryPurge() {
+  const pending = readKey(PURGE_KEY)
+  if (!pending || !memory || memory.user_id !== pending) return
+  if (await deleteAllSaved()) writeKey(PURGE_KEY, null)
+}
+
+/**
+ * Turn sync on or off. Turning it ON merges at once (returns the merged list,
+ * like `syncSaved`). Turning it OFF stops every upload and deletes the rows
+ * already in the account; resolves `{ deleted: true }` when that went through,
+ * `{ deleted: false }` when it will be retried on a later visit.
+ */
+export async function setSyncEnabled(on, local = []) {
+  syncMemory = !!on
+  writeKey(SYNC_KEY, on ? '1' : null)
+  if (on) {
+    writeKey(PURGE_KEY, null)
+    return { merged: await syncSaved(local) }
+  }
+  if (!memory) return { deleted: false }
+  const deleted = await deleteAllSaved()
+  writeKey(PURGE_KEY, deleted ? null : memory.user_id)
+  return { deleted }
 }

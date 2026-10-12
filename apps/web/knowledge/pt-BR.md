@@ -123,7 +123,7 @@ Sua tela nunca é enviada para a UNI·SIM. Na sua rede, ela vai direto do host p
 
 ## O que vai para a UNI·SIM, e quando
 
-- **A contagem de usuários.** O Screens envia um ID de instalação aleatório para poder mostrar quantas pessoas o usam. Se você estiver conectado à sua conta, ele também informa qual é, para que seus dispositivos contem como uma só pessoa. Nada sobre sua tela, seu PIN ou suas máquinas faz parte disso.
+- **A contagem de usuários, só se você ativar.** O cliente no navegador pode mostrar quantas pessoas usam o Screens. Ela fica desativada até você marcar **Show how many people use Screens** em Advanced; aí ele envia um ID aleatório que é trocado todo dia, nunca a sua conta. Os apps para celular e os hosts no computador não enviam contagem nenhuma. Nada sobre sua tela, seu PIN ou suas máquinas faz parte disso.
 - **Seu Universal ID, se você entrar na conta.** O artigo sobre entrar na conta lista exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Ela é criptografada de ponta a ponta, então o servidor não consegue lê-la.
 - **Cast to a browser screen.** Quando o app para celular controla uma aba do navegador dessa forma, os comandos de touchpad e de passador de slides passam pelo mesmo servidor. Eles vão protegidos no caminho, mas não são criptografados de ponta a ponta. Nenhuma imagem da sua tela é enviada.
@@ -138,20 +138,20 @@ O QR code do host é um endereço web. Se você o escanear com a câmera do celu
 id: signing-in
 group: Privacidade e segurança
 title: Para que serve entrar na conta?
-summary: É opcional. Com a conta, suas máquinas salvas acompanham você, mas nunca os seus PINs.
+summary: É opcional. Com a conta, você pode escolher sincronizar suas máquinas salvas, mas nunca os seus PINs.
 ---
-Nada na conexão exige uma conta. Entrar com o seu Universal ID serve apenas para que um celular ou navegador novo já conheça suas máquinas.
+Nada na conexão exige uma conta. Entrar com o seu Universal ID permite que um celular ou navegador novo já conheça suas máquinas, mas só se você escolher sincronizá-las.
 
 ## O que é sincronizado
 
-O app para celular e o cliente no navegador guardam suas máquinas salvas na sua conta. Para cada uma, isso inclui:
+A sincronização fica desativada até você marcar **Sync saved computers to my account** na janela de login do app para Android ou do cliente no navegador. Só entrar na conta não envia nenhuma das suas máquinas. Depois de ativada, para cada máquina salva isso inclui:
 
 - o endereço dela na sua rede
 - o nome e o sistema operacional da própria máquina
 - o nome que você deu a ela, se houver
 - quando você se conectou pela última vez
 
-Excluir uma máquina salva com a conta conectada também a remove da sua conta.
+Excluir uma máquina salva com a sincronização ativada também a remove da sua conta. Desmarque a caixa e a sincronização para, e suas máquinas salvas são excluídas da sua conta; elas continuam no dispositivo.
 
 ## O que não é
 
@@ -161,7 +161,7 @@ Excluir uma máquina salva com a conta conectada também a remove da sua conta.
 
 ## No computador
 
-O host entra na conta só para identificar você. Ele não tem uma lista de máquinas para sincronizar, porque ele é a própria máquina: as conexões recentes dele pertencem àquele computador, não a você. Entrar na conta ali faz a contagem de usuários tratar seu computador, seu celular e seu navegador como uma só pessoa.
+O host entra na conta só para identificar você. Ele não tem uma lista de máquinas para sincronizar, porque ele é a própria máquina: as conexões recentes dele pertencem àquele computador, não a você. O host não envia contagem de usuários nem dados de uso.
 
 ## Onde as contas são criadas
 

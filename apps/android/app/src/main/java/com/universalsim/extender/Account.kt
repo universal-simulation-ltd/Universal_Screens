@@ -12,9 +12,9 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * A Universal ID on the phone — sign in, stay signed in, and let the saved
- * machines follow the account (James, 2026-09-17: "go ahead with screens
- * account", choosing "Identity + saved hosts follow you").
+ * A Universal ID on the phone — sign in, stay signed in, and (only if the
+ * person ticks "Sync saved computers to my account") let the saved machines
+ * follow the account.
  *
  * The browser client's `apps/web/src/account.js` is the same thing in the same
  * order; keep the two in step. GoTrue's REST API written out by hand, because
@@ -34,6 +34,11 @@ import java.net.URLEncoder
  * with a whole-object serialiser. `mode` and `hidden` are this client's own and
  * stay local too.
  *
+ * ⚠️ **Sync is opt-in and off by default.** Signing in alone uploads nothing:
+ * until the box is ticked, `syncSaved`, `remember` and `forget` make no request
+ * and the list stays on this phone. Unticking it stops syncing and deletes the
+ * rows already uploaded for this account.
+ *
  * ⚠️ Signing in is optional and changes nothing about connecting. Screens is
  * used on networks with no route out as a matter of course, so every call here
  * is best-effort and silent.
@@ -49,6 +54,11 @@ object Account {
     private const val KEY_EXPIRES = "auth:expires"
     private const val KEY_EMAIL = "auth:email"
     private const val KEY_USER = "auth:user"
+    /** true once the person has ticked "Sync saved computers to my account". */
+    private const val KEY_SYNC = "screens:sync-saved"
+    /** The account id whose uploaded rows still need deleting, because sync
+     *  was turned off while the delete could not get through. */
+    private const val KEY_PURGE = "screens:sync-purge-pending"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -59,10 +69,16 @@ object Account {
     fun userId(context: Context): String? =
         prefs(context).getString(KEY_USER, null)?.takeIf { it.isNotBlank() }
 
+    /** Whether saved machines sync to the account. Off unless ticked. */
+    fun syncEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_SYNC, false)
+
     private fun store(context: Context, session: JSONObject?) {
         val e = prefs(context).edit()
         if (session == null) {
+            // The sync choice belongs to whoever made it: the next account to
+            // sign in here starts with it off.
             e.remove(KEY_ACCESS).remove(KEY_REFRESH).remove(KEY_EXPIRES).remove(KEY_EMAIL).remove(KEY_USER)
+                .remove(KEY_SYNC)
         } else {
             val user = session.optJSONObject("user")
             e.putString(KEY_ACCESS, session.optString("access_token"))
@@ -206,6 +222,8 @@ object Account {
      * reconnect to a machine the phone already knew.
      */
     suspend fun syncSaved(context: Context): Boolean = withContext(Dispatchers.IO) {
+        retryPurge(context)
+        if (!syncEnabled(context)) return@withContext false
         val token = accessToken(context) ?: return@withContext false
         val userId = userId(context) ?: return@withContext false
         val body = rest(token, "screens_saved_hosts?select=addr,hostname,os,custom_name,last_connected")
@@ -266,8 +284,10 @@ object Account {
         result != local
     }
 
-    /** Save (or refresh) one machine against the account. No-op signed out. */
+    /** Save (or refresh) one machine against the account. No-op signed out or
+     *  with sync off. */
     suspend fun remember(context: Context, addr: String) = withContext(Dispatchers.IO) {
+        if (!syncEnabled(context)) return@withContext
         val token = accessToken(context) ?: return@withContext
         val userId = userId(context) ?: return@withContext
         val c = ConnectionStore.load(context).find { it.addr == addr } ?: return@withContext
@@ -279,11 +299,46 @@ object Account {
         Unit
     }
 
-    /** Drop one machine from the account. No-op signed out. */
+    /** Drop one machine from the account. No-op signed out or with sync off. */
     suspend fun forget(context: Context, addr: String) = withContext(Dispatchers.IO) {
+        if (!syncEnabled(context)) return@withContext
         val token = accessToken(context) ?: return@withContext
         rest(token, "screens_saved_hosts?addr=eq.${URLEncoder.encode(addr, "UTF-8")}", method = "DELETE")
         Unit
+    }
+
+    /** Delete every saved machine uploaded for the signed-in account. True when
+     *  the server confirmed it. Row-Level Security limits it to this account's
+     *  rows; the filter is there because PostgREST refuses an unfiltered delete. */
+    private fun deleteAllSaved(token: String, userId: String): Boolean =
+        rest(token, "screens_saved_hosts?user_id=eq.${URLEncoder.encode(userId, "UTF-8")}", method = "DELETE") != null
+
+    /** Finish a delete that could not get through when sync was turned off. */
+    private suspend fun retryPurge(context: Context) {
+        val pending = prefs(context).getString(KEY_PURGE, null) ?: return
+        if (userId(context) != pending) return
+        val token = accessToken(context) ?: return
+        if (deleteAllSaved(token, pending)) prefs(context).edit().remove(KEY_PURGE).apply()
+    }
+
+    /**
+     * Turn sync on or off. ON merges at once; the result is true when the list
+     * on this phone changed. OFF stops every upload and deletes the rows
+     * already in the account; the result is true when that delete went through
+     * (otherwise it is retried on a later sync).
+     */
+    suspend fun setSyncEnabled(context: Context, on: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (on) {
+            prefs(context).edit().putBoolean(KEY_SYNC, true).remove(KEY_PURGE).apply()
+            return@withContext syncSaved(context)
+        }
+        prefs(context).edit().remove(KEY_SYNC).apply()
+        val userId = userId(context) ?: return@withContext false
+        val token = accessToken(context)
+        val deleted = token != null && deleteAllSaved(token, userId)
+        if (deleted) prefs(context).edit().remove(KEY_PURGE).apply()
+        else prefs(context).edit().putString(KEY_PURGE, userId).apply()
+        deleted
     }
 }
 

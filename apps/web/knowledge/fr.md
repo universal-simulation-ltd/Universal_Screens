@@ -123,7 +123,7 @@ Votre écran n'est jamais envoyé à UNI·SIM. Sur votre propre réseau, il va d
 
 ## Ce qui va à UNI·SIM, et quand
 
-- **Le nombre d'utilisateurs.** Screens envoie un identifiant d'installation aléatoire, pour pouvoir afficher combien de personnes l'utilisent. Si vous êtes connecté, il indique aussi le compte, pour que vos appareils comptent comme une seule personne. Rien sur votre écran, votre code PIN ou vos machines n'en fait partie.
+- **Le nombre d'utilisateurs, seulement si vous l'activez.** Le client navigateur peut afficher combien de personnes utilisent Screens. Il est désactivé tant que vous ne cochez pas **Show how many people use Screens** dans Advanced ; il envoie alors un identifiant aléatoire remplacé chaque jour, jamais votre compte. Les applications pour téléphone et les hôtes sur ordinateur n'envoient aucun décompte. Rien sur votre écran, votre code PIN ou vos machines n'en fait partie.
 - **Votre Universal ID, si vous vous connectez.** L'article sur la connexion au compte détaille exactement ce qui est conservé.
 - **L'accès à distance.** Une session avec un code distant passe par le relais d'UNI·SIM. Elle est chiffrée de bout en bout : le relais ne peut pas la lire.
 - **Cast to a browser screen.** Lorsque l'application pour téléphone pilote ainsi un onglet de navigateur, ses commandes de pavé tactile et de télécommande passent par le même relais. Elles sont protégées en chemin, mais elles ne sont pas chiffrées de bout en bout. Aucune image de votre écran n'est envoyée.
@@ -138,20 +138,20 @@ Le QR code de l'hôte est une adresse web. Si vous le scannez avec l'appareil ph
 id: signing-in
 group: Confidentialité et sécurité
 title: À quoi sert la connexion au compte ?
-summary: Elle est facultative. Une fois connecté, vos machines enregistrées vous suivent, mais jamais vos codes PIN.
+summary: Elle est facultative. Une fois connecté, vous pouvez choisir de synchroniser vos machines enregistrées, mais jamais vos codes PIN.
 ---
-Rien dans la connexion à vos machines ne demande de compte. Vous connecter avec votre Universal ID sert uniquement à ce qu'un nouveau téléphone ou navigateur connaisse déjà vos machines.
+Rien dans la connexion à vos machines ne demande de compte. Vous connecter avec votre Universal ID permet à un nouveau téléphone ou navigateur de connaître déjà vos machines, mais seulement si vous choisissez de les synchroniser.
 
 ## Ce qui est synchronisé
 
-L'application pour téléphone et le client navigateur conservent vos machines enregistrées avec votre compte. Pour chacune, il s'agit de :
+La synchronisation est désactivée tant que vous ne cochez pas **Sync saved computers to my account** dans la fenêtre de connexion de l'application Android ou du client navigateur. Se connecter seul n'envoie aucune de vos machines. Une fois activée, pour chaque machine enregistrée, il s'agit de :
 
 - son adresse sur votre réseau
 - le nom et le système d'exploitation de la machine
 - le nom que vous lui avez donné, le cas échéant
 - la date de votre dernière connexion
 
-Supprimer une machine enregistrée lorsque vous êtes connecté la retire aussi de votre compte.
+Supprimer une machine enregistrée pendant la synchronisation la retire aussi de votre compte. Décochez la case et la synchronisation s'arrête, et vos machines enregistrées sont supprimées de votre compte ; elles restent sur l'appareil.
 
 ## Ce qui ne l'est pas
 
@@ -161,7 +161,7 @@ Supprimer une machine enregistrée lorsque vous êtes connecté la retire aussi 
 
 ## Sur l'ordinateur
 
-L'hôte se connecte uniquement pour vous identifier. Il n'a pas de liste de machines à synchroniser, car il est lui-même la machine : ses connexions récentes appartiennent à cet ordinateur, pas à vous. Vous y connecter permet au nombre d'utilisateurs de compter votre ordinateur, votre téléphone et votre navigateur comme une seule personne.
+L'hôte se connecte uniquement pour vous identifier. Il n'a pas de liste de machines à synchroniser, car il est lui-même la machine : ses connexions récentes appartiennent à cet ordinateur, pas à vous. L'hôte n'envoie ni nombre d'utilisateurs ni données d'utilisation.
 
 ## Où les comptes sont créés
 

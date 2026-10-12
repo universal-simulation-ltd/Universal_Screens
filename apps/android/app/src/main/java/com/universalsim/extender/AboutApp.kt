@@ -73,15 +73,13 @@ fun AboutAppDialog(onDismiss: () -> Unit) {
                         "encrypted end to end with your PIN as the key, so neither your network nor " +
                         "the relay behind a remote code can read what is on it.",
                 )
-                // ⚠️ This used to read "Nothing is uploaded to UNI·SIM, and
-                // there is no account." Both halves stopped being true on
-                // 2026-09-17 (the user count, then a Universal ID). What is
-                // still true is that your screen is not part of it.
+                // Keep in step with PRIVACY.md: this app sends no usage data,
+                // and saved-machine sync is off until the person ticks it.
                 Text(
-                    "Your screen is never uploaded to UNI·SIM. Signed out, all this app tells us " +
-                        "is that a Screens client is in use, for the user count under Advanced. " +
-                        "Sign in and your saved machines are kept with your Universal ID — their " +
-                        "addresses and the names you gave them, never your PIN.",
+                    "Your screen is never uploaded to UNI·SIM, and this app sends us no usage " +
+                        "data. Signing in is optional. Only if you then tick \"Sync saved computers " +
+                        "to my account\" are your saved computers kept with your Universal ID — " +
+                        "their addresses, names and your nicknames, never your PIN.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

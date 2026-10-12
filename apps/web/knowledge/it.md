@@ -123,7 +123,7 @@ Il tuo schermo non viene mai caricato su UNI·SIM. Sulla tua rete va direttament
 
 ## Cosa va a UNI·SIM, e quando
 
-- **Il conteggio degli utenti.** Screens invia un ID di installazione casuale, per poter mostrare quante persone lo usano. Se hai effettuato l'accesso, indica anche l'account, così i tuoi dispositivi contano come una sola persona. Non contiene nulla sul tuo schermo, sul PIN o sui tuoi computer.
+- **Il conteggio degli utenti, solo se lo attivi.** Il client browser può mostrare quante persone usano Screens. È disattivato finché non spunti **Show how many people use Screens** in Advanced; allora invia un ID casuale che viene sostituito ogni giorno, mai il tuo account. Le app per il telefono e gli host sul computer non inviano alcun conteggio. Non contiene nulla sul tuo schermo, sul PIN o sui tuoi computer.
 - **Il tuo Universal ID, se accedi.** L'articolo sull'accesso elenca esattamente cosa viene conservato.
 - **L'accesso remoto.** Una sessione con codice remoto passa dal server di inoltro di UNI·SIM. È cifrata end-to-end, quindi il server non può leggerla.
 - **Cast to a browser screen.** Quando l'app per il telefono comanda così una scheda del browser, i suoi comandi di touchpad e telecomando passano dallo stesso server. Sono protetti lungo il percorso, ma non sono cifrati end-to-end. Nessuna immagine del tuo schermo viene inviata.
@@ -138,20 +138,20 @@ Il codice QR dell'host è un indirizzo web. Se lo scansioni con la fotocamera de
 id: signing-in
 group: Privacy e sicurezza
 title: A cosa serve accedere?
-summary: È facoltativo. Con l'accesso, i tuoi computer salvati ti seguono, ma i PIN mai.
+summary: È facoltativo. Con l'accesso puoi scegliere di sincronizzare i tuoi computer salvati, ma i PIN mai.
 ---
-Per collegarti ai tuoi computer non serve nessun account. Accedere con il tuo Universal ID serve solo perché un telefono o un browser nuovo conosca già i tuoi computer.
+Per collegarti ai tuoi computer non serve nessun account. Accedere con il tuo Universal ID permette a un telefono o a un browser nuovo di conoscere già i tuoi computer, ma solo se scegli di sincronizzarli.
 
 ## Cosa viene sincronizzato
 
-L'app per il telefono e il client browser conservano i tuoi computer salvati con il tuo account. Per ciascuno si tratta di:
+La sincronizzazione è disattivata finché non spunti **Sync saved computers to my account** nella finestra di accesso dell'app Android o del client browser. Il solo accesso non invia nessuno dei tuoi computer. Una volta attivata, per ogni computer salvato si tratta di:
 
 - il suo indirizzo sulla tua rete
 - il nome e il sistema operativo del computer
 - il nome che gli hai dato, se c'è
 - quando ti sei collegato l'ultima volta
 
-Se elimini un computer salvato mentre hai effettuato l'accesso, viene tolto anche dal tuo account.
+Se elimini un computer salvato mentre la sincronizzazione è attiva, viene tolto anche dal tuo account. Togli la spunta e la sincronizzazione si ferma, e i tuoi computer salvati vengono eliminati dal tuo account; restano sul dispositivo.
 
 ## Cosa no
 
@@ -161,7 +161,7 @@ Se elimini un computer salvato mentre hai effettuato l'accesso, viene tolto anch
 
 ## Sul computer
 
-L'host accede solo per identificarti. Non ha un elenco di computer da sincronizzare, perché è lui stesso il computer: le sue connessioni recenti appartengono a quel computer, non a te. Accedere lì permette al conteggio degli utenti di considerare computer, telefono e browser come una sola persona.
+L'host accede solo per identificarti. Non ha un elenco di computer da sincronizzare, perché è lui stesso il computer: le sue connessioni recenti appartengono a quel computer, non a te. L'host non invia né il conteggio degli utenti né dati di utilizzo.
 
 ## Dove si creano gli account
 

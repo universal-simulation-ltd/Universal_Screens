@@ -123,7 +123,7 @@ Your screen is never uploaded to UNI·SIM. On your own network it goes straight 
 
 ## What goes to UNI·SIM, and when
 
-- **The user count.** Screens sends a random install ID, so that it can show how many people use it. Signed in, it also says which account, so your devices count as one person. Nothing about your screen, your PIN or your machines is part of it.
+- **The user count, only if you turn it on.** The browser client can show how many people use Screens. It is off until you tick **Show how many people use Screens** under Advanced; then it sends a random ID that is replaced every day, never your account. The phone apps and the computer hosts send no count at all. Nothing about your screen, your PIN or your machines is part of it.
 - **Your Universal ID, if you sign in.** The article on signing in lists exactly what is kept.
 - **Remote access.** A session with a remote code travels through UNI·SIM's relay. It is end-to-end encrypted, so the relay cannot read it.
 - **Cast to a browser screen.** When the phone app drives a browser tab this way, its trackpad and clicker commands go through the same relay. They are protected on the way, but they are not end-to-end encrypted. No picture of your screen is sent.
@@ -138,20 +138,20 @@ The host's QR code is a web address. If you scan it with the phone's own camera 
 id: signing-in
 group: Privacy and security
 title: What does signing in do?
-summary: It is optional. Signed in, your saved machines follow you, but never your PINs.
+summary: It is optional. Signed in, you can choose to sync your saved machines, but never your PINs.
 ---
-Nothing about connecting needs an account. Signing in with your Universal ID is only so that a new phone or browser already knows your machines.
+Nothing about connecting needs an account. Signing in with your Universal ID lets a new phone or browser already know your machines, but only if you choose to sync them.
 
 ## What is synced
 
-The phone app and the browser client keep your saved machines with your account. For each one, that is:
+Syncing is off until you tick **Sync saved computers to my account** in the sign-in window of the Android app or the browser client. Signing in alone sends none of your machines. Once it is on, for each saved machine that is:
 
 - its address on your network
 - the machine's own name and operating system
 - the name you gave it, if any
 - when you last connected
 
-Deleting a saved machine while signed in removes it from your account too.
+Deleting a saved machine while syncing removes it from your account too. Untick the box and syncing stops, and your saved machines are deleted from your account; they stay on the device.
 
 ## What is not
 
@@ -161,7 +161,7 @@ Deleting a saved machine while signed in removes it from your account too.
 
 ## On the computer
 
-The host signs in for identity only. It has no list of machines to sync, because it is the machine: its recent connections belong to that computer, not to you. Signing in there lets the user count treat your computer, phone and browser as one person.
+The host signs in for identity only. It has no list of machines to sync, because it is the machine: its recent connections belong to that computer, not to you. The host sends no user count or usage data.
 
 ## Where accounts are made
 
