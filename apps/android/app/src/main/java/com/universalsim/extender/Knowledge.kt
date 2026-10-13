@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -58,6 +59,67 @@ import androidx.compose.ui.unit.sp
 object Knowledge {
     data class Article(val id: String, val group: String, val title: String, val summary: String, val body: String)
 
+    /** A paper, standard or guidance an article draws on (`sources.md`). */
+    data class Source(
+        val article: String, val kind: String, val title: String, val authors: String,
+        val publisher: String, val year: String, val href: String, val pdf: String, val licence: String,
+    )
+
+    /** Where the suite's knowledge-base PDFs are served (the opensource portal). */
+    const val LIBRARY_URL = "https://opensource.unisim.co.uk/kb"
+
+    /** The printed guide for an article in a language (English for anything unknown). */
+    fun guideUrl(code: String, id: String): String {
+        val lang = if (LANGUAGES.any { it.first == code }) code else "en"
+        return "$LIBRARY_URL/screens/$lang/$id.pdf"
+    }
+
+    /** A source's hosted copy (`papers/…`) as a URL. */
+    fun libraryUrl(path: String): String =
+        if (path.startsWith("https://") || path.startsWith("http://")) path else "$LIBRARY_URL/${path.trimStart('/')}"
+
+    private val KINDS = listOf("paper", "standard", "report", "guidance", "law")
+
+    /**
+     * Split `sources.md` into sources, in file order. The same rules as
+     * `parseSources` in apps/web/src/knowledge.js and `parse_sources` in the
+     * Rust port: one source per block of `key: value` lines closed by `---`;
+     * a block without an article, title, known kind or http(s) link is dropped.
+     */
+    fun parseSources(src: String): List<Source> {
+        val lines = src.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+        var i = 0
+        while (i < lines.size && lines[i].trim() != "---") i++
+        i++
+        val out = mutableListOf<Source>()
+        var cur = HashMap<String, String>()
+        fun flush() {
+            val href = cur["href"].orEmpty()
+            if (!cur["article"].isNullOrEmpty() && !cur["title"].isNullOrEmpty() && cur["kind"] in KINDS &&
+                (href.startsWith("https://") || href.startsWith("http://"))
+            ) {
+                out += Source(
+                    cur["article"]!!, cur["kind"]!!, cur["title"]!!, cur["authors"].orEmpty(), cur["publisher"].orEmpty(),
+                    cur["year"].orEmpty(), href, cur["pdf"].orEmpty(), cur["licence"].orEmpty(),
+                )
+            }
+            cur = HashMap()
+        }
+        while (i < lines.size) {
+            val line = lines[i++]
+            if (line.trim() == "---") { flush(); continue }
+            val at = line.indexOf(':')
+            if (at > 0) cur[line.substring(0, at).trim()] = line.substring(at + 1).trim()
+        }
+        flush()
+        return out
+    }
+
+    /** Every source, read from the APK's assets. Empty on failure. */
+    fun sources(context: Context): List<Source> = runCatching {
+        context.assets.open("sources.md").bufferedReader(Charsets.UTF_8).use { parseSources(it.readText()) }
+    }.getOrDefault(emptyList())
+
     sealed interface Block {
         data class Heading(val text: String) : Block
         data class Paragraph(val text: String) : Block
@@ -78,17 +140,42 @@ object Knowledge {
     )
 
     /** The reader's own words — the SDK's kb.* strings. */
-    data class Words(val title: String, val back: String, val close: String, val language: String, val failed: String)
+    data class Words(
+        val title: String, val back: String, val close: String, val language: String, val failed: String,
+        val download: String, val sources: String, val publisher: String, val readSource: String,
+        val previous: String, val next: String, val sourceOne: String, val sourcesMany: String,
+        /** paper, standard, report, guidance, law. */
+        val kinds: List<String>,
+    ) {
+        fun count(n: Int) = if (n == 1) sourceOne else sourcesMany.replace("{n}", n.toString())
+        fun kind(k: String) = KINDS.indexOf(k).let { if (it < 0) "" else kinds[it] }
+    }
 
     fun words(code: String): Words = when (code) {
-        "fr" -> Words("Base de connaissances", "Tous les articles", "Fermer", "Langue", "Impossible de charger les articles.")
-        "es" -> Words("Base de conocimientos", "Todos los artículos", "Cerrar", "Idioma", "No se han podido cargar los artículos.")
-        "it" -> Words("Knowledge base", "Tutti gli articoli", "Chiudi", "Lingua", "Impossibile caricare gli articoli.")
-        "de" -> Words("Wissensdatenbank", "Alle Artikel", "Schließen", "Sprache", "Die Artikel konnten nicht geladen werden.")
-        "pt-BR" -> Words("Base de conhecimento", "Todos os artigos", "Fechar", "Idioma", "Não foi possível carregar os artigos.")
-        "pt-PT" -> Words("Base de conhecimento", "Todos os artigos", "Fechar", "Idioma", "Não foi possível carregar os artigos.")
-        "tr" -> Words("Bilgi bankası", "Tüm makaleler", "Kapat", "Dil", "Makaleler yüklenemedi.")
-        else -> Words("Knowledge base", "All articles", "Close", "Language", "The articles couldn't be loaded.")
+        "fr" -> Words("Base de connaissances", "Tous les articles", "Fermer", "Langue", "Impossible de charger les articles.",
+            "Télécharger ce guide (PDF)", "Recherches et sources", "Éditeur", "Lire à la source", "Précédent", "Suivant", "1 source", "{n} sources",
+            listOf("Article de recherche", "Norme", "Rapport", "Recommandations", "Législation"))
+        "es" -> Words("Base de conocimientos", "Todos los artículos", "Cerrar", "Idioma", "No se han podido cargar los artículos.",
+            "Descargar esta guía (PDF)", "Investigación y fuentes", "Editor", "Leer en la fuente", "Anterior", "Siguiente", "1 fuente", "{n} fuentes",
+            listOf("Artículo de investigación", "Norma", "Informe", "Guía", "Legislación"))
+        "it" -> Words("Knowledge base", "Tutti gli articoli", "Chiudi", "Lingua", "Impossibile caricare gli articoli.",
+            "Scarica questa guida (PDF)", "Ricerche e fonti", "Editore", "Leggi alla fonte", "Precedente", "Successivo", "1 fonte", "{n} fonti",
+            listOf("Articolo di ricerca", "Standard", "Rapporto", "Linee guida", "Normativa"))
+        "de" -> Words("Wissensdatenbank", "Alle Artikel", "Schließen", "Sprache", "Die Artikel konnten nicht geladen werden.",
+            "Diese Anleitung herunterladen (PDF)", "Forschung und Quellen", "Herausgeber", "An der Quelle lesen", "Zurück", "Weiter", "1 Quelle", "{n} Quellen",
+            listOf("Fachartikel", "Norm", "Bericht", "Leitfaden", "Rechtsvorschrift"))
+        "pt-BR" -> Words("Base de conhecimento", "Todos os artigos", "Fechar", "Idioma", "Não foi possível carregar os artigos.",
+            "Baixar este guia (PDF)", "Pesquisas e fontes", "Editora", "Ler na fonte", "Anterior", "Próximo", "1 fonte", "{n} fontes",
+            listOf("Artigo científico", "Norma", "Relatório", "Orientações", "Legislação"))
+        "pt-PT" -> Words("Base de conhecimento", "Todos os artigos", "Fechar", "Idioma", "Não foi possível carregar os artigos.",
+            "Transferir este guia (PDF)", "Investigação e fontes", "Editor", "Ler na fonte", "Anterior", "Seguinte", "1 fonte", "{n} fontes",
+            listOf("Artigo de investigação", "Norma", "Relatório", "Orientações", "Legislação"))
+        "tr" -> Words("Bilgi bankası", "Tüm makaleler", "Kapat", "Dil", "Makaleler yüklenemedi.",
+            "Bu rehberi indir (PDF)", "Araştırma ve kaynaklar", "Yayıncı", "Kaynağında oku", "Önceki", "Sonraki", "1 kaynak", "{n} kaynak",
+            listOf("Araştırma makalesi", "Standart", "Rapor", "Kılavuz", "Mevzuat"))
+        else -> Words("Knowledge base", "All articles", "Close", "Language", "The articles couldn't be loaded.",
+            "Download this guide (PDF)", "Research and sources", "Publisher", "Read at source", "Previous", "Next", "1 source", "{n} sources",
+            listOf("Research paper", "Standard", "Report", "Guidance", "Law"))
     }
 
     private const val PREFS = "knowledge"
@@ -230,6 +317,8 @@ fun KnowledgeBaseDialog(onDismiss: () -> Unit) {
     var articles by remember { mutableStateOf<List<Knowledge.Article>?>(null) }
     var current by remember { mutableStateOf<String?>(null) }
     var pickerOpen by remember { mutableStateOf(false) }
+    val sources = remember { Knowledge.sources(context) }
+    val uri = LocalUriHandler.current
     val words = Knowledge.words(language)
     val scroll = rememberScrollState()
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.6f).dp
@@ -266,7 +355,33 @@ fun KnowledgeBaseDialog(onDismiss: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (article != null) {
+                    if (article.summary.isNotEmpty()) {
+                        Text(article.summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedButton(onClick = { uri.openUri(Knowledge.guideUrl(language, article.id)) }) {
+                        Text("⬇  ${words.download}")
+                    }
                     ArticleBody(article.body)
+                    val mine = sources.filter { it.article == article.id }
+                    if (mine.isNotEmpty()) {
+                        Text(
+                            words.sources.uppercase(),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.08.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                        mine.forEach { SourceItem(words, it) { url -> uri.openUri(url) } }
+                    }
+                    val list = articles.orEmpty()
+                    val i = list.indexOfFirst { it.id == article.id }
+                    val prev = list.getOrNull(i - 1)
+                    val next = list.getOrNull(i + 1)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        if (prev != null) TextButton(onClick = { current = prev.id }) { Text("‹ ${words.previous}") } else Box {}
+                        if (next != null) TextButton(onClick = { current = next.id }) { Text("${words.next} ›") }
+                    }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -323,6 +438,14 @@ fun KnowledgeBaseDialog(onDismiss: () -> Unit) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
+                                val n = sources.count { it.article == a.id }
+                                if (n > 0) {
+                                    Text(
+                                        words.count(n),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
                             Text(
                                 "›",
@@ -336,6 +459,33 @@ fun KnowledgeBaseDialog(onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+@Composable
+private fun SourceItem(words: Knowledge.Words, s: Knowledge.Source, open: (String) -> Unit) {
+    Column(modifier = Modifier.padding(top = 4.dp)) {
+        Text(words.kind(s.kind), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            s.title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { open(s.href) },
+        )
+        val byline = listOf(s.authors, s.publisher, s.year).filter { it.isNotEmpty() }.joinToString(" · ")
+        if (byline.isNotEmpty()) {
+            Text(byline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row {
+            if (s.pdf.isNotEmpty()) {
+                TextButton(onClick = { open(Knowledge.libraryUrl(s.pdf)) }) { Text("⬇ PDF") }
+            }
+            TextButton(onClick = { open(s.href) }) { Text("${if (s.pdf.isEmpty()) words.readSource else words.publisher} ↗") }
+        }
+        if (s.pdf.isNotEmpty() && s.licence.isNotEmpty()) {
+            Text(s.licence, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable

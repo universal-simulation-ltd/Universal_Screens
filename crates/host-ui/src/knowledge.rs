@@ -20,6 +20,13 @@
 //! bullets, `1. ` steps and `**bold**`. Nothing else is interpreted, and every
 //! reader renders it as widgets or elements, never as HTML.
 //!
+//! The research and sources behind each article are `knowledge/sources.md`,
+//! the same in every language and read by all three clients the same way
+//! (one source per `key: value` block). Every article also links its printed
+//! guide on opensource.unisim.co.uk/kb/screens/<lang>/<id>.pdf, made from these
+//! same files by universal-platform's `kb-pdfs.mjs` via
+//! `scripts/kb-pdfs-adapter.mjs`.
+//!
 //! The tests below check the data for all clients at once: every language has
 //! the same articles in the same order, and no body strays outside that syntax.
 
@@ -123,6 +130,105 @@ pub fn parse_bundle(src: &str) -> Vec<Article> {
 /// Articles for a language code; English for anything unknown.
 pub fn articles(code: &str) -> Vec<Article> {
     parse_bundle(bundle(code))
+}
+
+/// The research and sources behind the articles, the same in every language:
+/// `apps/web/knowledge/sources.md`, which the browser client and the Android
+/// app read too.
+pub const SOURCES: &str = include_str!("../../../apps/web/knowledge/sources.md");
+
+/// A paper, standard or guidance an article draws on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Source {
+    /// The article id it belongs to.
+    pub article: String,
+    /// paper, standard, report, guidance or law.
+    pub kind: String,
+    pub title: String,
+    pub authors: String,
+    pub publisher: String,
+    pub year: String,
+    /// The canonical free link.
+    pub href: String,
+    /// Our hosted copy, relative to [`KB_LIBRARY_URL`] — only where the
+    /// licence allows it.
+    pub pdf: String,
+    pub licence: String,
+}
+
+const KINDS: &[&str] = &["paper", "standard", "report", "guidance", "law"];
+
+/// Split `sources.md` into sources, in file order: one per block of
+/// `key: value` lines, each closed by `---`; anything before the first `---`
+/// is a note. A block without an article, a title, a known kind or an
+/// http(s) link is dropped. The same rules as `parseSources` in
+/// `apps/web/src/knowledge.js`.
+pub fn parse_sources(src: &str) -> Vec<Source> {
+    let mut out = Vec::new();
+    let mut lines = src.lines().map(|l| l.trim_end_matches('\r'));
+    for line in lines.by_ref() {
+        if line.trim() == "---" {
+            break;
+        }
+    }
+    let mut cur = Source::default();
+    let flush = |cur: &mut Source, out: &mut Vec<Source>| {
+        let s = std::mem::take(cur);
+        let ok = !s.article.is_empty()
+            && !s.title.is_empty()
+            && KINDS.contains(&s.kind.as_str())
+            && (s.href.starts_with("https://") || s.href.starts_with("http://"));
+        if ok {
+            out.push(s);
+        }
+    };
+    for line in lines {
+        if line.trim() == "---" {
+            flush(&mut cur, &mut out);
+            continue;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let v = v.trim().to_owned();
+            match k.trim() {
+                "article" => cur.article = v,
+                "kind" => cur.kind = v,
+                "title" => cur.title = v,
+                "authors" => cur.authors = v,
+                "publisher" => cur.publisher = v,
+                "year" => cur.year = v,
+                "href" => cur.href = v,
+                "pdf" => cur.pdf = v,
+                "licence" => cur.licence = v,
+                _ => {}
+            }
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+/// The sources for one article, in order.
+pub fn sources_for(id: &str) -> Vec<Source> {
+    parse_sources(SOURCES).into_iter().filter(|s| s.article == id).collect()
+}
+
+/// Where the suite's knowledge-base PDFs are served (the opensource portal).
+pub const KB_LIBRARY_URL: &str = "https://opensource.unisim.co.uk/kb";
+
+/// The printed guide for an article in a language (English for anything
+/// unknown), made by universal-platform's `kb-pdfs.mjs`.
+pub fn guide_url(code: &str, id: &str) -> String {
+    let lang = if LANGUAGES.iter().any(|(c, _)| *c == code) { code } else { "en" };
+    format!("{KB_LIBRARY_URL}/screens/{lang}/{id}.pdf")
+}
+
+/// A source's hosted copy (`papers/…`) as a URL.
+pub fn library_url(path: &str) -> String {
+    if path.starts_with("https://") || path.starts_with("http://") {
+        path.to_owned()
+    } else {
+        format!("{KB_LIBRARY_URL}/{}", path.trim_start_matches('/'))
+    }
 }
 
 /// One block of an article body.
@@ -231,20 +337,108 @@ pub struct UiText {
     pub title: &'static str,
     pub back: &'static str,
     pub language: &'static str,
+    pub download: &'static str,
+    pub sources: &'static str,
+    pub publisher: &'static str,
+    pub read_source: &'static str,
+    pub previous: &'static str,
+    pub next: &'static str,
+    /// "{n} sources"; [`UiText::count`] picks the singular.
+    pub sources_many: &'static str,
+    pub source_one: &'static str,
+    /// paper, standard, report, guidance, law.
+    pub kinds: [&'static str; 5],
+}
+
+impl UiText {
+    pub fn count(&self, n: usize) -> String {
+        if n == 1 { self.source_one.to_owned() } else { self.sources_many.replace("{n}", &n.to_string()) }
+    }
+
+    pub fn kind(&self, kind: &str) -> &'static str {
+        KINDS.iter().position(|k| *k == kind).map(|i| self.kinds[i]).unwrap_or("")
+    }
 }
 
 pub fn ui_text(code: &str) -> UiText {
-    let (title, back, language) = match code {
-        "fr" => ("Base de connaissances", "Tous les articles", "Langue"),
-        "es" => ("Base de conocimientos", "Todos los artículos", "Idioma"),
-        "it" => ("Knowledge base", "Tutti gli articoli", "Lingua"),
-        "de" => ("Wissensdatenbank", "Alle Artikel", "Sprache"),
-        "pt-BR" => ("Base de conhecimento", "Todos os artigos", "Idioma"),
-        "pt-PT" => ("Base de conhecimento", "Todos os artigos", "Idioma"),
-        "tr" => ("Bilgi bankası", "Tüm makaleler", "Dil"),
-        _ => ("Knowledge base", "All articles", "Language"),
-    };
-    UiText { title, back, language }
+    match code {
+        "fr" => UiText {
+            title: "Base de connaissances", back: "Tous les articles", language: "Langue",
+            download: "Télécharger ce guide (PDF)", sources: "Recherches et sources", publisher: "Éditeur",
+            read_source: "Lire à la source", previous: "Précédent", next: "Suivant",
+            sources_many: "{n} sources", source_one: "1 source",
+            kinds: ["Article de recherche", "Norme", "Rapport", "Recommandations", "Législation"],
+        },
+        "es" => UiText {
+            title: "Base de conocimientos", back: "Todos los artículos", language: "Idioma",
+            download: "Descargar esta guía (PDF)", sources: "Investigación y fuentes", publisher: "Editor",
+            read_source: "Leer en la fuente", previous: "Anterior", next: "Siguiente",
+            sources_many: "{n} fuentes", source_one: "1 fuente",
+            kinds: ["Artículo de investigación", "Norma", "Informe", "Guía", "Legislación"],
+        },
+        "it" => UiText {
+            title: "Knowledge base", back: "Tutti gli articoli", language: "Lingua",
+            download: "Scarica questa guida (PDF)", sources: "Ricerche e fonti", publisher: "Editore",
+            read_source: "Leggi alla fonte", previous: "Precedente", next: "Successivo",
+            sources_many: "{n} fonti", source_one: "1 fonte",
+            kinds: ["Articolo di ricerca", "Standard", "Rapporto", "Linee guida", "Normativa"],
+        },
+        "de" => UiText {
+            title: "Wissensdatenbank", back: "Alle Artikel", language: "Sprache",
+            download: "Diese Anleitung herunterladen (PDF)", sources: "Forschung und Quellen", publisher: "Herausgeber",
+            read_source: "An der Quelle lesen", previous: "Zurück", next: "Weiter",
+            sources_many: "{n} Quellen", source_one: "1 Quelle",
+            kinds: ["Fachartikel", "Norm", "Bericht", "Leitfaden", "Rechtsvorschrift"],
+        },
+        "pt-BR" => UiText {
+            title: "Base de conhecimento", back: "Todos os artigos", language: "Idioma",
+            download: "Baixar este guia (PDF)", sources: "Pesquisas e fontes", publisher: "Editora",
+            read_source: "Ler na fonte", previous: "Anterior", next: "Próximo",
+            sources_many: "{n} fontes", source_one: "1 fonte",
+            kinds: ["Artigo científico", "Norma", "Relatório", "Orientações", "Legislação"],
+        },
+        "pt-PT" => UiText {
+            title: "Base de conhecimento", back: "Todos os artigos", language: "Idioma",
+            download: "Transferir este guia (PDF)", sources: "Investigação e fontes", publisher: "Editor",
+            read_source: "Ler na fonte", previous: "Anterior", next: "Seguinte",
+            sources_many: "{n} fontes", source_one: "1 fonte",
+            kinds: ["Artigo de investigação", "Norma", "Relatório", "Orientações", "Legislação"],
+        },
+        "tr" => UiText {
+            title: "Bilgi bankası", back: "Tüm makaleler", language: "Dil",
+            download: "Bu rehberi indir (PDF)", sources: "Araştırma ve kaynaklar", publisher: "Yayıncı",
+            read_source: "Kaynağında oku", previous: "Önceki", next: "Sonraki",
+            sources_many: "{n} kaynak", source_one: "1 kaynak",
+            kinds: ["Araştırma makalesi", "Standart", "Rapor", "Kılavuz", "Mevzuat"],
+        },
+        _ => UiText {
+            title: "Knowledge base", back: "All articles", language: "Language",
+            download: "Download this guide (PDF)", sources: "Research and sources", publisher: "Publisher",
+            read_source: "Read at source", previous: "Previous", next: "Next",
+            sources_many: "{n} sources", source_one: "1 source",
+            kinds: ["Research paper", "Standard", "Report", "Guidance", "Law"],
+        },
+    }
+}
+
+/// Each group takes the next hue, as in the SDK's reader: blue, violet,
+/// green, amber, rose (the `bar` colours, readable on light and dark).
+const HUES: [egui::Color32; 5] = [
+    egui::Color32::from_rgb(0x3b, 0x82, 0xf6),
+    egui::Color32::from_rgb(0x8b, 0x5c, 0xf6),
+    egui::Color32::from_rgb(0x10, 0xb9, 0x81),
+    egui::Color32::from_rgb(0xf5, 0x9e, 0x0b),
+    egui::Color32::from_rgb(0xf4, 0x3f, 0x5e),
+];
+
+fn hue_of(list: &[Article], group: &str) -> egui::Color32 {
+    let mut groups: Vec<&str> = Vec::new();
+    for a in list {
+        if !groups.contains(&a.group.as_str()) {
+            groups.push(&a.group);
+        }
+    }
+    HUES[groups.iter().position(|g| *g == group).unwrap_or(0) % HUES.len()]
 }
 
 /// The desktop reader: a centred window with the article list (grouped, with a
@@ -329,7 +523,7 @@ pub fn show_knowledge_window(ctx: &egui::Context, reader: &mut KnowledgeReader) 
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .open(&mut open)
         .show(ctx, |ui| {
-            ui.set_width(380.0);
+            ui.set_width(460.0);
             let max_h = (ctx.screen_rect().height() - 140.0).max(200.0);
             let current = reader.current.clone();
             let article = current.and_then(|id| reader.list().iter().find(|a| a.id == id).cloned());
@@ -339,13 +533,70 @@ pub fn show_knowledge_window(ctx: &egui::Context, reader: &mut KnowledgeReader) 
                         reader.current = None;
                     }
                     ui.add_space(4.0);
+                    let list = reader.list().to_vec();
+                    let hue = hue_of(&list, &a.group);
+                    if !a.group.is_empty() {
+                        ui.label(egui::RichText::new(a.group.to_uppercase()).size(10.5).strong().color(hue));
+                    }
                     ui.label(egui::RichText::new(&a.title).strong().size(15.0));
+                    if !a.summary.is_empty() {
+                        ui.add(egui::Label::new(egui::RichText::new(&a.summary).weak()).wrap());
+                    }
                     ui.add_space(6.0);
+                    let lang = reader.lang().to_owned();
+                    let mut go: Option<String> = None;
                     egui::ScrollArea::vertical()
                         .id_salt(("kb_article", a.id.as_str()))
                         .max_height(max_h)
                         .auto_shrink([false, true])
-                        .show(ui, |ui| article_body(ui, &a.body));
+                        .show(ui, |ui| {
+                            ui.hyperlink_to(
+                                egui::RichText::new(format!("⬇  {}", ui_words.download)).strong().color(hue),
+                                guide_url(&lang, &a.id),
+                            );
+                            ui.add_space(6.0);
+                            article_body(ui, &a.body);
+                            let sources = sources_for(&a.id);
+                            if !sources.is_empty() {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(ui_words.sources.to_uppercase())
+                                        .size(10.5)
+                                        .strong()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                ui.add_space(2.0);
+                                for s in &sources {
+                                    source_item(ui, &ui_words, s);
+                                    ui.add_space(6.0);
+                                }
+                            }
+                            let i = list.iter().position(|x| x.id == a.id).unwrap_or(0);
+                            let prev = i.checked_sub(1).and_then(|p| list.get(p));
+                            let next = list.get(i + 1);
+                            if prev.is_some() || next.is_some() {
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.horizontal(|ui| {
+                                    if let Some(p) = prev {
+                                        if ui.button(format!("‹ {}", ui_words.previous)).on_hover_text(&p.title).clicked() {
+                                            go = Some(p.id.clone());
+                                        }
+                                    }
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if let Some(n) = next {
+                                            if ui.button(format!("{} ›", ui_words.next)).on_hover_text(&n.title).clicked() {
+                                                go = Some(n.id.clone());
+                                            }
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    if go.is_some() {
+                        reader.current = go;
+                    }
                 }
                 None => {
                     ui.horizontal(|ui| {
@@ -399,6 +650,14 @@ pub fn show_knowledge_window(ctx: &egui::Context, reader: &mut KnowledgeReader) 
                                         .wrap(),
                                     );
                                 }
+                                let n = sources_for(&a.id).len();
+                                if n > 0 {
+                                    ui.label(
+                                        egui::RichText::new(ui_words.count(n))
+                                            .size(10.5)
+                                            .color(hue_of(&list, &a.group)),
+                                    );
+                                }
                                 if row.clicked() {
                                     chosen = Some(a.id.clone());
                                 }
@@ -413,6 +672,29 @@ pub fn show_knowledge_window(ctx: &egui::Context, reader: &mut KnowledgeReader) 
         });
     if !open {
         reader.show = false;
+    }
+}
+
+fn source_item(ui: &mut egui::Ui, words: &UiText, s: &Source) {
+    ui.label(egui::RichText::new(words.kind(&s.kind)).size(10.0).strong().weak());
+    ui.add(egui::Hyperlink::from_label_and_url(egui::RichText::new(&s.title).strong().size(12.0), &s.href));
+    let byline: Vec<&str> = [s.authors.as_str(), s.publisher.as_str(), s.year.as_str()]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect();
+    if !byline.is_empty() {
+        ui.add(egui::Label::new(egui::RichText::new(byline.join(" · ")).size(11.0).weak()).wrap());
+    }
+    ui.horizontal_wrapped(|ui| {
+        if !s.pdf.is_empty() {
+            ui.hyperlink_to(egui::RichText::new("⬇ PDF").size(11.0), library_url(&s.pdf))
+                .on_hover_text(&s.licence);
+        }
+        let label = if s.pdf.is_empty() { words.read_source } else { words.publisher };
+        ui.hyperlink_to(egui::RichText::new(format!("{label} ↗")).size(11.0), &s.href);
+    });
+    if !s.pdf.is_empty() && !s.licence.is_empty() {
+        ui.add(egui::Label::new(egui::RichText::new(&s.licence).size(10.0).weak()).wrap());
     }
 }
 
@@ -538,6 +820,41 @@ mod tests {
         let a = en.iter().find(|a| a.id == "signing-in").expect("signing-in");
         let not = a.body.split("## What is not").nth(1).expect("a 'What is not' section");
         assert!(not.contains("**The PIN.**"), "{not}");
+    }
+
+    #[test]
+    fn every_source_belongs_to_an_article_and_links_over_https() {
+        let all = parse_sources(SOURCES);
+        assert!(all.len() >= 10, "{} sources", all.len());
+        let ids = ids("en");
+        for s in &all {
+            assert!(ids.contains(&s.article), "unknown article {}", s.article);
+            assert!(s.href.starts_with("https://"), "{}", s.href);
+            if !s.pdf.is_empty() {
+                assert!(s.pdf.starts_with("papers/") && s.pdf.ends_with(".pdf"), "{}", s.pdf);
+                assert!(!s.licence.is_empty(), "{} has no licence", s.pdf);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_sources_matches_the_browser() {
+        // The fixture knowledge.test.mjs uses for parseSources.
+        let src = "note: x\n---\narticle: a\nkind: paper\ntitle: T: sub\nyear: 2001\nhref: https://e.org/x\n---\narticle: a\nkind: rumour\ntitle: no\nhref: https://e.org\n---\narticle: b\nkind: law\ntitle: L\nhref: javascript:alert(1)\n---\n";
+        let s = parse_sources(src);
+        assert_eq!(s.len(), 1);
+        assert_eq!((s[0].article.as_str(), s[0].title.as_str(), s[0].year.as_str()), ("a", "T: sub", "2001"));
+    }
+
+    #[test]
+    fn guide_and_library_urls() {
+        assert_eq!(guide_url("pt-BR", "the-pin"), "https://opensource.unisim.co.uk/kb/screens/pt-BR/the-pin.pdf");
+        assert_eq!(guide_url("xx", "the-pin"), "https://opensource.unisim.co.uk/kb/screens/en/the-pin.pdf");
+        assert_eq!(library_url("papers/x.pdf"), "https://opensource.unisim.co.uk/kb/papers/x.pdf");
+        for (code, _) in LANGUAGES {
+            let w = ui_text(code);
+            assert!(w.count(3).contains('3') && !w.download.is_empty() && w.kinds.iter().all(|k| !k.is_empty()), "{code}");
+        }
     }
 
     #[test]
