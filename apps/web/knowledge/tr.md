@@ -126,6 +126,7 @@ Ekranınız hiçbir zaman UNI·SIM'e yüklenmez. Kendi ağınızda, ana bilgisay
 - **Oturum açarsanız Universal ID'niz.** Oturum açma hakkındaki makale neyin saklandığını tam olarak listeler.
 - **Uzaktan erişim.** Uzak kodlu bir oturum UNI·SIM'in aktarma sunucusundan geçer. Uçtan uca şifrelidir, bu yüzden sunucu onu okuyamaz.
 - **Cast to a browser screen.** Telefon uygulaması bu yolla bir tarayıcı sekmesini yönettiğinde, dokunmatik yüzey ve sunum kumandası komutları aynı sunucudan geçer. Yolda korunurlar ama uçtan uca şifreli değildirler. Ekranınızın hiçbir görüntüsü gönderilmez.
+- **Yalnızca tarayıcı istemcisinden günlük açılma sayımı.** Tarayıcı istemcisini bir gün içinde ilk kez kullandığınızda, paketteki her web uygulaması gibi, Screens'in o gün kaç kez açıldığını gösteren anonim sayıya bir ekler. Hiçbir kimlik, asla hesabınız ve ekranınız, PIN'iniz ya da bilgisayarlarınız hakkında hiçbir şey göndermez. Telefon uygulamaları ve ana bilgisayar hiçbir sayım göndermez.
 
 İnternet bağlantısı olmayan bir ağda bunların hiçbiri gönderilmez ve Screens aynı şekilde çalışır.
 

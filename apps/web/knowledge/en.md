@@ -126,6 +126,7 @@ Your screen is never uploaded to UNI·SIM. On your own network it goes straight 
 - **Your Universal ID, if you sign in.** The article on signing in lists exactly what is kept.
 - **Remote access.** A session with a remote code travels through UNI·SIM's relay. It is end-to-end encrypted, so the relay cannot read it.
 - **Cast to a browser screen.** When the phone app drives a browser tab this way, its trackpad and clicker commands go through the same relay. They are protected on the way, but they are not end-to-end encrypted. No picture of your screen is sent.
+- **A daily open count, from the browser client only.** The first time you use the browser client on a given day, it adds one to an anonymous count of how many times Screens is opened each day, as every suite web app does. It carries no ID, never your account, and nothing about your screen, your PIN or your computers. The phone apps and the hosts send no count at all.
 
 On a network with no internet connection, none of this is sent, and Screens works just the same.
 

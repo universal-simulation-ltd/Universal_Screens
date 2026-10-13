@@ -8,8 +8,10 @@ welcome to go and read it.
 
 The short version: **your screen goes only to the device you paired with,
 encrypted end to end with your PIN.** Out of the box, Screens sends UNI·SIM
-nothing about you, and it never counts its users. One extra can send
-something, and it is off until you switch it on.
+nothing about you. The browser client adds one to an anonymous daily open
+count, with no identifier, as every suite web app does; the phone apps and the
+desktop hosts count nothing. One extra can send something, and it is off until
+you switch it on.
 
 ---
 
@@ -94,13 +96,27 @@ The desktop hosts sign in for identity only: they have no list of computers to
 sync, because they are the computer. See
 [`crates/host-ui/src/account.rs`](crates/host-ui/src/account.rs).
 
-### No user count
+### The daily open count (browser client only)
 
-None of the Screens apps counts its users: not the browser client, not the
-Android or iPhone app, and not the desktop hosts. They send no usage data at
-all. (Until 2026-10-12 the browser client had an opt-in **Show how many
-people use Screens** box under Advanced; it is gone, along with the code that
-sent the count.)
+Like every web app in the suite, the browser client adds one to an anonymous
+count of how many times Screens was opened that day. The first time the page
+is used on a given day (UTC) in your browser, it sends one message holding the
+app's name and the word `web`, and nothing else: no ID of any kind, never your
+account (even when you are signed in), nothing about your screen, your PIN or
+your computers. Our server keeps a total per day, which identifies nobody.
+
+To count each browser only once a day, the page remembers today's date in your
+browser (`unisim:opened:screens`); that note is never sent. It waits until you
+first press, type, touch or scroll, so a page that merely loads is not counted.
+A copy served on your own computer or local network (by a host or a dev
+server) never counts, and nor does a browser under automated testing or one
+marked as a UNI·SIM staff device. See
+[`apps/web/src/openCount.js`](apps/web/src/openCount.js).
+
+**The Android and iPhone apps and the desktop hosts count nothing and send no
+usage data at all.** (Until 2026-10-12 the browser client had an opt-in **Show
+how many people use Screens** box under Advanced, which sent a random ID
+replaced daily; it is gone, along with the code that sent it.)
 
 ---
 

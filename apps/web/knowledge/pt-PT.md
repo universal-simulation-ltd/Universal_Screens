@@ -126,6 +126,7 @@ O seu ecrã nunca é enviado para a UNI·SIM. Na sua própria rede, vai diretame
 - **O seu Universal ID, se iniciar sessão.** O artigo sobre o início de sessão indica exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Está encriptada ponto a ponto, por isso o servidor não a consegue ler.
 - **Cast to a browser screen.** Quando a app para telemóvel controla assim um separador do browser, os comandos de touchpad e de apresentação passam pelo mesmo servidor. Vão protegidos pelo caminho, mas não estão encriptados ponto a ponto. Não é enviada nenhuma imagem do seu ecrã.
+- **Uma contagem diária de aberturas, só do cliente no browser.** Da primeira vez que usa o cliente no browser num dia, ele soma um a uma contagem anónima de quantas vezes o Screens é aberto nesse dia, como faz cada app web da suite. Não leva nenhum ID, nunca a sua conta, nem nada sobre o seu ecrã, o seu PIN ou os seus computadores. As apps para telemóvel e o anfitrião não enviam contagem nenhuma.
 
 Numa rede sem ligação à internet, nada disto é enviado, e o Screens funciona exatamente da mesma forma.
 

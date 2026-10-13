@@ -1013,8 +1013,9 @@
            encryption rather than just a gate. -->
       <p>It goes to the device you paired with, and to nobody else. The connection is encrypted end to end with your PIN as the key, so neither your network nor the relay behind a remote code can read what is on it.</p>
       <!-- Keep in step with PRIVACY.md: the one extra below is off by default.
-           The opt-in user count went on 2026-10-12, with the suite's. -->
-      <p class="about-note">Your screen is never uploaded to UNI·SIM. Out of the box this app sends us nothing, and it never counts its users. Once signed in, you can choose to sync your saved computers to your Universal ID (their addresses, names and your nicknames, never your PIN).</p>
+           The opt-in user count went on 2026-10-12, with the suite's; the
+           anonymous daily open count (src/openCount.js) came 2026-10-13. -->
+      <p class="about-note">Your screen is never uploaded to UNI·SIM. In a browser, this page adds one to an anonymous count of how many times Screens is opened each day, as every suite web app does: no ID, no account, nothing about you or your screen. Once signed in, you can choose to sync your saved computers to your Universal ID (their addresses, names and your nicknames, never your PIN).</p>
 
       <h3>Open source</h3>
       <p>Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.</p>
@@ -1080,6 +1081,14 @@
   <script type="module">
     import { mountKnowledgeBase } from "./src/kb-dialog.js";
     mountKnowledgeBase();
+  </script>
+  <!-- The suite's anonymous daily open count: one call a day, at the first
+       interaction, with no identifier — see src/openCount.js. Never on a LAN
+       or localhost copy, in automation, or in a browser marked as staff.
+       Its own module, so nothing here can hold up the client or the KB. -->
+  <script type="module">
+    import { startOpenCount } from "./src/openCount.js";
+    startOpenCount();
   </script>
 </body>
 </html>

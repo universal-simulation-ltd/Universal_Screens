@@ -104,6 +104,11 @@ jobs:
       - name: Test the browser's knowledge-base reader
         run: node apps/web/knowledge.test.mjs
 
+      # The anonymous daily open count: what counts, what never does, and that
+      # the one request carries no identifier.
+      - name: Test the browser's daily open count
+        run: node apps/web/open-count.test.mjs
+
       # `rust-cache` caches `~/.cargo/bin`, so this compiles once and is a no-op
       # on every later run — worth the guard, because installing it takes longer
       # than everything else in this job put together.

@@ -126,6 +126,7 @@ Votre écran n'est jamais envoyé à UNI·SIM. Sur votre propre réseau, il va d
 - **Votre Universal ID, si vous vous connectez.** L'article sur la connexion au compte détaille exactement ce qui est conservé.
 - **L'accès à distance.** Une session avec un code distant passe par le relais d'UNI·SIM. Elle est chiffrée de bout en bout : le relais ne peut pas la lire.
 - **Cast to a browser screen.** Lorsque l'application pour téléphone pilote ainsi un onglet de navigateur, ses commandes de pavé tactile et de télécommande passent par le même relais. Elles sont protégées en chemin, mais elles ne sont pas chiffrées de bout en bout. Aucune image de votre écran n'est envoyée.
+- **Un comptage quotidien des ouvertures, par le client navigateur uniquement.** La première fois que vous utilisez le client navigateur dans la journée, il ajoute un à un compteur anonyme du nombre d'ouvertures de Screens ce jour-là, comme toutes les applications web de la suite. Il n'envoie aucun identifiant, jamais votre compte, et rien sur votre écran, votre code PIN ou vos ordinateurs. Les applications pour téléphone et les hôtes n'envoient aucun comptage.
 
 Sur un réseau sans connexion Internet, rien de tout cela n'est envoyé, et Screens fonctionne exactement de la même façon.
 

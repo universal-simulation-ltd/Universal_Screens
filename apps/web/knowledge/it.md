@@ -126,6 +126,7 @@ Il tuo schermo non viene mai caricato su UNI·SIM. Sulla tua rete va direttament
 - **Il tuo Universal ID, se accedi.** L'articolo sull'accesso elenca esattamente cosa viene conservato.
 - **L'accesso remoto.** Una sessione con codice remoto passa dal server di inoltro di UNI·SIM. È cifrata end-to-end, quindi il server non può leggerla.
 - **Cast to a browser screen.** Quando l'app per il telefono comanda così una scheda del browser, i suoi comandi di touchpad e telecomando passano dallo stesso server. Sono protetti lungo il percorso, ma non sono cifrati end-to-end. Nessuna immagine del tuo schermo viene inviata.
+- **Un conteggio giornaliero delle aperture, solo dal client browser.** La prima volta che usi il client browser in una giornata, aggiunge uno a un conteggio anonimo di quante volte Screens viene aperto quel giorno, come fa ogni app web della suite. Non invia alcun ID, mai il tuo account, e niente sul tuo schermo, sul tuo PIN o sui tuoi computer. Le app per il telefono e l'host non inviano alcun conteggio.
 
 Su una rete senza connessione a Internet non viene inviato nulla di tutto questo, e Screens funziona esattamente allo stesso modo.
 
