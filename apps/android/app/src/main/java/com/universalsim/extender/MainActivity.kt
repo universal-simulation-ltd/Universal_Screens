@@ -579,6 +579,7 @@ fun ConnectionStatusScreen(
     // the Rust core's own error text.
     val context = LocalContext.current
     val failureWords = remember(failure) { Messages.connectFailure(Knowledge.language(context), failure) }
+    val failureButtons = remember(failure) { Messages.failureButtons(Knowledge.language(context)) }
     // A Surface (rather than a bare Column) both paints the backdrop opaque and
     // swallows touches, which matters for the "Connected" pass: the live mode UI
     // is composed underneath it and must not be tappable through the overlay.
@@ -663,10 +664,10 @@ fun ConnectionStatusScreen(
             when (phase) {
                 ConnectPhase.CONNECTING -> OutlinedButton(onClick = onCancel) { Text("Cancel") }
                 ConnectPhase.FAILED -> {
-                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
+                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text(failureButtons.retry) }
                     Spacer(Modifier.height(10.dp))
                     OutlinedButton(onClick = onHome, modifier = Modifier.fillMaxWidth()) {
-                        Text("Back to home")
+                        Text(failureButtons.home)
                     }
                 }
                 else -> {}
@@ -941,6 +942,10 @@ fun ConnectScreen(
                     onToggleHide = { ConnectionStore.setHidden(context, c.addr, !c.hidden); reload() },
                     onForget = if (c.addr in paired) ({ forgetting = c }) else null,
                     onDelete = {
+                        // Delete forgets the pairing too: a removed row leaves
+                        // no key behind that would let that computer back in
+                        // with no PIN.
+                        runCatching { ExtenderNative.nativeForgetHost(c.addr) }
                         ConnectionStore.delete(context, c.addr)
                         accountScope.launch { Account.forget(context, c.addr) }
                         reload()

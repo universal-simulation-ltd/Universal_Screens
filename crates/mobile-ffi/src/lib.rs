@@ -24,7 +24,8 @@ use extender_core::protocol::{
     self, Button, CaptureMode, ClientHello, Codec, Gesture, Input, TouchPhase,
 };
 use extender_core::{
-    connect_problem, set_pairing_location, ConnectProblem, PairingLocation, Session, StreamEvent,
+    connect_problem, forget_host, paired_hosts, set_pairing_location, ConnectProblem, PairingLocation,
+    Session, StreamEvent,
 };
 
 thread_local! {
@@ -120,6 +121,42 @@ pub unsafe extern "C" fn extender_set_pairing_dir(dir: *const c_char) {
         }
     };
     set_pairing_location(location);
+}
+
+/// Read `addr` as a UTF-8 C string; `None` for null or invalid UTF-8.
+///
+/// # Safety
+/// `addr` must be null or a valid pointer to a NUL-terminated C string.
+unsafe fn addr_arg<'a>(addr: *const c_char) -> Option<&'a str> {
+    if addr.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(addr) }.to_str().ok()
+}
+
+/// Whether this device holds a pairing with the host at `addr` (a saved row's
+/// `"host:port"`), so the row can offer "Forget this computer". False for null
+/// or invalid UTF-8, and when nothing is paired.
+///
+/// # Safety
+/// `addr` must be null or a valid pointer to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn extender_is_paired(addr: *const c_char) -> bool {
+    let Some(addr) = (unsafe { addr_arg(addr) }) else { return false };
+    paired_hosts().iter().any(|h| h == addr)
+}
+
+/// "Forget this computer": drop the pairing with the host at `addr`, so the
+/// next connection to it needs its code. Every other pairing, and this
+/// device's own key, are kept. Returns whether anything was forgotten — false
+/// also for null/invalid `addr` or when the pairing file could not be written.
+///
+/// # Safety
+/// `addr` must be null or a valid pointer to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn extender_forget_host(addr: *const c_char) -> bool {
+    let Some(addr) = (unsafe { addr_arg(addr) }) else { return false };
+    forget_host(addr).unwrap_or(false)
 }
 
 // ---- session lifecycle ---------------------------------------------------
@@ -667,6 +704,22 @@ mod tests {
         // Stream ends after the host closes; next event is null.
         assert!(unsafe { extender_session_next_event(session) }.is_null());
         unsafe { extender_session_free(session) };
+    }
+
+    /// The pairing calls are safe on null / non-UTF-8 input and report "nothing
+    /// paired" when pairing keys are kept nowhere (as in every test here, so no
+    /// test touches the developer's real pairing file).
+    #[test]
+    fn ffi_pairing_calls_take_bad_input_and_no_pairings() {
+        extender_core::set_pairing_location(extender_core::PairingLocation::Nowhere);
+        assert!(!unsafe { extender_is_paired(ptr::null()) });
+        assert!(!unsafe { extender_forget_host(ptr::null()) });
+        let bad = [0xffu8, 0xfe, 0];
+        assert!(!unsafe { extender_is_paired(bad.as_ptr().cast()) });
+        assert!(!unsafe { extender_forget_host(bad.as_ptr().cast()) });
+        let addr = CString::new("192.168.1.20:9000").unwrap();
+        assert!(!unsafe { extender_is_paired(addr.as_ptr()) });
+        assert!(!unsafe { extender_forget_host(addr.as_ptr()) });
     }
 
     /// A failed connect says why through `extender_last_connect_problem`, and a

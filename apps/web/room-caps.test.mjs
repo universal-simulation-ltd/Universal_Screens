@@ -220,5 +220,30 @@ function fakeSecure(pin, hostHandshake) {
   globalThis.localStorage = undefined;
 }
 
+// --- 8. Deleting a saved row forgets its pairing (pairing.forgetTarget) -------
+{
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+  };
+  const { rememberHost, noteHostAt, hostKeyAt, forgetTarget, isTrustedHost } = await import("./src/pairing.js?delete");
+  const a = "a".repeat(64), b = "b".repeat(64);
+  rememberHost(a);
+  rememberHost(b);
+  noteHostAt("192.168.1.20:9002", a);
+  noteHostAt("192.168.1.30:9002", b);
+  noteHostAt("192.168.1.40:9002", "not-a-key");
+  A(hostKeyAt("192.168.1.20:9002") === a, "remembers which key answered at an address");
+  A(hostKeyAt("192.168.1.40:9002") === null, "ignores a malformed key");
+  A(hostKeyAt("__proto__") === null, "no inherited property reads as a key");
+  A(forgetTarget("192.168.1.20:9002") === true, "deleting that row forgets its pairing");
+  A(!isTrustedHost(a) && isTrustedHost(b), "and only that one");
+  A(hostKeyAt("192.168.1.20:9002") === null, "the note goes too");
+  A(forgetTarget("192.168.1.99:9002") === false, "a row never paired forgets nothing");
+  A(isTrustedHost(b), "and leaves the others alone");
+  globalThis.localStorage = undefined;
+}
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exitCode = failures ? 1 : 0;

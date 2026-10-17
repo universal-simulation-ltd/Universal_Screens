@@ -124,12 +124,25 @@ struct ConnectView: View {
     // Saved-host rename: the host being renamed (drives the alert) + the draft.
     @State private var renameTarget: SavedConnection?
     @State private var renameDraft = ""
+    /// The addresses this device holds a pairing with: only their rows offer
+    /// "Forget this computer". Re-read with the list (`reload()`).
+    @State private var paired: Set<String> = []
+    /// The saved host whose "Forget this computer" awaits confirmation.
+    @State private var forgetTarget: SavedConnection?
+    /// The knowledge base's language choice, which the Forget wording follows.
+    @AppStorage(Knowledge.languageKey) private var savedLanguage = ""
     // Nearby hosts, browsed over Bonjour while this screen is visible. Tapping
     // one asks for the host's PIN (the QR normally carries it; there's no QR in
     // this flow), then goes to the usual mode picker.
     @StateObject private var nearby = NearbyBrowser()
     @State private var nearbyTarget: NearbyHost?
     @State private var nearbyPin = ""
+
+    /// Re-read the saved rows and which of them are paired.
+    private func reload() {
+        saved = ConnectionStore.load()
+        paired = Set(saved.map(\.addr).filter(Pairing.isPaired))
+    }
 
     private var visible: [SavedConnection] {
         saved.filter { showHidden || !$0.hidden }.sorted { $0.lastConnected > $1.lastConnected }
@@ -162,7 +175,7 @@ struct ConnectView: View {
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .onAppear {
-            saved = ConnectionStore.load()
+            reload()
             nearby.start()
             #if DEBUG
             // Debug builds only: `-openKnowledgeBase list` (or an article id)
@@ -201,13 +214,33 @@ struct ConnectView: View {
             Button("Save") {
                 if let t = renameTarget {
                     ConnectionStore.setCustomName(addr: t.addr, renameDraft)
-                    saved = ConnectionStore.load()
+                    reload()
                 }
                 renameTarget = nil
             }
             Button("Cancel", role: .cancel) { renameTarget = nil }
         } message: {
             Text("Give this saved host a friendly name. Leave blank to reset to its device name.")
+        }
+        // "Forget this computer": confirm, then drop the pairing (and the PIN
+        // saved with the row), so the next connection asks for the code. The
+        // row itself stays; Delete is what removes it.
+        .alert(ForgetMessages.words(Knowledge.language(saved: savedLanguage)).title, isPresented: Binding(
+            get: { forgetTarget != nil },
+            set: { if !$0 { forgetTarget = nil } }
+        )) {
+            let words = ForgetMessages.words(Knowledge.language(saved: savedLanguage))
+            Button(words.confirm, role: .destructive) {
+                if let t = forgetTarget {
+                    Pairing.forget(t.addr)
+                    ConnectionStore.clearPin(addr: t.addr)
+                    reload()
+                }
+                forgetTarget = nil
+            }
+            Button(words.cancel, role: .cancel) { forgetTarget = nil }
+        } message: {
+            Text(ForgetMessages.words(Knowledge.language(saved: savedLanguage)).body)
         }
         .sheet(isPresented: $showScanner) {
             QRScannerView { text in
@@ -356,13 +389,24 @@ struct ConnectView: View {
                     }
                     Button {
                         ConnectionStore.setHidden(addr: host.addr, !host.hidden)
-                        saved = ConnectionStore.load()
+                        reload()
                     } label: {
                         Label(host.hidden ? "Unhide" : "Hide", systemImage: host.hidden ? "eye" : "eye.slash")
                     }
+                    if paired.contains(host.addr) {
+                        Button {
+                            forgetTarget = host
+                        } label: {
+                            Label(ForgetMessages.words(Knowledge.language(saved: savedLanguage)).menu,
+                                  systemImage: "key.slash")
+                        }
+                    }
+                    // Delete forgets the pairing too: a removed row leaves no
+                    // key behind that would let that computer back in with no PIN.
                     Button(role: .destructive) {
+                        Pairing.forget(host.addr)
                         ConnectionStore.delete(addr: host.addr)
-                        saved = ConnectionStore.load()
+                        reload()
                     } label: { Label("Delete", systemImage: "trash") }
                 } label: {
                     Image(systemName: "ellipsis")

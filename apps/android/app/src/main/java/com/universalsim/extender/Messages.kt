@@ -178,6 +178,20 @@ object Messages {
         )
     }
 
+    /** The failure screen's two buttons. */
+    data class FailureButtons(val retry: String, val home: String)
+
+    fun failureButtons(lang: String): FailureButtons = when (lang) {
+        "fr" -> FailureButtons("Réessayer", "Retour à l'accueil")
+        "es" -> FailureButtons("Reintentar", "Volver al inicio")
+        "it" -> FailureButtons("Riprova", "Torna alla home")
+        "de" -> FailureButtons("Erneut versuchen", "Zurück zur Startseite")
+        "pt-BR" -> FailureButtons("Tentar de novo", "Voltar ao início")
+        "pt-PT" -> FailureButtons("Tentar novamente", "Voltar ao início")
+        "tr" -> FailureButtons("Yeniden dene", "Ana sayfaya dön")
+        else -> FailureButtons("Retry", "Back to home")
+    }
+
     /** "Forget this computer" on a saved row, and its confirmation. */
     data class Forget(val menu: String, val title: String, val body: String, val confirm: String, val cancel: String)
 

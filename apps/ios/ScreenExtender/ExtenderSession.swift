@@ -238,6 +238,20 @@ enum ConnectMessages {
         }
     }
 
+    /// The failure screen's two buttons: (retry, back to home).
+    static func buttons(_ lang: String) -> (retry: String, home: String) {
+        switch lang {
+        case "fr": ("Réessayer", "Retour à l'accueil")
+        case "es": ("Reintentar", "Volver al inicio")
+        case "it": ("Riprova", "Torna alla home")
+        case "de": ("Erneut versuchen", "Zurück zur Startseite")
+        case "pt-BR": ("Tentar de novo", "Voltar ao início")
+        case "pt-PT": ("Tentar novamente", "Voltar ao início")
+        case "tr": ("Yeniden dene", "Ana sayfaya dön")
+        default: ("Retry", "Back to home")
+        }
+    }
+
     static func body(_ lang: String, _ failure: ConnectFailure?) -> String {
         let f = failure ?? ConnectFailure(problem: .other)
         let line = table(lang)[Int(f.problem.rawValue) - 1]
@@ -351,6 +365,45 @@ enum ConnectMessages {
             "The computer is running an older version of Universal Screens. Update it, then try again.",
             "The computer is running a different version of Universal Screens. Update both apps, then try again.",
         ]
+        }
+    }
+}
+
+/// This device's pairings, by the address a saved row connects to — the Rust
+/// core's pairing file (`extender_is_paired` / `extender_forget_host`).
+enum Pairing {
+    /// Whether this device holds a pairing with the host at `addr`, so its row
+    /// offers "Forget this computer".
+    static func isPaired(_ addr: String) -> Bool {
+        addr.withCString { extender_is_paired($0) }
+    }
+
+    /// "Forget this computer": drop the pairing with `addr`, so the next
+    /// connection asks for its PIN. True if one was dropped.
+    @discardableResult
+    static func forget(_ addr: String) -> Bool {
+        addr.withCString { extender_forget_host($0) }
+    }
+}
+
+/// "Forget this computer" on a saved row, and its confirmation, in the
+/// knowledge base's eight languages. Mirrors `Messages.forget` on Android
+/// word for word.
+enum ForgetMessages {
+    struct Words {
+        let menu: String, title: String, body: String, confirm: String, cancel: String
+    }
+
+    static func words(_ lang: String) -> Words {
+        switch lang {
+        case "fr": Words(menu: "Oublier cet ordinateur", title: "Oublier cet ordinateur ?", body: "Ce téléphone demandera son code PIN à la prochaine connexion.", confirm: "Oublier", cancel: "Annuler")
+        case "es": Words(menu: "Olvidar este ordenador", title: "¿Olvidar este ordenador?", body: "Este teléfono le pedirá su PIN la próxima vez que se conecte.", confirm: "Olvidar", cancel: "Cancelar")
+        case "it": Words(menu: "Dimentica questo computer", title: "Dimenticare questo computer?", body: "Questo telefono chiederà il suo PIN alla prossima connessione.", confirm: "Dimentica", cancel: "Annulla")
+        case "de": Words(menu: "Diesen Computer vergessen", title: "Diesen Computer vergessen?", body: "Dieses Handy fragt beim nächsten Verbinden nach seiner PIN.", confirm: "Vergessen", cancel: "Abbrechen")
+        case "pt-BR": Words(menu: "Esquecer este computador", title: "Esquecer este computador?", body: "Este celular vai pedir o PIN dele na próxima vez que você se conectar.", confirm: "Esquecer", cancel: "Cancelar")
+        case "pt-PT": Words(menu: "Esquecer este computador", title: "Esquecer este computador?", body: "Este telemóvel vai pedir o respetivo PIN da próxima vez que ligar.", confirm: "Esquecer", cancel: "Cancelar")
+        case "tr": Words(menu: "Bu bilgisayarı unut", title: "Bu bilgisayar unutulsun mu?", body: "Bu telefon bir sonraki bağlantıda bilgisayarın PIN'ini soracak.", confirm: "Unut", cancel: "İptal")
+        default: Words(menu: "Forget this computer", title: "Forget this computer?", body: "This phone will ask for its PIN next time you connect.", confirm: "Forget", cancel: "Cancel")
         }
     }
 }

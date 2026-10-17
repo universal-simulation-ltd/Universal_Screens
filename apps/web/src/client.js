@@ -254,6 +254,9 @@ function renderSaved() {
     row.addEventListener("click", (e) => {
       if (e.target.classList.contains("del")) {
         saved.remove(h.addr);
+        // The pairing goes with the row, so no key is left behind that would
+        // let that computer back in with no PIN.
+        pairing.forgetTarget(h.addr);
         // Syncing, forget it everywhere; otherwise this device only — the
         // hint under the list says which, so nobody is surprised by a machine
         // that comes back.

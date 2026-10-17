@@ -180,6 +180,9 @@ export function openChannel(protocol, { hostHandshake, pin, target }) {
     // A pairing over PIN 0 (a host that lets anyone in) proves nothing about
     // who answered, so it earns no trust.
     if (channel.paired && pin) pairing.rememberHost(channel.hostKeyHex);
+    // Which key answered here, so deleting this address's saved row can
+    // forget the pairing with it.
+    pairing.noteHostAt(target, channel.hostKeyHex);
   };
   return channel;
 }

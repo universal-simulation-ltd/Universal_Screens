@@ -56,6 +56,15 @@ typedef enum {
  * is the app's Library/Application Support — so iOS need not call it. */
 void extender_set_pairing_dir(const char *dir);
 
+/* Whether this device holds a pairing with the host at `addr` (a saved row's
+ * "host:port"), so the row can offer "Forget this computer". */
+bool extender_is_paired(const char *addr);
+
+/* "Forget this computer": drop the pairing with the host at `addr`, so the next
+ * connection to it needs its code. Every other pairing is kept. True if one was
+ * dropped. The host still lists this device until its own Forget is used. */
+bool extender_forget_host(const char *addr);
+
 /* --- session lifecycle --- */
 
 /* capture_mode for extender_session_connect. */

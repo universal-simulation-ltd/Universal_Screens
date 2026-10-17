@@ -70,6 +70,15 @@ enum ConnectionStore {
         save(list)
     }
 
+    /// Drop the PIN saved with `addr` — "Forget this computer" — so tapping its
+    /// row asks for the code instead of quietly pairing again with the old one.
+    static func clearPin(addr: String) {
+        var list = load()
+        guard let i = list.firstIndex(where: { $0.addr == addr }) else { return }
+        list[i].pin = 0
+        save(list)
+    }
+
     static func delete(addr: String) {
         save(load().filter { $0.addr != addr })
     }

@@ -96,10 +96,44 @@ export function forgetHost(hex) {
   write({ ...s, hosts: trustedHosts().filter((h) => h !== hex) });
 }
 
+/// Note that the host with key `hex` answered at `target` (a bridge address or
+/// `remote:CODE`), so a saved row — which knows only its address — can find the
+/// pairing to forget when it is deleted (`forgetTarget`). Kept apart from
+/// `hosts`, which stays the one list of keys this tab trusts.
+export function noteHostAt(target, hex) {
+  if (!target || typeof hex !== "string" || !/^[0-9a-f]{64}$/.test(hex)) return;
+  const s = read();
+  const at = s.at && typeof s.at === "object" ? { ...s.at } : {};
+  delete at[target]; // re-add last, so the newest survive the cap
+  at[target] = hex;
+  const keep = Object.keys(at).slice(-MAX_HOSTS);
+  write({ ...s, at: Object.fromEntries(keep.map((t) => [t, at[t]])) });
+}
+
+/// The key of the host last seen at `target`, or null.
+export function hostKeyAt(target) {
+  const at = read().at;
+  const hex = at && typeof at === "object" && Object.hasOwn(at, target) ? at[target] : null;
+  return typeof hex === "string" ? hex : null;
+}
+
+/// A deleted saved row forgets the pairing too: drop the host last seen at
+/// `target` and the note itself. Returns whether a trusted host was forgotten.
+export function forgetTarget(target) {
+  const hex = hostKeyAt(target);
+  const s = read();
+  const at = s.at && typeof s.at === "object" ? { ...s.at } : {};
+  delete at[target];
+  write({ ...s, at });
+  if (!hex || !isTrustedHost(hex)) return false;
+  forgetHost(hex);
+  return true;
+}
+
 /// Forget every paired host on this browser (the key pair is kept).
 export function forgetHosts() {
   const s = read();
-  write({ ...s, hosts: [], v2: [] });
+  write({ ...s, hosts: [], v2: [], at: {} });
 }
 
 /**
