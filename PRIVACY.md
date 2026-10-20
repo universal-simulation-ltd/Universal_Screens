@@ -10,8 +10,8 @@ The short version: **your screen goes only to the device you paired with,
 encrypted end to end with your PIN.** Out of the box, Screens sends UNI·SIM
 nothing about you. The browser client adds one to an anonymous daily open
 count, with no identifier, as every suite web app does; the phone apps and the
-desktop hosts count nothing. One extra can send something, and it is off until
-you switch it on.
+desktop hosts count nothing. There is no account and no sign-in anywhere in
+Screens.
 
 ---
 
@@ -40,6 +40,16 @@ See [`apps/android/.../ConnectionStore.kt`](apps/android/app/src/main/java/com/u
 [`apps/ios/ScreenExtender/ConnectionStore.swift`](apps/ios/ScreenExtender/ConnectionStore.swift)
 and [`apps/web/src/saved.js`](apps/web/src/saved.js).
 
+**Moving them to another device is a file you save yourself.** The Android app
+and the browser client have **Save saved computers to a file** and **Open a
+file of saved computers**. The file holds, for each computer, its address on
+your network, its own name and operating system, your nickname for it and
+when you last connected. **Never the PIN**, nothing about your screen, and
+nothing goes to UNI·SIM: the file goes wherever you put it. It still lists
+addresses on your network, so keep it somewhere private. See
+[`apps/web/src/savedFile.js`](apps/web/src/savedFile.js) and
+[`apps/android/.../SavedFile.kt`](apps/android/app/src/main/java/com/universalsim/extender/SavedFile.kt).
+
 On a network with no internet connection, Screens works exactly the same.
 
 ---
@@ -65,45 +75,15 @@ connections' IP addresses while they are open.
 
 ---
 
-## The one thing you can switch on
-
-### Signing in, and syncing your saved computers
-
-Signing in with a Universal ID is optional in the Android app, the browser
-client and the desktop hosts. It uses a code emailed to you, and only works
-for an account that already exists (made at app.unisim.co.uk). Signing in
-sends your email address to our sign-in service. **It uploads nothing else.**
-The iPhone app has no sign-in.
-
-In the Android app and the browser client, the sign-in window then offers
-**Sync saved computers to my account**, unticked. Only if you tick it does the
-app keep your saved computers with your account, so a new device already knows
-them. For each one that is:
-
-- its address on your network
-- the computer's own name and operating system
-- the nickname you gave it, if any
-- when you last connected
-
-**Never the PIN**, and nothing about your screen. Untick the box and syncing
-stops, and the computers already uploaded are deleted from your account (if
-the device is offline at that moment, the delete is retried the next time it
-can reach us). They stay on the device. Signing out turns syncing off as well.
-See [`apps/web/src/account.js`](apps/web/src/account.js) and
-[`apps/android/.../Account.kt`](apps/android/app/src/main/java/com/universalsim/extender/Account.kt).
-
-The desktop hosts sign in for identity only: they have no list of computers to
-sync, because they are the computer. See
-[`crates/host-ui/src/account.rs`](crates/host-ui/src/account.rs).
+## What else is sent
 
 ### The daily open count (browser client only)
 
 Like every web app in the suite, the browser client adds one to an anonymous
 count of how many times Screens was opened that day. The first time the page
 is used on a given day (UTC) in your browser, it sends one message holding the
-app's name and the word `web`, and nothing else: no ID of any kind, never your
-account (even when you are signed in), nothing about your screen, your PIN or
-your computers. Our server keeps a total per day, which identifies nobody.
+app's name and the word `web`, and nothing else: no ID of any kind, and
+nothing about your screen, your PIN or your computers. Our server keeps a total per day, which identifies nobody.
 
 To count each browser only once a day, the page remembers today's date in your
 browser (`unisim:opened:screens`); that note is never sent. It waits until you
@@ -117,6 +97,14 @@ marked as a UNI·SIM staff device. See
 usage data at all.** (Until 2026-10-12 the browser client had an opt-in **Show
 how many people use Screens** box under Advanced, which sent a random ID
 replaced daily; it is gone, along with the code that sent it.)
+
+### Signing in: gone
+
+Until 2026-10-20 the Android app, the browser client and the desktop hosts had
+an optional sign-in with a Universal ID, and the Android app and the browser
+client could sync saved computers to the account if you ticked a box. Both
+are gone, along with the code. Each app deletes the sign-in it may have kept
+on the device the next time it starts (the browser on its next visit).
 
 ---
 

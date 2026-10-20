@@ -45,4 +45,10 @@ dependencies {
     // WebSocket client for the "cast to a browser" rendezvous (RoomSession): the
     // app joins a receiver tab's room over wss:// and sends control frames.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Unit tests (src/test, `./gradlew testDebugUnitTest`): the saved-computers
+    // file parser. org.json here is the real library — android.jar's copy is
+    // only stubs off a device, and SavedFile.kt reads and writes with it.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

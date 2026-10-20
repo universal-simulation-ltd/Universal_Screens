@@ -813,11 +813,11 @@ mod tests {
     }
 
     #[test]
-    fn the_pin_is_never_said_to_be_synced() {
+    fn the_pin_is_never_said_to_be_in_the_file() {
         // The one claim that must not drift in translation: the article on
-        // signing in lists the PIN under what is NOT sent.
+        // the saved-computers file lists the PIN under what is NOT in it.
         let en = articles("en");
-        let a = en.iter().find(|a| a.id == "signing-in").expect("signing-in");
+        let a = en.iter().find(|a| a.id == "saved-computers-file").expect("saved-computers-file");
         let not = a.body.split("## What is not").nth(1).expect("a 'What is not' section");
         assert!(not.contains("**The PIN.**"), "{not}");
     }

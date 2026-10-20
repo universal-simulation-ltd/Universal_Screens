@@ -13,6 +13,7 @@ import android.view.TextureView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -98,9 +99,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.navigationBarsPadding
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -240,6 +243,7 @@ class MainActivity : ComponentActivity() {
         // reconnects without its code. The Rust side cannot find this folder by
         // itself on Android; without the call it simply asks for the code each time.
         ExtenderNative.nativeSetPairingDir(filesDir.absolutePath)
+        ConnectionStore.clearOldSignIn(this)
         deepLink.value = intent?.dataString
         setContent {
             val link by deepLink
@@ -348,10 +352,6 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     // Remember the host for quick reconnect; store the mode only if
                     // the user asked to. OS/name fill in once HostInfo arrives.
                     ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
-                    // Signed in with sync on, this machine is the account's
-                    // too. No-op otherwise, and the PIN is never part of it
-                    // (Account.kt).
-                    accountScope.launch { Account.remember(context, addr) }
                 }
                 session = s
                 failure = outcome.failure
@@ -813,6 +813,75 @@ fun ConnectScreen(
         paired = pairedHosts()
     }
 
+    // Saved computers as a file (SavedFile.kt): the system's own save and open
+    // pickers, so the file can go anywhere the phone can put one — Downloads,
+    // Drive, a message to the other device. The note under the buttons says
+    // what happened; an error is in the error colour.
+    val fileScope = rememberCoroutineScope()
+    var fileNote by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(SavedFile.MIME),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val list = ConnectionStore.load(context)
+        fileScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri, "wt")!!.use {
+                        it.write(SavedFile.pack(list).toByteArray(Charsets.UTF_8))
+                    }
+                }.isSuccess
+            }
+            fileNote = if (ok) {
+                val n = if (list.size == 1) "1 computer" else "${list.size} computers"
+                "Saved $n to the file. PINs are never in it." to false
+            } else {
+                "The file could not be saved. Try another place." to true
+            }
+        }
+    }
+    val openFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        fileScope.launch {
+            // Read at most one byte past the cap, so a huge file is refused
+            // without loading it.
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)!!.use { input ->
+                        val bytes = input.readNBytesCompat(SavedFile.MAX_BYTES + 1)
+                        if (bytes.size > SavedFile.MAX_BYTES) null else String(bytes, Charsets.UTF_8)
+                    }
+                }
+            }
+            val body = text.getOrNull()
+            fileNote = when {
+                text.isFailure -> SavedFile.errorText("damaged") to true
+                body == null -> SavedFile.errorText("too-big") to true
+                else -> when (val r = SavedFile.read(body)) {
+                    is SavedFile.Opened.Failed -> r.message to true
+                    is SavedFile.Opened.Ok -> {
+                        val m = SavedFile.merge(ConnectionStore.load(context), r.machines)
+                        ConnectionStore.replaceAll(context, m.list)
+                        reload()
+                        var line = when {
+                            m.added == 0 && m.updated == 0 -> "You already had every computer in that file."
+                            m.updated == 0 -> if (m.added == 1) "Added 1 computer." else "Added ${m.added} computers."
+                            else -> (if (m.added == 1) "Added 1 computer" else "Added ${m.added} computers") +
+                                ", updated ${m.updated}."
+                        }
+                        if (r.skipped > 0) {
+                            line += if (r.skipped == 1) " 1 entry was not readable and left out."
+                            else " ${r.skipped} entries were not readable and left out."
+                        }
+                        line to false
+                    }
+                }
+            }
+        }
+    }
+
     // Nearby hosts, browsed over DNS-SD while this screen is visible. Tapping
     // one asks for the host's PIN (it's on the host under More details — the QR
     // normally carries it, but there's no QR in this flow), then goes to the
@@ -947,7 +1016,6 @@ fun ConnectScreen(
                         // with no PIN.
                         runCatching { ExtenderNative.nativeForgetHost(c.addr) }
                         ConnectionStore.delete(context, c.addr)
-                        accountScope.launch { Account.forget(context, c.addr) }
                         reload()
                     },
                 )
@@ -1032,11 +1100,23 @@ fun ConnectScreen(
             TextButton(onClick = { showKnowledge = true }) { Text("📖  Knowledge base") }
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
 
-            // Universal ID — optional, and nothing about connecting needs it.
-            // Saved machines follow the account only if "Sync saved computers
-            // to my account" is ticked in its dialog (off by default). See
-            // Account.kt.
-            AccountRow(onSynced = { reload() })
+            // Saved computers as a file — how the list moves to another phone
+            // or the browser client, with no account. See SavedFile.kt.
+            if (saved.isNotEmpty()) {
+                TextButton(onClick = { saveFileLauncher.launch(SavedFile.fileName()) }) {
+                    Text("💾  Save saved computers to a file")
+                }
+            }
+            TextButton(onClick = { openFileLauncher.launch(arrayOf(SavedFile.MIME, "text/plain", "application/octet-stream")) }) {
+                Text("📂  Open a file of saved computers")
+            }
+            fileNote?.let { (text, bad) ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (bad) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (showAbout) AboutAppDialog(onDismiss = { showAbout = false })
         if (showKnowledge) KnowledgeBaseDialog(onDismiss = { showKnowledge = false })
@@ -1085,7 +1165,6 @@ fun ConnectScreen(
                 confirmButton = {
                     TextButton(onClick = {
                         ConnectionStore.setCustomName(context, target.addr, renameDraft)
-                        accountScope.launch { Account.remember(context, target.addr) }
                         renaming = null
                         reload()
                     }) { Text("Save") }

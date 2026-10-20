@@ -44,7 +44,7 @@ export function label(addr, hostname, os) {
   if (e) { e.hostname = hostname; e.os = os; write(list); }
 }
 
-/// Replace the whole list — what a sync from the account writes back.
+/// Replace the whole list — what opening a file of saved computers writes back.
 export function replaceAll(list) {
   write(list);
 }

@@ -123,7 +123,6 @@ Sua tela nunca é enviada para a UNI·SIM. Na sua rede, ela vai direto do host p
 
 ## O que vai para a UNI·SIM, e quando
 
-- **Seu Universal ID, se você entrar na conta.** O artigo sobre entrar na conta lista exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Ela é criptografada de ponta a ponta, então o servidor não consegue lê-la.
 - **Cast to a browser screen.** Quando o app para celular controla uma aba do navegador dessa forma, os comandos de touchpad e de passador de slides passam pelo mesmo servidor. Eles vão protegidos no caminho, mas não são criptografados de ponta a ponta. Nenhuma imagem da sua tela é enviada.
 - **Uma contagem diária de aberturas, só do cliente no navegador.** Na primeira vez que você usa o cliente no navegador em um dia, ele soma um a uma contagem anônima de quantas vezes o Screens é aberto naquele dia, como todo app web da suíte faz. Não leva nenhum ID, nunca a sua conta, nem nada sobre a sua tela, o seu PIN ou os seus computadores. Os apps para celular e o host não enviam contagem nenhuma.
@@ -135,50 +134,38 @@ Em uma rede sem conexão com a internet, nada disso é enviado, e o Screens func
 O QR code do host é um endereço web. Se você o escanear com a câmera do celular e o app não estiver instalado, o navegador abre essa página, e o endereço local do host e o PIN fazem parte do endereço que o site recebe. Uma senha de Wi-Fi, se o código tiver uma, fica na parte do endereço que os navegadores nunca enviam.
 
 ---
-id: signing-in
+id: saved-computers-file
 group: Privacidade e segurança
-title: Para que serve entrar na conta?
-summary: É opcional. Com a conta, você pode escolher sincronizar suas máquinas salvas, mas nunca os seus PINs.
+title: Como levo minhas máquinas salvas para outro dispositivo?
+summary: Salve-as em um arquivo e abra esse arquivo no outro dispositivo. Não há conta, e o arquivo nunca contém os seus PINs.
 ---
-Nada na conexão exige uma conta. Entrar com o seu Universal ID permite que um celular ou navegador novo já conheça suas máquinas, mas só se você escolher sincronizá-las.
+O Screens não tem login. Suas máquinas salvas ficam no dispositivo que as salvou, e é você quem as leva, em um arquivo.
 
-## O que é sincronizado
+## Como fazer
 
-A sincronização fica desativada até você marcar **Sync saved computers to my account** na janela de login do app para Android ou do cliente no navegador. Só entrar na conta não envia nenhuma das suas máquinas. Depois de ativada, para cada máquina salva isso inclui:
+1. No dispositivo que as tem, escolha **Save saved computers to a file**. No app para Android, fica em Advanced; no cliente no navegador, abaixo das conexões salvas.
+2. Leve o arquivo para o outro dispositivo como preferir: por e-mail, por um armazenamento na nuvem ou em um pendrive.
+3. No outro dispositivo, escolha **Open a file of saved computers** e selecione o arquivo.
+
+Abrir um arquivo adiciona as máquinas que você ainda não tem. Uma máquina que você já tem mantém a sua cópia, a não ser que a do arquivo tenha sido usada mais recentemente. Nada é apagado. O app para Android e o cliente no navegador abrem os arquivos um do outro.
+
+## O que há no arquivo
+
+Para cada máquina salva:
 
 - o endereço dela na sua rede
 - o nome e o sistema operacional da própria máquina
 - o nome que você deu a ela, se houver
 - quando você se conectou pela última vez
 
-Excluir uma máquina salva com a sincronização ativada também a remove da sua conta. Desmarque a caixa e a sincronização para, e suas máquinas salvas são excluídas da sua conta; elas continuam no dispositivo.
+## O que não há
 
-## O que não é
-
-- **O PIN.** Ele nunca é enviado, nem mesmo embaralhado. O app para celular o guarda no celular junto com cada máquina salva. O cliente no navegador não o salva de jeito nenhum. O que um dispositivo guarda depois do pareamento é a sua própria chave e as chaves dos computadores com que foi pareado, para se reconectar sem o PIN. Elas ficam no dispositivo.
+- **O PIN.** Ele nunca está no arquivo, nem mesmo embaralhado. O app para celular o guarda no celular junto com cada máquina salva. O cliente no navegador não o salva de jeito nenhum. O que um dispositivo guarda depois do pareamento é a sua própria chave e as chaves dos computadores com que foi pareado, para se reconectar sem o PIN. Elas ficam naquele dispositivo, então na primeira vez que você se conectar pelo novo, digite o PIN ou escaneie o código do host.
 - No app para celular, o modo escolhido e se você ocultou uma máquina ficam no celular.
 - Qualquer coisa sobre a sua tela.
 
+Mesmo assim, o arquivo lista os endereços de máquinas da sua rede, então guarde-o em um lugar privado.
+
 ## No computador
 
-O host entra na conta só para identificar você. Ele não tem uma lista de máquinas para sincronizar, porque ele é a própria máquina: as conexões recentes dele pertencem àquele computador, não a você. O host não envia contagem de usuários nem dados de uso.
-
-## Onde as contas são criadas
-
-O Screens só consegue entrar em um Universal ID que já existe. Você cria um, de graça, em app.unisim.co.uk, assim um e-mail digitado errado nunca cria uma conta por engano.
-
----
-id: email-code-sign-in
-group: Privacidade e segurança
-title: Por que não existe "Entrar com Google"?
-summary: O Screens usa um código enviado ao seu e-mail, o único método que funciona em todos os clientes.
----
-Para entrar, você digita seu e-mail, recebe um código de 6 dígitos e digita esse código. Não há senha.
-
-## Por que não o Google
-
-O cliente no navegador é aberto a partir de uma máquina da sua própria rede, por um endereço http:// simples. Tem de ser assim: os navegadores impedem que uma página segura https:// abra o tipo de conexão local que o cliente usa para chegar ao host. O Google só permite o login dele em endereços web seguros registrados com antecedência, e um endereço da rede da sua casa ou do escritório nunca pode ser um deles. Por isso o Screens usa o código por e-mail em todo lugar: no app para celular, no navegador e no computador.
-
-## Depois de entrar
-
-Você continua conectado naquele dispositivo até sair. Se o acesso não puder mais ser renovado, por exemplo porque a conta foi excluída, o app desconecta você naquele dispositivo. A conexão com suas máquinas nunca depende disso.
+O host não tem nada a levar: as conexões recentes dele pertencem àquele computador, não a você. Ele não tem login e não envia contagem de usuários nem dados de uso.

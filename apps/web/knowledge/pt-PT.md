@@ -123,7 +123,6 @@ O seu ecrã nunca é enviado para a UNI·SIM. Na sua própria rede, vai diretame
 
 ## O que vai para a UNI·SIM, e quando
 
-- **O seu Universal ID, se iniciar sessão.** O artigo sobre o início de sessão indica exatamente o que é guardado.
 - **Acesso remoto.** Uma sessão com código remoto passa pelo servidor de retransmissão da UNI·SIM. Está encriptada ponto a ponto, por isso o servidor não a consegue ler.
 - **Cast to a browser screen.** Quando a app para telemóvel controla assim um separador do browser, os comandos de touchpad e de apresentação passam pelo mesmo servidor. Vão protegidos pelo caminho, mas não estão encriptados ponto a ponto. Não é enviada nenhuma imagem do seu ecrã.
 - **Uma contagem diária de aberturas, só do cliente no browser.** Da primeira vez que usa o cliente no browser num dia, ele soma um a uma contagem anónima de quantas vezes o Screens é aberto nesse dia, como faz cada app web da suite. Não leva nenhum ID, nunca a sua conta, nem nada sobre o seu ecrã, o seu PIN ou os seus computadores. As apps para telemóvel e o anfitrião não enviam contagem nenhuma.
@@ -135,50 +134,38 @@ Numa rede sem ligação à internet, nada disto é enviado, e o Screens funciona
 O código QR do anfitrião é um endereço web. Se o ler com a câmara do telemóvel e a app não estiver instalada, o browser abre essa página, e o endereço local do anfitrião e o PIN fazem parte do endereço que o site recebe. Uma palavra-passe de Wi-Fi, se o código tiver uma, fica na parte do endereço que os browsers nunca enviam.
 
 ---
-id: signing-in
+id: saved-computers-file
 group: Privacidade e segurança
-title: Para que serve iniciar sessão?
-summary: É opcional. Com sessão iniciada, pode optar por sincronizar as suas máquinas guardadas, mas nunca os PIN.
+title: Como passo as minhas máquinas guardadas para outro dispositivo?
+summary: Guarde-as num ficheiro e abra esse ficheiro no outro dispositivo. Não há conta, e o ficheiro nunca contém os seus PIN.
 ---
-Nada na ligação às suas máquinas exige uma conta. Iniciar sessão com o seu Universal ID permite que um telemóvel ou browser novo já conheça as suas máquinas, mas só se optar por sincronizá-las.
+O Screens não tem início de sessão. As suas máquinas guardadas ficam no dispositivo que as guardou, e é o utilizador que as passa, num ficheiro.
 
-## O que é sincronizado
+## Como fazer
 
-A sincronização está desativada até assinalar **Sync saved computers to my account** na janela de início de sessão da app Android ou do cliente no browser. Iniciar sessão, por si só, não envia nenhuma das suas máquinas. Depois de ativada, para cada máquina guardada trata-se de:
+1. No dispositivo que as tem, escolha **Save saved computers to a file**. Na app Android, está em Advanced; no cliente no browser, por baixo das ligações guardadas.
+2. Faça chegar o ficheiro ao outro dispositivo como preferir: por e-mail, através de um armazenamento na nuvem ou numa pen USB.
+3. No outro dispositivo, escolha **Open a file of saved computers** e selecione o ficheiro.
+
+Abrir um ficheiro acrescenta as máquinas que ainda não tem. Uma máquina que já tem mantém a sua cópia, a menos que a do ficheiro tenha sido usada mais recentemente. Nada é apagado. A app Android e o cliente no browser abrem os ficheiros um do outro.
+
+## O que está no ficheiro
+
+Para cada máquina guardada:
 
 - o endereço na sua rede
 - o nome e o sistema operativo da própria máquina
 - o nome que lhe deu, se existir
 - quando se ligou pela última vez
 
-Eliminar uma máquina guardada com a sincronização ativada remove-a também da sua conta. Desmarque a caixa e a sincronização para, e as suas máquinas guardadas são eliminadas da sua conta; ficam no dispositivo.
+## O que não está
 
-## O que não é
-
-- **O PIN.** Nunca é enviado, nem sequer baralhado. A app para telemóvel guarda-o no telemóvel com cada máquina. O cliente no browser não o guarda de todo. O que um dispositivo guarda depois do emparelhamento é a sua própria chave e as chaves dos computadores com que se emparelhou, para voltar a ligar-se sem o PIN. Ficam no dispositivo.
+- **O PIN.** Nunca está no ficheiro, nem sequer baralhado. A app para telemóvel guarda-o no telemóvel com cada máquina. O cliente no browser não o guarda de todo. O que um dispositivo guarda depois do emparelhamento é a sua própria chave e as chaves dos computadores com que se emparelhou, para voltar a ligar-se sem o PIN. Ficam nesse dispositivo, por isso, da primeira vez que se ligar a partir do novo, introduza o PIN ou leia o código do anfitrião.
 - Na app para telemóvel, o modo escolhido e o facto de ter ocultado uma máquina ficam no telemóvel.
 - Nada sobre o seu ecrã.
 
+Ainda assim, o ficheiro indica os endereços de máquinas da sua rede, por isso guarde-o num local privado.
+
 ## No computador
 
-O anfitrião inicia sessão apenas para o identificar. Não tem uma lista de máquinas para sincronizar, porque ele próprio é a máquina: as ligações recentes pertencem a esse computador, não a si. O anfitrião não envia contagem de utilizadores nem dados de utilização.
-
-## Onde se criam as contas
-
-O Screens só consegue iniciar sessão num Universal ID que já exista. Cria um, gratuitamente, em app.unisim.co.uk, para que um e-mail mal escrito nunca crie uma conta por engano.
-
----
-id: email-code-sign-in
-group: Privacidade e segurança
-title: Porque não existe «Iniciar sessão com o Google»?
-summary: O Screens inicia sessão com um código enviado para o seu e-mail, o único método que funciona em todos os clientes.
----
-Para iniciar sessão, escreve o seu endereço de e-mail, recebe um código de 6 dígitos e escreve esse código. Não há palavra-passe.
-
-## Porque não o Google
-
-O cliente no browser é aberto a partir de uma máquina da sua própria rede, num endereço http:// simples. Tem de ser assim: os browsers impedem que uma página segura https:// abra o tipo de ligação local que o cliente usa para chegar ao anfitrião. O Google só permite o seu início de sessão em endereços web seguros registados previamente, e um endereço da rede de sua casa ou do escritório nunca pode ser um deles. Por isso, o Screens usa o código por e-mail em todo o lado: na app para telemóvel, no browser e no computador.
-
-## Depois de iniciar sessão
-
-Mantém a sessão iniciada nesse dispositivo até a terminar. Se a sessão deixar de poder ser renovada, por exemplo porque a conta foi eliminada, a app termina a sessão nesse dispositivo. A ligação às suas máquinas nunca depende disso.
+O anfitrião não tem nada para passar: as ligações recentes pertencem a esse computador, não a si. Não tem início de sessão e não envia contagem de utilizadores nem dados de utilização.

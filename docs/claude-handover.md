@@ -4,6 +4,53 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-20 (login-free: sign-in removed; saved computers as a file)
+
+**Pushed straight to `main`. No release cut, the hosted browser client NOT
+republished, nothing installed on a device.** James, 2026-10-20: "avoid logins
+except where it really improves experience … introduce an export / import
+function" (`Docs_UNI_SIM/login-free-plan.md`, Screens = **B**, desktop **A**).
+
+- **Sign-in gone from all three.** Web `src/account.js` (+ its test, the bar's
+  Sign in pill, the dialog and its CSS), Android `Account.kt` + `AccountUi.kt`
+  (the Advanced row and every `Account.remember/forget`), desktop
+  `host-ui/src/account.rs` (profile-menu row + window in the macOS and
+  Windows hosts; Linux never had it) and host-ui's `ureq` dependency. Sign-in
+  gated nothing else; the room relay (`room.js`, `remote.rs`) never used it.
+  Each client deletes what the sign-in left on start: the web's three
+  `universal-screens.session/sync-*` keys, Android's `unisim_suite` prefs
+  file, the hosts' `<config>/UniversalScreens/session.json`
+  (`clear_old_sign_in`). `screens_saved_hosts` (migration 0178) is now unused
+  (0 rows on prod); dropping it is a platform-repo job.
+- **Saved computers as a file** (web + Android; the hosts keep no list):
+  "Save saved computers to a file" / "Open a file of saved computers" — on the
+  web under the saved list (not on the hosted https copy, which has no saved
+  list), on Android under Advanced (system save/open pickers). The suite
+  transfer envelope written by hand (`product: screens`, `kind:
+  saved-machines`, `schema: 1`, `data.machines[]` with the old sync's five
+  fields), in `apps/web/src/savedFile.js` and `SavedFile.kt` — keep the two in
+  step. Import validates every field, needs `host:port`, caps 200 machines /
+  1 MB, refuses `encrypted`, merges by address (newer `last_connected` wins
+  the labels; Android keeps its own pin/mode/hidden; a new row comes in with no
+  PIN and no mode, so its first tap asks).
+- **Knowledge base, all 8 languages:** `signing-in` and `email-code-sign-in`
+  replaced by one `saved-computers-file` article; the Universal ID bullet left
+  "What leaves your network?"; the 4 sign-in sources left `sources.md`. The
+  hosted guide PDFs (portal, `kb-pdfs-adapter.mjs`) still have the old two
+  until regenerated.
+- **Paperwork:** PRIVACY.md, About texts (web, Android, hosts),
+  `store-assets/data-safety.json` → no data collected, `PSL_ACM_NONE`.
+- **Tests:** `node apps/web/saved-file.test.mjs` (new, in CI), Playwright run
+  of the page (download, open, merge, wrong file), `./gradlew
+  testDebugUnitTest` (new `src/test`, junit + real org.json) + `assembleDebug`,
+  `cargo test -p extender-host-ui`, `cargo build -p extender-host-macos`. The
+  Windows host was NOT compiled here (its build script needs Windows); its
+  edit mirrors the macOS one, and CI's Windows job will compile it.
+
+**Next:** republish the browser client (`scripts/publish-web-client.sh`), a
+host release, and the next Android build (re-import data safety; Play App
+access → no special access) to reach users.
+
 ## Update — 2026-10-12 (Android "Forget this computer"; mobile connect errors explained)
 
 **Pushed straight to `main`. No release cut; nothing installed on a device.**

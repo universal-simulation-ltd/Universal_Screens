@@ -1,29 +1,8 @@
 {
-  "_about": "Play Data safety answers for the Android app (com.universalsim.extender). Build the importable CSV with: node Docs_UNI_SIM/store-kit/data-safety.mjs Universal_Apps/Universal_Screens/store-assets/data-safety.json Universal_Apps/Universal_Screens/store-assets/out/play/data-safety.csv. Checked against the code 2026-10-12: the screen, input and device name go peer to peer on the LAN, end-to-end encrypted with the PIN (Noise), never to UNI·SIM. Remote codes and Cast to a browser pass through the opensource.unisim.co.uk rendezvous relay, which forwards messages and stores nothing (remote sessions are end-to-end encrypted; cast commands are TLS-encrypted and processed ephemerally), so not declared as collected. No user count, analytics or crash reporting in the Android app (UserCount.kt removed 2026-10-12). Sign-in is optional, LOGIN ONLY with an emailed code (accounts are made on app.unisim.co.uk, never in the app, hence PSL_ACM_NONE): email + account id. Saved-computer sync to screens_saved_hosts is opt-in (\"Sync saved computers to my account\", unticked; unticking deletes the uploaded rows): each computer's LAN address, name, OS, the user's nickname and last-connected time, never the PIN — declared as Other user-generated content, optional, App functionality. Mirrors PRIVACY.md and apps/ios/ScreenExtender/PrivacyInfo.xcprivacy (the iOS app has no sign-in and collects nothing).",
+  "_about": "Play Data safety answers for the Android app (com.universalsim.extender). Build the importable CSV with: node Docs_UNI_SIM/store-kit/data-safety.mjs Universal_Apps/Universal_Screens/store-assets/data-safety.json Universal_Apps/Universal_Screens/store-assets/out/play/data-safety.csv. Checked against the code 2026-10-20: the screen, input and device name go peer to peer on the LAN, end-to-end encrypted with the PIN (Noise), never to UNI·SIM. Remote codes and Cast to a browser pass through the opensource.unisim.co.uk rendezvous relay, which forwards messages and stores nothing (remote sessions are end-to-end encrypted; cast commands are TLS-encrypted and processed ephemerally), so not declared as collected. No user count, analytics or crash reporting in the Android app (UserCount.kt removed 2026-10-12). No sign-in and no accounts since 2026-10-20 (Account.kt / AccountUi.kt removed; the saved-computer sync to screens_saved_hosts went with them, and prod held 0 rows): saved computers move between devices only as a file the user saves and opens themselves (SavedFile.kt, the suite transfer envelope, never the PIN), which never reaches UNI·SIM. So: no data collected. Re-import this at the next Play release, and set App access to no special access. Mirrors PRIVACY.md and apps/ios/ScreenExtender/PrivacyInfo.xcprivacy.",
   "accountCreation": [
     "PSL_ACM_NONE"
   ],
   "deletionUrl": "https://www.unisim.co.uk/privacy#retention",
-  "types": {
-    "PSL_EMAIL": {
-      "required": false,
-      "purposes": [
-        "PSL_APP_FUNCTIONALITY",
-        "PSL_ACCOUNT_MANAGEMENT"
-      ]
-    },
-    "PSL_USER_ACCOUNT": {
-      "required": false,
-      "purposes": [
-        "PSL_APP_FUNCTIONALITY",
-        "PSL_ACCOUNT_MANAGEMENT"
-      ]
-    },
-    "PSL_USER_GENERATED_CONTENT": {
-      "required": false,
-      "purposes": [
-        "PSL_APP_FUNCTIONALITY"
-      ]
-    }
-  }
+  "types": {}
 }

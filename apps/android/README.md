@@ -60,6 +60,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/android-ndk-r27c"
 ./gradlew assembleDebug        # or open in Android Studio and Run
+./gradlew testDebugUnitTest    # the saved-computers file parser (src/test)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -94,7 +95,10 @@ adb reverse tcp:9000 tcp:9000   # then connect the app to 127.0.0.1:9000
   the host pages through it once, caching each page; the previous / next slides
   then appear above the ◀ / ▶ buttons.
 - **Saved connections** — successful hosts are remembered with their OS icon and
-  machine name for one-tap reconnect; hide or delete them.
+  machine name for one-tap reconnect; hide or delete them. Advanced ▸
+  **Save saved computers to a file** / **Open a file of saved computers** move
+  the list to another phone or the browser client as the suite's transfer file
+  (`SavedFile.kt`; never the PIN). There is no sign-in.
 - **Window picker** — **Focus window ▾** lists the host's open windows; pick one
   to bring it to the foreground (and start its slideshow).
 

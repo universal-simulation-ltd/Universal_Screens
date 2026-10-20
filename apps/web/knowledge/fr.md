@@ -123,7 +123,6 @@ Votre écran n'est jamais envoyé à UNI·SIM. Sur votre propre réseau, il va d
 
 ## Ce qui va à UNI·SIM, et quand
 
-- **Votre Universal ID, si vous vous connectez.** L'article sur la connexion au compte détaille exactement ce qui est conservé.
 - **L'accès à distance.** Une session avec un code distant passe par le relais d'UNI·SIM. Elle est chiffrée de bout en bout : le relais ne peut pas la lire.
 - **Cast to a browser screen.** Lorsque l'application pour téléphone pilote ainsi un onglet de navigateur, ses commandes de pavé tactile et de télécommande passent par le même relais. Elles sont protégées en chemin, mais elles ne sont pas chiffrées de bout en bout. Aucune image de votre écran n'est envoyée.
 - **Un comptage quotidien des ouvertures, par le client navigateur uniquement.** La première fois que vous utilisez le client navigateur dans la journée, il ajoute un à un compteur anonyme du nombre d'ouvertures de Screens ce jour-là, comme toutes les applications web de la suite. Il n'envoie aucun identifiant, jamais votre compte, et rien sur votre écran, votre code PIN ou vos ordinateurs. Les applications pour téléphone et les hôtes n'envoient aucun comptage.
@@ -135,50 +134,38 @@ Sur un réseau sans connexion Internet, rien de tout cela n'est envoyé, et Scre
 Le QR code de l'hôte est une adresse web. Si vous le scannez avec l'appareil photo du téléphone et que l'application n'est pas installée, le navigateur ouvre cette page, et l'adresse locale de l'hôte ainsi que son code PIN font partie de l'adresse que reçoit le site. Un mot de passe Wi-Fi, si le code en contient un, se trouve dans la partie de l'adresse que les navigateurs n'envoient jamais.
 
 ---
-id: signing-in
+id: saved-computers-file
 group: Confidentialité et sécurité
-title: À quoi sert la connexion au compte ?
-summary: Elle est facultative. Une fois connecté, vous pouvez choisir de synchroniser vos machines enregistrées, mais jamais vos codes PIN.
+title: Comment transférer mes machines enregistrées sur un autre appareil ?
+summary: Enregistrez-les dans un fichier, puis ouvrez ce fichier sur l'autre appareil. Il n'y a pas de compte, et le fichier ne contient jamais vos codes PIN.
 ---
-Rien dans la connexion à vos machines ne demande de compte. Vous connecter avec votre Universal ID permet à un nouveau téléphone ou navigateur de connaître déjà vos machines, mais seulement si vous choisissez de les synchroniser.
+Screens n'a pas de connexion à un compte. Vos machines enregistrées restent sur l'appareil qui les a enregistrées, et c'est vous qui les transférez, dans un fichier.
 
-## Ce qui est synchronisé
+## Comment faire
 
-La synchronisation est désactivée tant que vous ne cochez pas **Sync saved computers to my account** dans la fenêtre de connexion de l'application Android ou du client navigateur. Se connecter seul n'envoie aucune de vos machines. Une fois activée, pour chaque machine enregistrée, il s'agit de :
+1. Sur l'appareil qui les connaît, choisissez **Save saved computers to a file**. Dans l'application Android, c'est sous Advanced ; dans le client navigateur, sous les connexions enregistrées.
+2. Faites parvenir le fichier à l'autre appareil comme vous le souhaitez : par e-mail, via un espace de stockage en ligne ou sur une clé USB.
+3. Sur l'autre appareil, choisissez **Open a file of saved computers** et sélectionnez le fichier.
+
+Ouvrir un fichier ajoute les machines que vous n'avez pas encore. Une machine que vous avez déjà garde votre version, sauf si celle du fichier a servi plus récemment. Rien n'est supprimé. L'application Android et le client navigateur ouvrent les fichiers l'un de l'autre.
+
+## Ce que contient le fichier
+
+Pour chaque machine enregistrée :
 
 - son adresse sur votre réseau
 - le nom et le système d'exploitation de la machine
 - le nom que vous lui avez donné, le cas échéant
 - la date de votre dernière connexion
 
-Supprimer une machine enregistrée pendant la synchronisation la retire aussi de votre compte. Décochez la case et la synchronisation s'arrête, et vos machines enregistrées sont supprimées de votre compte ; elles restent sur l'appareil.
+## Ce qu'il ne contient pas
 
-## Ce qui ne l'est pas
-
-- **Le code PIN.** Il n'est jamais envoyé, même chiffré. L'application pour téléphone le garde sur le téléphone avec chaque machine enregistrée. Le client navigateur ne l'enregistre pas du tout. Ce qu'un appareil conserve après l'association, c'est sa propre clé et les clés des ordinateurs auxquels il est associé, pour se reconnecter sans code PIN. Elles restent sur l'appareil.
+- **Le code PIN.** Il n'est jamais dans le fichier, même chiffré. L'application pour téléphone le garde sur le téléphone avec chaque machine enregistrée. Le client navigateur ne l'enregistre pas du tout. Ce qu'un appareil conserve après l'association, c'est sa propre clé et les clés des ordinateurs auxquels il est associé, pour se reconnecter sans code PIN. Elles restent sur cet appareil : la première fois que vous vous connectez depuis le nouveau, vous saisissez donc le code PIN ou scannez le code de l'hôte.
 - Dans l'application pour téléphone, le mode choisi et le fait d'avoir masqué une machine restent sur le téléphone.
 - Tout ce qui concerne votre écran.
 
+Le fichier indique tout de même les adresses de machines de votre réseau : gardez-le dans un endroit privé.
+
 ## Sur l'ordinateur
 
-L'hôte se connecte uniquement pour vous identifier. Il n'a pas de liste de machines à synchroniser, car il est lui-même la machine : ses connexions récentes appartiennent à cet ordinateur, pas à vous. L'hôte n'envoie ni nombre d'utilisateurs ni données d'utilisation.
-
-## Où les comptes sont créés
-
-Screens ne peut se connecter qu'à un Universal ID qui existe déjà. Vous en créez un, gratuitement, sur app.unisim.co.uk : une adresse e-mail mal saisie ne peut donc jamais créer un compte par erreur.
-
----
-id: email-code-sign-in
-group: Confidentialité et sécurité
-title: Pourquoi n'y a-t-il pas de « Se connecter avec Google » ?
-summary: Screens vous connecte avec un code envoyé par e-mail, la seule méthode qui fonctionne dans tous les clients.
----
-Pour vous connecter, vous saisissez votre adresse e-mail, vous recevez un code à 6 chiffres, puis vous saisissez ce code. Il n'y a pas de mot de passe.
-
-## Pourquoi pas Google
-
-Le client navigateur s'ouvre depuis une machine de votre propre réseau, à une simple adresse http://. Il ne peut pas en être autrement : les navigateurs empêchent une page sécurisée https:// d'ouvrir le type de connexion locale que le client utilise pour atteindre l'hôte. Or Google n'autorise sa connexion que sur des adresses web sécurisées enregistrées auprès de lui à l'avance, et une adresse de votre réseau domestique ou professionnel ne pourra jamais en faire partie. Screens utilise donc le code par e-mail partout : dans l'application pour téléphone, dans le navigateur et sur l'ordinateur.
-
-## Une fois connecté
-
-Vous restez connecté sur cet appareil jusqu'à ce que vous vous déconnectiez. Si la connexion ne peut plus être renouvelée, par exemple parce que le compte a été supprimé, l'application vous déconnecte sur cet appareil. La connexion à vos machines n'en dépend jamais.
+L'hôte n'a rien à transférer : ses connexions récentes appartiennent à cet ordinateur, pas à vous. Il n'a pas de connexion à un compte et n'envoie ni nombre d'utilisateurs ni données d'utilisation.

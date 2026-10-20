@@ -1,4 +1,4 @@
-Universal Screens knowledge base: the research, standards and guidance behind each article. The same in every language (titles are not translated), so it is kept once, here, and read by every client beside the articles: the browser client fetches it, the desktop hosts embed it with include_str!, and the Android app packs it as an asset. Format: one source per block of "key: value" lines, each block closed by a "---" line. Keys: article (the article's id), kind (paper, standard, report, guidance or law), title, authors, publisher, year, href (the canonical free link), and pdf + licence for our hosted copy under opensource.unisim.co.uk/kb/, ONLY where the licence allows redistribution (US Government works, IETF RFCs, and the Noise specification, which its section 16 places in the public domain). Sources show in the order they appear here. Original research first, then standards, then guidance, and only for what the app really does: checked against the Rust workspace on 2026-10-12 (pairing is SPAKE2 in crates/pake, then Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s; reconnecting is Noise_XX with the remembered keys; v0.3 clients still get the old NNpsk0; the PIN comes from getrandom; discovery is mDNS/DNS-SD; screens are H.264 decoded by WebCodecs in the browser). Screens does not use VNC/RFB, so the remote-framebuffer paper is deliberately not cited, and "signing-in" has no source that genuinely fits. Every link was fetched on 2026-10-12; ISO's site bot-blocks curl, so its page was confirmed through a Wayback Machine capture, and Wiegand's author copy moved off hhi.de, so it links to the Wayback Machine's snapshot.
+Universal Screens knowledge base: the research, standards and guidance behind each article. The same in every language (titles are not translated), so it is kept once, here, and read by every client beside the articles: the browser client fetches it, the desktop hosts embed it with include_str!, and the Android app packs it as an asset. Format: one source per block of "key: value" lines, each block closed by a "---" line. Keys: article (the article's id), kind (paper, standard, report, guidance or law), title, authors, publisher, year, href (the canonical free link), and pdf + licence for our hosted copy under opensource.unisim.co.uk/kb/, ONLY where the licence allows redistribution (US Government works, IETF RFCs, and the Noise specification, which its section 16 places in the public domain). Sources show in the order they appear here. Original research first, then standards, then guidance, and only for what the app really does: checked against the Rust workspace on 2026-10-12 (pairing is SPAKE2 in crates/pake, then Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s; reconnecting is Noise_XX with the remembered keys; v0.3 clients still get the old NNpsk0; the PIN comes from getrandom; discovery is mDNS/DNS-SD; screens are H.264 decoded by WebCodecs in the browser). Screens does not use VNC/RFB, so the remote-framebuffer paper is deliberately not cited, and "saved-computers-file" has no source that genuinely fits. Every link was fetched on 2026-10-12; ISO's site bot-blocks curl, so its page was confirmed through a Wayback Machine capture, and Wiegand's author copy moved off hhi.de, so it links to the Wayback Machine's snapshot.
 
 ---
 article: what-is-screens
@@ -137,32 +137,4 @@ year: 2018
 href: https://noiseprotocol.org/noise.pdf
 pdf: papers/noise-protocol-framework-rev34.pdf
 licence: Public domain (dedicated by the author, §16 of the specification)
----
-article: email-code-sign-in
-kind: standard
-title: Mixed Content
-publisher: W3C
-href: https://www.w3.org/TR/mixed-content/
----
-article: email-code-sign-in
-kind: standard
-title: Private Network Access
-publisher: W3C Web Platform Incubator Community Group
-href: https://wicg.github.io/private-network-access/
----
-article: email-code-sign-in
-kind: standard
-title: Best Current Practice for OAuth 2.0 Security (RFC 9700) — exact redirect URI matching
-authors: Torsten Lodderstedt, John Bradley, Andrey Labunets, Daniel Fett
-publisher: IETF
-year: 2025
-href: https://www.rfc-editor.org/rfc/rfc9700.html
-pdf: papers/rfc-9700-oauth-security-bcp.pdf
-licence: IETF Trust — RFC, freely redistributable unmodified
----
-article: email-code-sign-in
-kind: guidance
-title: Using OAuth 2.0 for Web Server Applications — redirect URI validation rules
-publisher: Google
-href: https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation
 ---

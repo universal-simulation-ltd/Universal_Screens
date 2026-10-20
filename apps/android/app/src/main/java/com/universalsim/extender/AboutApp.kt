@@ -73,13 +73,13 @@ fun AboutAppDialog(onDismiss: () -> Unit) {
                         "encrypted end to end with your PIN as the key, so neither your network nor " +
                         "the relay behind a remote code can read what is on it.",
                 )
-                // Keep in step with PRIVACY.md: this app sends no usage data,
-                // and saved-machine sync is off until the person ticks it.
+                // Keep in step with PRIVACY.md: this app sends no usage data
+                // and has no sign-in (removed 2026-10-20).
                 Text(
                     "Your screen is never uploaded to UNI·SIM, and this app sends us no usage " +
-                        "data. Signing in is optional. Only if you then tick \"Sync saved computers " +
-                        "to my account\" are your saved computers kept with your Universal ID — " +
-                        "their addresses, names and your nicknames, never your PIN.",
+                        "data. There is no sign-in: your saved computers stay on this phone, and " +
+                        "reach another device only in a file you save yourself, which never holds " +
+                        "your PIN.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -123,7 +123,6 @@ Your screen is never uploaded to UNI·SIM. On your own network it goes straight 
 
 ## What goes to UNI·SIM, and when
 
-- **Your Universal ID, if you sign in.** The article on signing in lists exactly what is kept.
 - **Remote access.** A session with a remote code travels through UNI·SIM's relay. It is end-to-end encrypted, so the relay cannot read it.
 - **Cast to a browser screen.** When the phone app drives a browser tab this way, its trackpad and clicker commands go through the same relay. They are protected on the way, but they are not end-to-end encrypted. No picture of your screen is sent.
 - **A daily open count, from the browser client only.** The first time you use the browser client on a given day, it adds one to an anonymous count of how many times Screens is opened each day, as every suite web app does. It carries no ID, never your account, and nothing about your screen, your PIN or your computers. The phone apps and the hosts send no count at all.
@@ -135,50 +134,38 @@ On a network with no internet connection, none of this is sent, and Screens work
 The host's QR code is a web address. If you scan it with the phone's own camera and the app is not installed, the browser opens that page, and the host's local address and PIN are part of the address the website receives. A Wi-Fi password, if the code carries one, sits in the part of the address that browsers never send.
 
 ---
-id: signing-in
+id: saved-computers-file
 group: Privacy and security
-title: What does signing in do?
-summary: It is optional. Signed in, you can choose to sync your saved machines, but never your PINs.
+title: How do I move my saved computers to another device?
+summary: Save them to a file, then open that file on the other device. There is no account, and the file never holds your PINs.
 ---
-Nothing about connecting needs an account. Signing in with your Universal ID lets a new phone or browser already know your machines, but only if you choose to sync them.
+Screens has no sign-in. Your saved computers stay on the device that saved them, and you move them yourself, in a file.
 
-## What is synced
+## How
 
-Syncing is off until you tick **Sync saved computers to my account** in the sign-in window of the Android app or the browser client. Signing in alone sends none of your machines. Once it is on, for each saved machine that is:
+1. On the device that has them, choose **Save saved computers to a file**. In the Android app it is under Advanced; in the browser client it is under the saved connections.
+2. Get the file to the other device however you like: email, a cloud drive or a USB stick.
+3. On the other device, choose **Open a file of saved computers** and pick the file.
+
+Opening a file adds the computers you do not have yet. A computer you already have keeps your copy, unless the one in the file was used more recently. Nothing is deleted. The Android app and the browser client open each other's files.
+
+## What is in the file
+
+For each saved computer:
 
 - its address on your network
-- the machine's own name and operating system
+- the computer's own name and operating system
 - the name you gave it, if any
 - when you last connected
 
-Deleting a saved machine while syncing removes it from your account too. Untick the box and syncing stops, and your saved machines are deleted from your account; they stay on the device.
-
 ## What is not
 
-- **The PIN.** It is never sent, not even scrambled. The phone app keeps it on the phone with each saved machine. The browser client does not save it at all. What a device does keep after pairing is its own key and the keys of the computers it has paired with, so it can reconnect without the PIN. They stay on the device.
-- In the phone app, the mode you chose and whether you hid a machine stay on the phone.
+- **The PIN.** It is never in the file, not even scrambled. The phone app keeps it on the phone with each saved computer. The browser client does not save it at all. What a device does keep after pairing is its own key and the keys of the computers it has paired with, so it can reconnect without the PIN. They stay on that device, so the first time you connect from the new one, you type the PIN or scan the host's code.
+- In the phone app, the mode you chose and whether you hid a computer stay on the phone.
 - Anything about your screen.
+
+The file still lists the addresses of computers on your network, so keep it somewhere private.
 
 ## On the computer
 
-The host signs in for identity only. It has no list of machines to sync, because it is the machine: its recent connections belong to that computer, not to you. The host sends no user count or usage data.
-
-## Where accounts are made
-
-Screens can only sign in to a Universal ID that already exists. You create one, free, at app.unisim.co.uk, so a mistyped email address can never make a stray account.
-
----
-id: email-code-sign-in
-group: Privacy and security
-title: Why is there no "Sign in with Google"?
-summary: Screens signs in with a code sent to your email, the one method that works in every client.
----
-To sign in, you type your email address, you are sent a 6-digit code, and you type the code back. There is no password.
-
-## Why not Google
-
-The browser client is opened from a machine on your own network, over a plain http:// address. It has to be: browsers block a secure https:// page from opening the kind of local connection the client uses to reach the host. Google only lets its sign-in run on secure web addresses registered with it in advance, and an address on your home or office network can never be one of them. So Screens uses the emailed code everywhere: in the phone app, in the browser and on the computer.
-
-## After you sign in
-
-You stay signed in on that device until you sign out. If the sign-in can no longer be renewed, for example because the account was deleted, the app signs you out on that device. Connecting to your machines never depends on it.
+The host has nothing to move: its recent connections belong to that computer, not to you. It has no sign-in and sends no user count or usage data.
