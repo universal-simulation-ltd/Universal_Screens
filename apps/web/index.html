@@ -608,6 +608,42 @@
   #kb-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); cursor: pointer; z-index: 1; }
   #kb-close:hover { color: var(--text); }
 
+  /* ---- Universal ID dialog: the About card's shape, a form instead of prose --- */
+  #account-backdrop {
+    position: fixed; inset: 0; background: rgba(15,23,42,.45);
+    display: none; align-items: center; justify-content: center;
+    padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+    z-index: 1100;
+  }
+  #account-backdrop.open { display: flex; }
+  #account-card {
+    position: relative; width: 100%; max-width: 420px;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 1.35rem 1.5rem 1.5rem;
+    text-align: left; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  #account-card h2 { margin: 0 0 .2rem; font-size: 1.05rem; letter-spacing: -.01em; }
+  #account-card p { margin: 0 0 .9rem; font-size: .8rem; line-height: 1.5; color: var(--muted); }
+  #account-card .field { margin-bottom: .7rem; }
+  /* ⚠️ `.field` sets `display: flex`, and a class rule beats the UA's
+     `[hidden] { display: none }` — so without this the code box is on screen
+     before a code has been asked for, and "Use a different email" sits under
+     the button from the first frame. Caught in the browser, not in review. */
+  #account-card [hidden] { display: none; }
+  #account-card button.primary {
+    width: 100%; padding: .65rem 1rem; border: 0; border-radius: .6rem;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  #account-card button.primary:disabled { opacity: .55; cursor: default; }
+  #account-card button.quiet {
+    margin-top: .6rem; width: 100%; padding: .55rem 1rem; border: 1px solid var(--line);
+    border-radius: .6rem; background: none; color: var(--text); font: inherit; cursor: pointer;
+  }
+  #account-msg { font-size: .78rem; line-height: 1.45; margin: 0 0 .7rem; }
+  #account-msg.bad { color: #b91c1c; }
+  :root.dark #account-msg.bad { color: #fca5a5; }
+  #account-close { position: absolute; top: .6rem; right: .6rem; width: 1.9rem; height: 1.9rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: .5rem; background: none; color: var(--muted); cursor: pointer; }
+  #account-close:hover { color: var(--text); }
 
   /* ---- session view (full screen) ---- */
   /* `flex: 1` rather than `height: 100%`: body is a column now, so the session
@@ -764,6 +800,12 @@
         </a>
 
         <div class="un-right">
+          <!-- Universal ID. Signed out this says "Sign in"; signed in it is the
+               account, and opens the same dialog to sign out. Optional in every
+               sense: nothing about connecting to a machine needs it. -->
+          <button type="button" class="un-pill" id="account-btn" title="Your Universal ID">
+            <span id="account-label">Sign in</span>
+          </button>
           <a class="un-pill" href="https://opensource.unisim.co.uk" target="_blank" rel="noopener noreferrer"
              title="All the Universal Apps"><span><span class="long">Universal </span>Apps ↗</span></a>
           <a class="un-icon-btn" href="https://github.com/universal-simulation-ltd/Universal_Screens"
@@ -813,9 +855,10 @@
       <div id="saved-list" hidden></div>
     </div>
 
-    <!-- Saved computers as a file (src/savedFile.js): how the list moves to
-         another device — the browser or the Android app — with no account.
-         Hidden on the hosted copy, which has no saved list (see HOSTED). -->
+    <!-- Saved computers as a file (src/savedFile.js): the other way the list
+         moves to another device — the browser or the Android app — besides
+         syncing it with a Universal ID. No account needed. Hidden on the
+         hosted copy, which has no saved list (see HOSTED). -->
     <div id="saved-file" hidden>
       <button type="button" class="link-btn" id="saved-export" hidden>Save saved computers to a file</button>
       <button type="button" class="link-btn" id="saved-import">Open a file of saved computers</button>
@@ -896,6 +939,41 @@
   <!-- About this app. The content mirrors the SDK's <AboutAppDialog>, which
        every other app in the suite shows; see the CSS block above for why this
        one is hand-written rather than imported. -->
+  <!-- Universal ID: email a code, type it back. LOGIN ONLY — an account is
+       created on the hub, never here (see src/account.js). -->
+  <div id="account-backdrop" role="presentation">
+    <div id="account-card" role="dialog" aria-modal="true" aria-label="Your Universal ID">
+      <!-- An inline SVG, not `✕` — see the About dialog for why. -->
+      <button type="button" id="account-close" aria-label="Close">
+        <svg viewBox="0 0 20 20" aria-hidden="true" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </button>
+      <h2 id="account-title">Sign in</h2>
+      <p id="account-intro">Sign in with your Universal ID, the same account as every other UNI·SIM app. Connecting never needs an account.</p>
+      <p id="account-msg" hidden></p>
+
+      <div id="account-signed-out">
+        <div class="field" id="account-email-field">
+          <label for="account-email">Email address</label>
+          <input id="account-email" type="email" autocomplete="email" placeholder="you@example.com" />
+        </div>
+        <div class="field" id="account-code-field" hidden>
+          <label for="account-code">Your code</label>
+          <input id="account-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+        </div>
+        <button type="button" class="primary" id="account-submit">Email me a code</button>
+        <button type="button" class="quiet" id="account-back" hidden>Use a different email</button>
+      </div>
+
+      <div id="account-signed-in" hidden>
+        <!-- Off by default: until this is ticked, no saved computer is uploaded. -->
+        <label class="opt-row" style="margin:0 0 .8rem"><input type="checkbox" id="account-sync" /><span>Sync saved computers to my account<small>Sends each saved computer's network address, name, operating system and your nickname for it, so your other devices know them. Never your PIN. Turning this off deletes them from your account.</small></span></label>
+        <button type="button" class="quiet" id="account-signout">Sign out</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Knowledge base: the list, then one article. Filled by src/kb-dialog.js
        from knowledge/<lang>.md with textContent only. -->
@@ -950,11 +1028,10 @@
            crates/transport/src/lib.rs for the Noise tunnel that makes the PIN
            encryption rather than just a gate. -->
       <p>It goes to the device you paired with, and to nobody else. The connection is encrypted end to end with your PIN as the key, so neither your network nor the relay behind a remote code can read what is on it.</p>
-      <!-- Keep in step with PRIVACY.md. The opt-in user count went on
-           2026-10-12, with the suite's; the anonymous daily open count
-           (src/openCount.js) came 2026-10-13; the optional sign-in and its
-           saved-computer sync went on 2026-10-20 (src/savedFile.js). -->
-      <p class="about-note">Your screen is never uploaded to UNI·SIM. In a browser, this page adds one to an anonymous count of how many times Screens is opened each day, as every suite web app does: no ID, no account, nothing about you or your screen. There is no sign-in: your saved computers stay in this browser, and reach another device only in a file you save yourself, which never holds your PIN.</p>
+      <!-- Keep in step with PRIVACY.md: the one extra below is off by default.
+           The opt-in user count went on 2026-10-12, with the suite's; the
+           anonymous daily open count (src/openCount.js) came 2026-10-13. -->
+      <p class="about-note">Your screen is never uploaded to UNI·SIM. In a browser, this page adds one to an anonymous count of how many times Screens is opened each day, as every suite web app does: no ID, no account, nothing about you or your screen. Once signed in, you can choose to sync your saved computers to your Universal ID (their addresses, names and your nicknames, never your PIN), or move them yourself in a file, which never reaches UNI·SIM and never holds your PIN.</p>
 
       <h3>Open source</h3>
       <p>Free and open source under the AGPL — every line of it public, for anyone to read or run themselves, and anyone who runs a changed copy for others has to share their changes too.</p>

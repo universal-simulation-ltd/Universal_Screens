@@ -123,6 +123,7 @@ Il tuo schermo non viene mai caricato su UNI·SIM. Sulla tua rete va direttament
 
 ## Cosa va a UNI·SIM, e quando
 
+- **Il tuo Universal ID, se accedi.** L'articolo sull'accesso elenca esattamente cosa viene conservato.
 - **L'accesso remoto.** Una sessione con codice remoto passa dal server di inoltro di UNI·SIM. È cifrata end-to-end, quindi il server non può leggerla.
 - **Cast to a browser screen.** Quando l'app per il telefono comanda così una scheda del browser, i suoi comandi di touchpad e telecomando passano dallo stesso server. Sono protetti lungo il percorso, ma non sono cifrati end-to-end. Nessuna immagine del tuo schermo viene inviata.
 - **Un conteggio giornaliero delle aperture, solo dal client browser.** La prima volta che usi il client browser in una giornata, aggiunge uno a un conteggio anonimo di quante volte Screens viene aperto quel giorno, come fa ogni app web della suite. Non invia alcun ID, mai il tuo account, e niente sul tuo schermo, sul tuo PIN o sui tuoi computer. Le app per il telefono e l'host non inviano alcun conteggio.
@@ -134,12 +135,61 @@ Su una rete senza connessione a Internet non viene inviato nulla di tutto questo
 Il codice QR dell'host è un indirizzo web. Se lo scansioni con la fotocamera del telefono e l'app non è installata, il browser apre quella pagina, e l'indirizzo locale dell'host e il suo PIN fanno parte dell'indirizzo che riceve il sito. Una password Wi-Fi, se il codice ne contiene una, si trova nella parte dell'indirizzo che i browser non inviano mai.
 
 ---
+id: signing-in
+group: Privacy e sicurezza
+title: A cosa serve accedere?
+summary: È facoltativo. Con l'accesso puoi scegliere di sincronizzare i tuoi computer salvati, ma i PIN mai.
+---
+Per collegarti ai tuoi computer non serve nessun account. Accedere con il tuo Universal ID permette a un telefono o a un browser nuovo di conoscere già i tuoi computer, ma solo se scegli di sincronizzarli.
+
+## Cosa viene sincronizzato
+
+La sincronizzazione è disattivata finché non spunti **Sync saved computers to my account** nella finestra di accesso dell'app Android o del client browser. Il solo accesso non invia nessuno dei tuoi computer. Una volta attivata, per ogni computer salvato si tratta di:
+
+- il suo indirizzo sulla tua rete
+- il nome e il sistema operativo del computer
+- il nome che gli hai dato, se c'è
+- quando ti sei collegato l'ultima volta
+
+Se elimini un computer salvato mentre la sincronizzazione è attiva, viene tolto anche dal tuo account. Togli la spunta e la sincronizzazione si ferma, e i tuoi computer salvati vengono eliminati dal tuo account; restano sul dispositivo.
+
+## Cosa no
+
+- **Il PIN.** Non viene mai inviato, nemmeno cifrato. L'app per il telefono lo tiene sul telefono insieme a ogni computer salvato. Il client browser non lo salva affatto. Quello che un dispositivo conserva dopo l'associazione è la sua chiave e le chiavi dei computer a cui è associato, per ricollegarsi senza PIN. Restano sul dispositivo.
+- Nell'app per il telefono, la modalità scelta e il fatto di aver nascosto un computer restano sul telefono.
+- Niente che riguardi il tuo schermo.
+
+## Sul computer
+
+L'host accede solo per identificarti. Non ha un elenco di computer da sincronizzare, perché è lui stesso il computer: le sue connessioni recenti appartengono a quel computer, non a te. L'host non invia né il conteggio degli utenti né dati di utilizzo.
+
+## Dove si creano gli account
+
+Screens può accedere solo a un Universal ID che esiste già. Ne crei uno, gratis, su app.unisim.co.uk, così un indirizzo email scritto male non può mai creare un account per sbaglio.
+
+---
+id: email-code-sign-in
+group: Privacy e sicurezza
+title: Perché non c'è «Accedi con Google»?
+summary: Screens ti fa accedere con un codice inviato via email, l'unico metodo che funziona in tutti i client.
+---
+Per accedere, digiti il tuo indirizzo email, ricevi un codice di 6 cifre e lo digiti. Non c'è nessuna password.
+
+## Perché non Google
+
+Il client browser si apre da un computer della tua rete, a un semplice indirizzo http://. Non può essere altrimenti: i browser impediscono a una pagina sicura https:// di aprire il tipo di connessione locale che il client usa per raggiungere l'host. Google consente il suo accesso solo su indirizzi web sicuri registrati in anticipo, e un indirizzo della rete di casa o dell'ufficio non potrà mai esserlo. Per questo Screens usa il codice via email ovunque: nell'app per il telefono, nel browser e sul computer.
+
+## Dopo l'accesso
+
+Resti collegato su quel dispositivo finché non esci. Se l'accesso non può più essere rinnovato, per esempio perché l'account è stato eliminato, l'app ti fa uscire su quel dispositivo. La connessione ai tuoi computer non dipende mai da questo.
+
+---
 id: saved-computers-file
 group: Privacy e sicurezza
 title: Come porto i miei computer salvati su un altro dispositivo?
-summary: Salvali in un file, poi apri quel file sull'altro dispositivo. Non c'è nessun account, e il file non contiene mai i tuoi PIN.
+summary: Accedi e sincronizzali, oppure salvali in un file e apri quel file sull'altro dispositivo. Il file non contiene mai i tuoi PIN.
 ---
-Screens non ha l'accesso con un account. I tuoi computer salvati restano sul dispositivo che li ha salvati, e li sposti tu, in un file.
+Ci sono due modi, entrambi facoltativi. Con l'accesso al tuo Universal ID puoi sincronizzarli tra i tuoi dispositivi; l'articolo sull'accesso dice cosa viene conservato. Oppure, senza account, li sposti tu, in un file.
 
 ## Come fare
 
@@ -168,4 +218,4 @@ Il file elenca comunque gli indirizzi dei computer della tua rete, quindi tienil
 
 ## Sul computer
 
-L'host non ha niente da spostare: le sue connessioni recenti appartengono a quel computer, non a te. Non ha l'accesso con un account e non invia né il conteggio degli utenti né dati di utilizzo.
+L'host non ha niente da spostare: le sue connessioni recenti appartengono a quel computer, non a te. Non invia né il conteggio degli utenti né dati di utilizzo.

@@ -21,7 +21,7 @@ use crate::{serve_loop, HostEvent};
 // crate's docs for what deliberately stays forked (HostApp, RecentConn,
 // best_lan_ip) and why APP_VERSION must not move.
 use extender_host_ui::{
-    clear_old_sign_in,
+    account_menu_row, show_account_window, UserAccount,
     show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY,
     about_panel, connect_url, device_icon, first_free_port, gen_pin, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
@@ -44,6 +44,9 @@ struct RecentConn {
 }
 
 struct HostApp {
+    /// Signing in is optional and identity-only on a host: there is no saved
+    /// list here to follow an account (see host-ui/account.rs).
+    account: UserAccount,
     auto_connect: bool,
     dark_mode: Option<bool>,
     /// The PIN being enforced right now (your own, or this start's random one).
@@ -117,9 +120,9 @@ impl HostApp {
         let own_pin: Option<u32> =
             storage.and_then(|s| eframe::get_value::<Option<u32>>(s, OWN_PIN_KEY)).flatten();
         let pin = startup_pin(own_pin);
-        // The optional sign-in went on 2026-10-20; drop the session file it
-        // may have left, so no stale token stays on this computer.
-        clear_old_sign_in();
+        // Restored from `<config>/UniversalScreens/session.json` if the user
+        // has signed in before; it refreshes its token on its own thread.
+        let account = UserAccount::new();
         let discovered_peers = Arc::new(Mutex::new(Vec::new()));
         let listener_stop = Arc::new(AtomicBool::new(false));
         let own_ip: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -138,6 +141,7 @@ impl HostApp {
                 storage.and_then(|s| eframe::get_value::<String>(s, KB_LANGUAGE_KEY)),
             ),
             show_pc_info: false,
+            account,
             auto_connect: storage
                 .and_then(|s| eframe::get_value(s, "auto_connect"))
                 .unwrap_or(true),
@@ -763,6 +767,10 @@ impl HostApp {
                     if ui.checkbox(&mut dont, "Don't connect automatically").changed() {
                         self.auto_connect = !dont;
                     }
+                    ui.separator();
+                    // Optional, and identity-only on a host — see
+                    // host-ui/account.rs for why there is nothing here to sync.
+                    account_menu_row(ui, &mut self.account);
                 })
                 .response
                 // The disc carries no text, so without this the control is
@@ -899,6 +907,9 @@ impl eframe::App for HostApp {
             None => egui::ThemePreference::System,
         });
 
+        // The sign-in window, when the profile menu's account row opened it.
+        // Draws nothing otherwise, and drains its worker thread either way.
+        show_account_window(ctx, &mut self.account);
         // The knowledge base, when Actions ▸ Advanced opened it.
         show_knowledge_window(ctx, &mut self.knowledge);
 

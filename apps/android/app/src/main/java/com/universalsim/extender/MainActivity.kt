@@ -243,7 +243,6 @@ class MainActivity : ComponentActivity() {
         // reconnects without its code. The Rust side cannot find this folder by
         // itself on Android; without the call it simply asks for the code each time.
         ExtenderNative.nativeSetPairingDir(filesDir.absolutePath)
-        ConnectionStore.clearOldSignIn(this)
         deepLink.value = intent?.dataString
         setContent {
             val link by deepLink
@@ -352,6 +351,10 @@ fun AppRoot(deepLink: String? = null, onDeepLinkHandled: () -> Unit = {}) {
                     // Remember the host for quick reconnect; store the mode only if
                     // the user asked to. OS/name fill in once HostInfo arrives.
                     ConnectionStore.remember(context, addr, if (rememberMode) chosenMode.name else "", pin)
+                    // Signed in with sync on, this machine is the account's
+                    // too. No-op otherwise, and the PIN is never part of it
+                    // (Account.kt).
+                    accountScope.launch { Account.remember(context, addr) }
                 }
                 session = s
                 failure = outcome.failure
@@ -865,6 +868,11 @@ fun ConnectScreen(
                         val m = SavedFile.merge(ConnectionStore.load(context), r.machines)
                         ConnectionStore.replaceAll(context, m.list)
                         reload()
+                        // Signed in with sync on, the account gets them too
+                        // (no-op otherwise; see Account.kt).
+                        if (m.added > 0 || m.updated > 0) {
+                            fileScope.launch { if (Account.syncSaved(context)) reload() }
+                        }
                         var line = when {
                             m.added == 0 && m.updated == 0 -> "You already had every computer in that file."
                             m.updated == 0 -> if (m.added == 1) "Added 1 computer." else "Added ${m.added} computers."
@@ -1016,6 +1024,7 @@ fun ConnectScreen(
                         // with no PIN.
                         runCatching { ExtenderNative.nativeForgetHost(c.addr) }
                         ConnectionStore.delete(context, c.addr)
+                        accountScope.launch { Account.forget(context, c.addr) }
                         reload()
                     },
                 )
@@ -1100,8 +1109,15 @@ fun ConnectScreen(
             TextButton(onClick = { showKnowledge = true }) { Text("📖  Knowledge base") }
             TextButton(onClick = { showAbout = true }) { Text("ℹ  About this app") }
 
-            // Saved computers as a file — how the list moves to another phone
-            // or the browser client, with no account. See SavedFile.kt.
+            // Universal ID — optional, and nothing about connecting needs it.
+            // Saved machines follow the account only if "Sync saved computers
+            // to my account" is ticked in its dialog (off by default). See
+            // Account.kt.
+            AccountRow(onSynced = { reload() })
+
+            // Saved computers as a file — the other way the list moves to
+            // another phone or the browser client, with no account needed.
+            // See SavedFile.kt.
             if (saved.isNotEmpty()) {
                 TextButton(onClick = { saveFileLauncher.launch(SavedFile.fileName()) }) {
                     Text("💾  Save saved computers to a file")
@@ -1165,6 +1181,7 @@ fun ConnectScreen(
                 confirmButton = {
                     TextButton(onClick = {
                         ConnectionStore.setCustomName(context, target.addr, renameDraft)
+                        accountScope.launch { Account.remember(context, target.addr) }
                         renaming = null
                         reload()
                     }) { Text("Save") }

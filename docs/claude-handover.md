@@ -4,6 +4,33 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-10-20 (sign-in BACK; the saved-computers file kept)
+
+**Overrides the login-free entry below.** James, later on 2026-10-20: Screens
+needs sign-in, "it's designed to be on multi devices". So `3e50e11` is undone
+except for the file:
+
+- **Sign-in and saved-machine sync restored exactly as before `3e50e11`**: web
+  `src/account.js` (+ `account.test.mjs`, the bar's Sign in pill and dialog),
+  Android `Account.kt` + `AccountUi.kt` (Advanced row, every
+  `Account.remember/forget`), desktop `host-ui/src/account.rs` (profile-menu
+  row + window, macOS and Windows) and `ureq`. Sync to `screens_saved_hosts`
+  is opt-in as before. The "delete the leftover sign-in on start" code
+  (`clearOldSignIn`, `clear_old_sign_in`) is GONE — it would sign people out.
+- **The saved-computers file stays** (web under the saved list, Android under
+  Advanced, below the Universal ID row). After opening a file, a signed-in
+  device with sync on merges with the account, so the new computers reach the
+  other devices.
+- **Knowledge base, 8 languages:** `signing-in` and `email-code-sign-in` are
+  back, the Universal ID bullet is back in "What leaves your network?", the 4
+  sign-in sources are back, and `saved-computers-file` stays as an extra last
+  article ("sync with your Universal ID, or move them as a file"). host-ui has
+  a PIN-not-in-it test for each article. The hosted guide PDFs have no PDF for
+  `saved-computers-file` until the portal's `kb-pdfs-adapter.mjs` is re-run.
+- **Paperwork** back to sign-in + opt-in sync (PRIVACY.md, About texts,
+  data-safety.json with email / account / user content), each now also naming
+  the file.
+
 ## Update — 2026-10-20 (login-free: sign-in removed; saved computers as a file)
 
 **Pushed straight to `main`. No release cut, the hosted browser client NOT

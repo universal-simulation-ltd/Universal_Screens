@@ -123,6 +123,7 @@ Ekranınız hiçbir zaman UNI·SIM'e yüklenmez. Kendi ağınızda, ana bilgisay
 
 ## UNI·SIM'e gidenler ve ne zaman
 
+- **Oturum açarsanız Universal ID'niz.** Oturum açma hakkındaki makale neyin saklandığını tam olarak listeler.
 - **Uzaktan erişim.** Uzak kodlu bir oturum UNI·SIM'in aktarma sunucusundan geçer. Uçtan uca şifrelidir, bu yüzden sunucu onu okuyamaz.
 - **Cast to a browser screen.** Telefon uygulaması bu yolla bir tarayıcı sekmesini yönettiğinde, dokunmatik yüzey ve sunum kumandası komutları aynı sunucudan geçer. Yolda korunurlar ama uçtan uca şifreli değildirler. Ekranınızın hiçbir görüntüsü gönderilmez.
 - **Yalnızca tarayıcı istemcisinden günlük açılma sayımı.** Tarayıcı istemcisini bir gün içinde ilk kez kullandığınızda, paketteki her web uygulaması gibi, Screens'in o gün kaç kez açıldığını gösteren anonim sayıya bir ekler. Hiçbir kimlik, asla hesabınız ve ekranınız, PIN'iniz ya da bilgisayarlarınız hakkında hiçbir şey göndermez. Telefon uygulamaları ve ana bilgisayar hiçbir sayım göndermez.
@@ -134,12 +135,61 @@ Ekranınız hiçbir zaman UNI·SIM'e yüklenmez. Kendi ağınızda, ana bilgisay
 Ana bilgisayarın QR kodu bir web adresidir. Kodu telefonun kendi kamerasıyla tararsanız ve uygulama yüklü değilse, tarayıcı o sayfayı açar; ana bilgisayarın yerel adresi ve PIN'i web sitesinin aldığı adresin parçası olur. Kod bir Wi-Fi şifresi içeriyorsa, bu şifre adresin tarayıcıların hiçbir zaman göndermediği kısmında durur.
 
 ---
+id: signing-in
+group: Gizlilik ve güvenlik
+title: Oturum açmak ne işe yarar?
+summary: İsteğe bağlıdır. Oturum açtığınızda kayıtlı makinelerinizi eşitlemeyi seçebilirsiniz, PIN'lerinizi asla.
+---
+Bağlanmak için hiçbir hesap gerekmez. Universal ID'nizle oturum açmak, yeni bir telefonun ya da tarayıcının makinelerinizi zaten tanımasını sağlar, ama yalnızca onları eşitlemeyi seçerseniz.
+
+## Neler eşitlenir
+
+Android uygulamasının ya da tarayıcı istemcisinin oturum açma penceresinde **Sync saved computers to my account** kutusunu işaretleyene kadar eşitleme kapalıdır. Yalnızca oturum açmak makinelerinizin hiçbirini göndermez. Açıldığında, her kayıtlı makine için bunlar şunlardır:
+
+- ağınızdaki adresi
+- makinenin kendi adı ve işletim sistemi
+- varsa ona verdiğiniz ad
+- en son ne zaman bağlandığınız
+
+Eşitleme açıkken kayıtlı bir makineyi silmek, onu hesabınızdan da kaldırır. Kutunun işaretini kaldırırsanız eşitleme durur ve kayıtlı makineleriniz hesabınızdan silinir; cihazda kalırlar.
+
+## Neler eşitlenmez
+
+- **PIN.** Hiçbir zaman gönderilmez, şifrelenmiş hâlde bile. Telefon uygulaması onu her kayıtlı makineyle birlikte telefonda tutar. Tarayıcı istemcisi ise onu hiç kaydetmez. Bir cihazın eşleştirmeden sonra sakladığı şey kendi anahtarı ve eşleştiği bilgisayarların anahtarlarıdır; böylece PIN olmadan yeniden bağlanabilir. Bunlar cihazda kalır.
+- Telefon uygulamasında seçtiğiniz mod ve bir makineyi gizleyip gizlemediğiniz telefonda kalır.
+- Ekranınızla ilgili hiçbir şey.
+
+## Bilgisayarda
+
+Ana bilgisayar yalnızca kimliğinizi belirlemek için oturum açar. Eşitlenecek bir makine listesi yoktur, çünkü makinenin kendisidir: son bağlantıları size değil, o bilgisayara aittir. Ana bilgisayar kullanıcı sayısı ya da kullanım verisi göndermez.
+
+## Hesaplar nerede oluşturulur
+
+Screens yalnızca zaten var olan bir Universal ID ile oturum açabilir. Hesabı app.unisim.co.uk adresinde ücretsiz oluşturursunuz; böylece yanlış yazılmış bir e-posta adresi asla istenmeyen bir hesap oluşturmaz.
+
+---
+id: email-code-sign-in
+group: Gizlilik ve güvenlik
+title: Neden "Google ile oturum aç" yok?
+summary: Screens, e-postanıza gönderilen bir kodla oturum açar; bu, her istemcide çalışan tek yöntemdir.
+---
+Oturum açmak için e-posta adresinizi yazarsınız, 6 haneli bir kod alırsınız ve kodu geri yazarsınız. Şifre yoktur.
+
+## Neden Google değil
+
+Tarayıcı istemcisi, kendi ağınızdaki bir makineden düz bir http:// adresiyle açılır. Başka türlüsü mümkün değildir: tarayıcılar, güvenli bir https:// sayfasının, istemcinin ana bilgisayara ulaşmak için kullandığı türden yerel bir bağlantı açmasını engeller. Google ise oturum açma özelliğinin yalnızca önceden kendisine kaydedilmiş güvenli web adreslerinde çalışmasına izin verir; ev ya da ofis ağınızdaki bir adres bunlardan biri olamaz. Bu yüzden Screens her yerde e-posta kodunu kullanır: telefon uygulamasında, tarayıcıda ve bilgisayarda.
+
+## Oturum açtıktan sonra
+
+Oturumu kapatana kadar o cihazda oturumunuz açık kalır. Oturum artık yenilenemezse, örneğin hesap silindiği için, uygulama o cihazdaki oturumunuzu kapatır. Makinelerinize bağlanmak hiçbir zaman buna bağlı değildir.
+
+---
 id: saved-computers-file
 group: Gizlilik ve güvenlik
 title: Kayıtlı makinelerimi başka bir cihaza nasıl taşırım?
-summary: Onları bir dosyaya kaydedin, sonra o dosyayı diğer cihazda açın. Hesap yoktur ve dosyada PIN'leriniz asla bulunmaz.
+summary: Oturum açıp onları eşitleyin ya da bir dosyaya kaydedip o dosyayı diğer cihazda açın. Dosyada PIN'leriniz asla bulunmaz.
 ---
-Screens'te oturum açma yoktur. Kayıtlı makineleriniz onları kaydeden cihazda kalır; onları bir dosyayla kendiniz taşırsınız.
+Bunun iki yolu vardır ve ikisi de isteğe bağlıdır. Universal ID'nizle oturum açtıysanız onları cihazlarınız arasında eşitleyebilirsiniz; neyin saklandığını oturum açma makalesi anlatır. Ya da hesap olmadan, onları bir dosyayla kendiniz taşırsınız.
 
 ## Nasıl yapılır
 
@@ -168,4 +218,4 @@ Yine de dosya ağınızdaki makinelerin adreslerini listeler, bu yüzden onu giz
 
 ## Bilgisayarda
 
-Ana bilgisayarın taşıyacağı bir şey yoktur: son bağlantıları size değil, o bilgisayara aittir. Oturum açma yoktur ve kullanıcı sayısı ya da kullanım verisi göndermez.
+Ana bilgisayarın taşıyacağı bir şey yoktur: son bağlantıları size değil, o bilgisayara aittir. Kullanıcı sayısı ya da kullanım verisi göndermez.

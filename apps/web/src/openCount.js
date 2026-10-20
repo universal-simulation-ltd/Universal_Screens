@@ -8,9 +8,9 @@
 //
 //   * ONE call, `app_open_count {p_product:'screens', p_platform:'web'}`, the
 //     first time the page is used on a given UTC day in this browser. Nothing
-//     else is sent: no id, no account (always the anon key), no host, PIN,
-//     room code or anything about what is on screen. The server keeps a
-//     per-day total and nothing that identifies anyone.
+//     else is sent: no id, no account (always the anon key, even when signed
+//     in), no host, PIN, room code or anything about what is on screen. The
+//     server keeps a per-day total and nothing that identifies anyone.
 //   * "Already counted today" is `localStorage['unisim:opened:screens']` = the
 //     date. It stays in this browser and is never sent. A browser that cannot
 //     remember (storage blocked) is not counted at all, rather than once per

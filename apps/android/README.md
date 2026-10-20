@@ -95,10 +95,12 @@ adb reverse tcp:9000 tcp:9000   # then connect the app to 127.0.0.1:9000
   the host pages through it once, caching each page; the previous / next slides
   then appear above the ◀ / ▶ buttons.
 - **Saved connections** — successful hosts are remembered with their OS icon and
-  machine name for one-tap reconnect; hide or delete them. Advanced ▸
-  **Save saved computers to a file** / **Open a file of saved computers** move
-  the list to another phone or the browser client as the suite's transfer file
-  (`SavedFile.kt`; never the PIN). There is no sign-in.
+  machine name for one-tap reconnect; hide or delete them. They reach another
+  device two ways: signed in with a Universal ID, tick **Sync saved computers
+  to my account** (optional, off by default; `Account.kt`), or Advanced ▸
+  **Save saved computers to a file** / **Open a file of saved computers**, the
+  suite's transfer file, readable by another phone or the browser client
+  (`SavedFile.kt`; never the PIN).
 - **Window picker** — **Focus window ▾** lists the host's open windows; pick one
   to bring it to the foreground (and start its slideshow).
 

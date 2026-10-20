@@ -123,6 +123,7 @@ Su pantalla nunca se sube a UNI·SIM. En su propia red, va directamente del host
 
 ## Lo que va a UNI·SIM, y cuándo
 
+- **Su Universal ID, si inicia sesión.** El artículo sobre el inicio de sesión detalla exactamente qué se guarda.
 - **El acceso remoto.** Una sesión con código remoto pasa por el servidor de retransmisión de UNI·SIM. Está cifrada de extremo a extremo, así que el servidor no puede leerla.
 - **Cast to a browser screen.** Cuando la aplicación para el teléfono controla así una pestaña del navegador, sus órdenes de panel táctil y de mando pasan por el mismo servidor. Van protegidas por el camino, pero no están cifradas de extremo a extremo. No se envía ninguna imagen de su pantalla.
 - **Un recuento diario de aperturas, solo desde el cliente de navegador.** La primera vez que usa el cliente de navegador en un día, suma uno a un recuento anónimo de cuántas veces se abre Screens ese día, como hace cada aplicación web de la suite. No lleva ningún identificador, nunca su cuenta, ni nada sobre su pantalla, su PIN o sus ordenadores. Las aplicaciones para el teléfono y el host no envían ningún recuento.
@@ -134,12 +135,61 @@ En una red sin conexión a Internet no se envía nada de esto, y Screens funcion
 El código QR del host es una dirección web. Si lo escanea con la cámara del propio teléfono y la aplicación no está instalada, el navegador abre esa página, y la dirección local del host y su PIN forman parte de la dirección que recibe el sitio web. Si el código incluye una contraseña Wi-Fi, esta va en la parte de la dirección que los navegadores nunca envían.
 
 ---
+id: signing-in
+group: Privacidad y seguridad
+title: ¿Para qué sirve iniciar sesión?
+summary: Es opcional. Con la sesión iniciada, puede elegir sincronizar sus equipos guardados, pero nunca sus PIN.
+---
+Para conectarse a sus equipos no hace falta ninguna cuenta. Iniciar sesión con su Universal ID permite que un teléfono o navegador nuevo ya conozca sus equipos, pero solo si usted decide sincronizarlos.
+
+## Qué se sincroniza
+
+La sincronización está desactivada hasta que marque **Sync saved computers to my account** en la ventana de inicio de sesión de la aplicación para Android o del cliente de navegador. Iniciar sesión por sí solo no envía ninguno de sus equipos. Una vez activada, de cada equipo guardado se envía:
+
+- su dirección en su red
+- el nombre y el sistema operativo del propio equipo
+- el nombre que usted le puso, si lo hay
+- cuándo se conectó por última vez
+
+Si elimina un equipo guardado con la sincronización activada, también se elimina de su cuenta. Si desmarca la casilla, la sincronización se detiene y sus equipos guardados se eliminan de su cuenta; se quedan en el dispositivo.
+
+## Qué no
+
+- **El PIN.** Nunca se envía, ni siquiera cifrado. La aplicación para el teléfono lo guarda en el teléfono con cada equipo. El cliente de navegador no lo guarda en absoluto. Lo que un dispositivo sí conserva tras la vinculación es su propia clave y las claves de los ordenadores con los que se ha vinculado, para volver a conectarse sin el PIN. Se quedan en el dispositivo.
+- En la aplicación para el teléfono, el modo elegido y si ocultó un equipo se quedan en el teléfono.
+- Nada sobre su pantalla.
+
+## En el ordenador
+
+El host inicia sesión solo para identificarle. No tiene una lista de equipos que sincronizar, porque él mismo es el equipo: sus conexiones recientes pertenecen a ese ordenador, no a usted. El host no envía ningún recuento de usuarios ni datos de uso.
+
+## Dónde se crean las cuentas
+
+Screens solo puede iniciar sesión en un Universal ID que ya exista. Puede crear uno, gratis, en app.unisim.co.uk, de modo que un correo mal escrito nunca crea una cuenta por error.
+
+---
+id: email-code-sign-in
+group: Privacidad y seguridad
+title: ¿Por qué no hay «Iniciar sesión con Google»?
+summary: Screens inicia sesión con un código enviado a su correo, el único método que funciona en todos los clientes.
+---
+Para iniciar sesión, escribe su dirección de correo, recibe un código de 6 dígitos y lo escribe. No hay contraseña.
+
+## Por qué no Google
+
+El cliente de navegador se abre desde un equipo de su propia red, con una dirección http:// sin cifrar. No puede ser de otro modo: los navegadores impiden que una página segura https:// abra el tipo de conexión local que el cliente usa para llegar al host. Google solo permite su inicio de sesión en direcciones web seguras registradas con antelación, y una dirección de la red de su casa o de su oficina nunca puede ser una de ellas. Por eso Screens usa el código por correo en todas partes: en la aplicación para el teléfono, en el navegador y en el ordenador.
+
+## Después de iniciar sesión
+
+Seguirá con la sesión iniciada en ese dispositivo hasta que la cierre. Si la sesión ya no puede renovarse, por ejemplo porque se eliminó la cuenta, la aplicación la cierra en ese dispositivo. La conexión a sus equipos nunca depende de ello.
+
+---
 id: saved-computers-file
 group: Privacidad y seguridad
 title: ¿Cómo paso mis equipos guardados a otro dispositivo?
-summary: Guárdelos en un archivo y abra ese archivo en el otro dispositivo. No hay ninguna cuenta, y el archivo nunca contiene sus PIN.
+summary: Inicie sesión y sincronícelos, o guárdelos en un archivo y ábralo en el otro dispositivo. El archivo nunca contiene sus PIN.
 ---
-Screens no tiene inicio de sesión. Sus equipos guardados se quedan en el dispositivo que los guardó, y usted mismo los lleva a otro, en un archivo.
+Hay dos maneras, y las dos son opcionales. Con la sesión iniciada con su Universal ID, puede sincronizarlos entre sus dispositivos; el artículo sobre iniciar sesión explica qué se guarda. O, sin ninguna cuenta, llevarlos usted mismo, en un archivo.
 
 ## Cómo
 
@@ -168,4 +218,4 @@ Aun así, el archivo enumera las direcciones de equipos de su red, así que guá
 
 ## En el ordenador
 
-El host no tiene nada que pasar: sus conexiones recientes pertenecen a ese ordenador, no a usted. No tiene inicio de sesión y no envía ningún recuento de usuarios ni datos de uso.
+El host no tiene nada que pasar: sus conexiones recientes pertenecen a ese ordenador, no a usted. No envía ningún recuento de usuarios ni datos de uso.

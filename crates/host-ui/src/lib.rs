@@ -32,15 +32,8 @@
 //! and when it changes must not differ by platform. Linux carried its own
 //! clock-seeded copy of `gen_pin` until then.
 
-/// The hosts had an optional Universal ID sign-in until 2026-10-20 (identity
-/// only: a host keeps no list to carry anywhere). It is gone; this removes the
-/// session file it kept at `<config>/UniversalScreens/session.json`, so no
-/// stale token stays on the computer. Best-effort and silent.
-pub fn clear_old_sign_in() {
-    if let Some(dir) = dirs::config_dir() {
-        let _ = std::fs::remove_file(dir.join("UniversalScreens").join("session.json"));
-    }
-}
+pub mod account;
+pub use account::{account_menu_row, show_account_window, UserAccount};
 
 pub mod knowledge;
 pub use knowledge::{show_knowledge_window, KnowledgeReader, KB_LANGUAGE_KEY};
@@ -415,11 +408,11 @@ pub fn about_panel(ui: &mut egui::Ui, version: &str) {
     );
     ui.small("Full detail, including what is NOT locked down, is under the 🔒 button.");
     // ⚠️ Say what DOES leave. The host sends no usage data (no user count since
-    // 2026-10-12) and has no sign-in (since 2026-10-20). Keep in step with
-    // PRIVACY.md.
+    // 2026-10-12); only an optional sign-in. It syncs no list — see account.rs.
+    // Keep in step with PRIVACY.md.
     ui.small(
         "Your screen is never uploaded to UNI·SIM, and this host sends us no usage data. \
-         There is no account and no sign-in.",
+         Signing in is optional and only tells us who you are.",
     );
     ui.add_space(8.0);
 

@@ -11,6 +11,7 @@ import { CanvasRenderer } from "./renderer.js";
 import { InputController } from "./input.js";
 import * as saved from "./saved.js";
 import * as pairing from "./pairing.js";
+import * as account from "./account.js";
 import * as savedFile from "./savedFile.js";
 
 // The cloud rendezvous that relays a host ↔ this browser across networks (M8).
@@ -244,9 +245,10 @@ function renderSaved() {
     const title = cn ? `${cn} (${base})` : base;
     // ⚠️ Structure by markup, every value by textContent. `title` is the
     // host's own machine name (from its HostInfo — anything on the network can
-    // claim any name, including one made of HTML) and the rest can arrive in
-    // an opened file of saved computers; spliced into innerHTML, a rogue
-    // "host" would run script here.
+    // claim any name, including one made of HTML) and the rest arrives by
+    // account sync from other devices or in an opened file of saved
+    // computers; spliced into innerHTML, a rogue "host" ran script here, on
+    // the page that holds the Universal ID session.
     row.innerHTML = `<span class="glyph"></span><span class="body"><div class="title"></div><div class="blurb"></div></span><span class="ren" title="Rename">✎</span><span class="del" title="Forget">×</span>`;
     row.querySelector(".glyph").textContent = Object.hasOwn(DEVICE_GLYPH, h.os) ? DEVICE_GLYPH[h.os] : "🖥️";
     row.querySelector(".title").textContent = title;
@@ -257,6 +259,10 @@ function renderSaved() {
         // The pairing goes with the row, so no key is left behind that would
         // let that computer back in with no PIN.
         pairing.forgetTarget(h.addr);
+        // Syncing, forget it everywhere; otherwise this device only — the
+        // hint under the list says which, so nobody is surprised by a machine
+        // that comes back.
+        void account.forget(h.addr);
         renderSaved();
         return;
       }
@@ -264,6 +270,7 @@ function renderSaved() {
         const next = prompt("Friendly name for this host (leave blank to reset to its device name):", cn);
         if (next !== null) {
           saved.setCustomName(h.addr, next);
+          void account.remember({ ...h, customName: next.trim(), lastConnected: h.lastConnected || Date.now() });
           renderSaved();
         }
         return;
@@ -272,10 +279,15 @@ function renderSaved() {
     });
     box.appendChild(row);
   }
-  // The list is this device's alone; a file is how it moves (see savedFile.js).
+  // Say which "forget" this is. Without an account the list is this device's
+  // alone; with one, × removes the machine everywhere — and a device that
+  // forgets something while signed out gets it back on the next sync, because
+  // there are no tombstones (see account.js).
   const note = document.createElement("p");
   note.className = "saved-note";
-  note.textContent = "Kept on this device only. Save them to a file to use them on another device.";
+  note.textContent = account.account() && account.syncEnabled()
+    ? "Synced to your Universal ID — × forgets a machine on every device you sign in on."
+    : "Kept on this device only. Sign in to sync them, or save them to a file.";
   box.appendChild(note);
   $("saved-export").hidden = list.length === 0;
 }
@@ -312,6 +324,7 @@ async function connect(addr, mode, targetHost = null) {
     // reappear live from discovery instead.
     if (!targetHost) {
       saved.touch(addr, Date.now());
+      void account.remember({ addr, lastConnected: Date.now() });
     }
     sendHelloAndAttach(mode);
     $("host-label").textContent = targetHost ?? addr;
@@ -580,9 +593,121 @@ export async function runDecodePipelineSelfTest() {
 // ---- boot ------------------------------------------------------------------
 
 /**
+ * The Universal ID control in the bar, and the dialog behind it.
+ *
+ * Signing in is optional and changes nothing about connecting; what it buys is
+ * the saved-machine list following the account, opt-in. Everything
+ * here fails quietly — this client is routinely used on a LAN with no way out.
+ */
+function wireAccount() {
+  const back = $("account-backdrop");
+  const label = $("account-label");
+  const msg = $("account-msg");
+  const emailField = $("account-email-field");
+  const codeField = $("account-code-field");
+  const submit = $("account-submit");
+  const backBtn = $("account-back");
+  // "Sync saved computers to my account" — unticked until the person ticks it.
+  const syncBox = $("account-sync");
+  let stage = "email";
+
+  const say = (text, bad = false) => {
+    msg.textContent = text ?? "";
+    msg.hidden = !text;
+    msg.classList.toggle("bad", !!bad);
+  };
+
+  function paint() {
+    const who = account.account();
+    label.textContent = who ? (who.email || "Signed in") : "Sign in";
+    $("account-signed-in").hidden = !who;
+    $("account-signed-out").hidden = !!who;
+    $("account-title").textContent = who ? "Your Universal ID" : "Sign in";
+    $("account-intro").textContent = who
+      ? `Signed in as ${who.email}.`
+      : "Sign in with your Universal ID, the same account as every other UNI·SIM app. Connecting never needs an account.";
+    syncBox.checked = !!who && account.syncEnabled();
+  }
+
+  function toEmailStage() {
+    stage = "email";
+    codeField.hidden = true;
+    emailField.hidden = false;
+    backBtn.hidden = true;
+    submit.textContent = "Email me a code";
+    say(null);
+  }
+
+  const open = () => { back.classList.add("open"); paint(); };
+  const close = () => { back.classList.remove("open"); toEmailStage(); };
+
+  $("account-btn").addEventListener("click", open);
+  $("account-close").addEventListener("click", close);
+  back.addEventListener("click", (e) => { if (e.target === back) close(); });
+  backBtn.addEventListener("click", toEmailStage);
+
+  submit.addEventListener("click", async () => {
+    const email = $("account-email").value.trim();
+    submit.disabled = true;
+    try {
+      if (stage === "email") {
+        if (!email.includes("@")) { say("Enter your email address.", true); return; }
+        await account.sendCode(email);
+        stage = "code";
+        emailField.hidden = true;
+        codeField.hidden = false;
+        backBtn.hidden = false;
+        submit.textContent = "Sign in";
+        say(`We emailed a 6-digit code to ${email}.`);
+        $("account-code").focus();
+      } else {
+        await account.verifyCode(email, $("account-code").value);
+        say(null);
+        close();
+        await syncSaved();
+      }
+    } catch (err) {
+      say(String(err.message ?? err), true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  syncBox.addEventListener("change", async () => {
+    syncBox.disabled = true;
+    try {
+      if (syncBox.checked) {
+        const { merged } = await account.setSyncEnabled(true, saved.load());
+        if (merged) saved.replaceAll(merged);
+        say(merged ? "Your saved computers now sync to this account." : "Sync is on. It will catch up when this device can reach the internet.");
+      } else {
+        const { deleted } = await account.setSyncEnabled(false);
+        say(deleted
+          ? "Sync is off. Your saved computers were removed from your account and stay on this device."
+          : "Sync is off. They will be removed from your account the next time this device can reach the internet.");
+      }
+      renderSaved();
+    } finally {
+      syncBox.disabled = false;
+    }
+  });
+
+  $("account-signout").addEventListener("click", async () => {
+    await account.signOut();
+    close();
+  });
+
+  account.onAccountChange(paint);
+  paint();
+}
+
+/**
  * Saved computers as a file — "Save saved computers to a file" and "Open a file
- * of saved computers" under the saved list. The file is the suite's transfer
- * envelope (savedFile.js); the Android app reads and writes the same one.
+ * of saved computers" under the saved list: the way to move them with no
+ * account (signing in and syncing is the other). The file is the suite's
+ * transfer envelope (savedFile.js); the Android app reads and writes the same
+ * one. An opened file is merged in, then — signed in with sync on — merged
+ * with the account too, so the new computers reach the other devices.
  */
 function wireSavedFile() {
   const msg = $("saved-file-msg");
@@ -632,20 +757,22 @@ function wireSavedFile() {
     // Open the list so what was added is in view.
     const l = $("saved-list");
     if (l.hidden) $("saved-toggle").click();
+    // Signed in with sync on, the account gets them too (no-op otherwise).
+    if (added || updated) void syncSaved();
   });
 }
 
-/** Keys the optional Universal ID sign-in left in this browser (removed
- *  2026-10-20). Cleared so no stale session token sits in storage. */
-function clearOldSignIn() {
-  for (const k of ["universal-screens.session", "universal-screens.sync-saved", "universal-screens.sync-purge-pending"]) {
-    try { localStorage.removeItem(k); } catch { /* storage blocked: nothing to clear */ }
-  }
+/** Merge this device's saved machines with the account's, then repaint. */
+async function syncSaved() {
+  const merged = await account.syncSaved(saved.load());
+  if (!merged) return;              // signed out, or no route out — keep what we have
+  saved.replaceAll(merged);
+  renderSaved();
 }
 
 export function boot() {
   renderModes();
-  clearOldSignIn();
+  wireAccount();
   if (HOSTED) {
     // Remote only — see HOSTED. Saved connections are LAN addresses, so they
     // stay hidden too (renderSaved is what would un-hide them).
@@ -656,6 +783,7 @@ export function boot() {
     wireSavedFile();
     $("saved-file").hidden = false;
     renderSaved();
+    void syncSaved();
     startNearbyPolling();
   }
   // A changed bridge address means a different /peers source — refresh now.

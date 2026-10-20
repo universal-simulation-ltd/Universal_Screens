@@ -111,7 +111,7 @@ object ConnectionStore {
         save(context, load(context).map { if (it.addr == addr) it.copy(pin = 0) else it })
     }
 
-    /** Replace the whole list — what opening a file of saved computers writes back. */
+    /** Replace the whole list — what a sync from the account, or an opened file of saved computers, writes back. */
     fun replaceAll(context: Context, list: List<SavedConnection>) {
         save(context, list)
     }
@@ -139,15 +139,6 @@ object ConnectionStore {
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
-    /**
-     * The optional Universal ID sign-in (removed 2026-10-20) kept its session
-     * and its sync choice in their own preferences file, `unisim_suite`, which
-     * nothing else uses. Deleted on start so no stale token stays on the phone.
-     */
-    fun clearOldSignIn(context: Context) {
-        runCatching { context.deleteSharedPreferences("unisim_suite") }
-    }
 }
 
 /** A glyph standing in for the host's OS, shown on saved-connection rows. */
