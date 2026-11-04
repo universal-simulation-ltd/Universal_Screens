@@ -6,12 +6,15 @@
 //! `StreamStart`) to Annex-B, decodes them with openh264 (software, portable)
 //! into RGBA, and stashes the pixels for the wgpu render loop on the main thread.
 //!
-//! Run: cargo run -p extender-client [-- HOST_ADDR]   (default 127.0.0.1:9000)
+//! Run: cargo run -p extender-client [-- HOST_ADDR [--pin NNNN]]   (default 127.0.0.1:9000)
+//!
+//! `--pin` is the 4-digit code the host shows. It is only needed the first time:
+//! the pairing is remembered, so later runs reconnect without it.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use extender_core::{Session, StreamEvent};
+use extender_core::{connect_problem, ConnectProblem, Session, StreamEvent};
 use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, Input};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
@@ -63,6 +66,9 @@ fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>, hello: C
         Ok(s) => s,
         Err(e) => {
             eprintln!("client error: {e}");
+            if connect_problem(&e) == ConnectProblem::NeedsCode {
+                eprintln!("this host needs its 4-digit PIN: run again with --pin NNNN");
+            }
             return;
         }
     };
@@ -580,6 +586,9 @@ struct App {
     /// Which display the host should stream: a virtual second screen (default) or
     /// a mirror of the host's primary display (`--mirror`, remote-control mode).
     capture_mode: CaptureMode,
+    /// The host's pairing PIN from `--pin` (0 = none given: a host this client
+    /// has already paired with lets it in without one).
+    pin: u32,
     /// Whether the pointer is locked and we're forwarding input to the host.
     grabbed: bool,
 }
@@ -605,7 +614,7 @@ impl ApplicationHandler for App {
                 height,
                 capture_mode: self.capture_mode,
                 platform: protocol::ClientPlatform::current(),
-                pin: 0,
+                pin: self.pin,
                 // The desktop client doesn't supply a device name yet.
                 device_name: String::new(),
             };
@@ -714,18 +723,27 @@ impl ApplicationHandler for App {
 }
 
 /// Parse the command line: one positional `HOST_ADDR`, plus optional
-/// `--monitor N` / `-m N`, `--res N` / `-r N`, and `--mirror` flags.
-fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode) {
+/// `--monitor N` / `-m N`, `--res N` / `-r N`, `--pin NNNN` / `-p NNNN`, and
+/// `--mirror` flags.
+fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32) {
     let mut addr: Option<String> = None;
     let mut monitor_index = None;
     let mut res_index = None;
     let mut capture_mode = CaptureMode::VirtualDisplay;
+    let mut pin = 0;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--monitor" | "-m" => monitor_index = args.next().and_then(|s| s.parse().ok()),
             "--res" | "-r" => res_index = args.next().and_then(|s| s.parse().ok()),
             "--mirror" => capture_mode = CaptureMode::MirrorPrimary,
+            "--pin" | "-p" => {
+                let code = args.next().unwrap_or_default();
+                match code.trim().parse::<u32>() {
+                    Ok(n @ 1..=9999) => pin = n,
+                    _ => eprintln!("ignoring --pin {code:?}: expected the host's 4-digit PIN"),
+                }
+            }
             _ if arg.starts_with('-') => eprintln!("ignoring unknown flag: {arg}"),
             _ if addr.is_none() => addr = Some(arg),
             _ => eprintln!("ignoring extra argument: {arg}"),
@@ -736,13 +754,14 @@ fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode) {
         monitor_index,
         res_index,
         capture_mode,
+        pin,
     )
 }
 
 fn main() {
     // The network thread starts in `resumed` once winit can enumerate monitors
     // (we need the chosen monitor's size before we can send the hello).
-    let (addr, monitor_index, res_index, capture_mode) = parse_args();
+    let (addr, monitor_index, res_index, capture_mode, pin) = parse_args();
     let shared: Shared = Arc::new(Mutex::new(None));
     let (input_tx, input_rx) = mpsc::channel::<Input>();
 
@@ -761,6 +780,7 @@ fn main() {
         monitor_index,
         res_index,
         capture_mode,
+        pin,
         grabbed: false,
     };
     event_loop.run_app(&mut app).expect("run app");

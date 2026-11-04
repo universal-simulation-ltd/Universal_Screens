@@ -81,11 +81,13 @@ The Mac and Windows machines must be on the **same LAN**.
 Use `--release` — the H.264 decode is software, and release builds are much smoother:
 
 ```
-cargo run --release -p extender-client -- 192.168.1.42:9000
+cargo run --release -p extender-client -- 192.168.1.42:9000 --pin 1234
 ```
 
-Replace **`192.168.1.42`** with your Mac's IP from step 3. (The first build
-compiles OpenH264 from source, so it takes a minute or two.)
+Replace **`192.168.1.42`** with your Mac's IP from step 3 and **`1234`** with
+the PIN the host shows. The PIN is only needed the first time — the pairing is
+remembered, so later runs connect without it. (The first build compiles
+OpenH264 from source, so it takes a minute or two.)
 
 On startup the client lists your monitors and a set of **resolution presets**
 (percentages of the chosen monitor's native size, each keeping its aspect ratio),

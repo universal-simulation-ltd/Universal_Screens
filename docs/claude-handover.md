@@ -4,6 +4,24 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-04 (desktop client takes `--pin`; PC → Mac mirror)
+
+- **`extender-client --pin NNNN`** (`crates/client/src/main.rs`): the desktop
+  client hard-coded `pin: 0`, so it could never pair with a host showing a PIN —
+  which is every GUI host. Now `--pin` / `-p` takes 1–9999, the pairing is
+  remembered (core's default store), and a "needs its PIN" failure prints the
+  hint. Verified on the Mac against the Mac GUI host over the LAN: no PIN →
+  NeedsCode + hint, wrong PIN → WrongCode (so the PIN reaches the host). A
+  correct-PIN connect was NOT exercised (the PIN sits under "More details").
+- **PC → Mac mirror** (James's ask): run the client bundled in the Mac app,
+  `"/Applications/Universal Screens.app/Contents/Resources/extender-client" <PC-IP>:9000 --mirror --pin NNNN`,
+  or use the browser via the PC host's Remote access code at `/screens/app/`.
+  The native client has still never been run against a Windows host.
+- Docs: README-macos.txt, README-installed.txt, WINDOWS-CLIENT.md, README's
+  "Untested combos".
+- **Deploy state:** pushed to main; James's Mac has `/Applications/Universal
+  Screens.app` built from this commit (0.4.2, ad-hoc signed). No release cut.
+
 ## Update — 2026-10-20 (sign-in BACK; the saved-computers file kept)
 
 **Overrides the login-free entry below.** James, later on 2026-10-20: Screens

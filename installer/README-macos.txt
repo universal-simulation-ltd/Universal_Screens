@@ -35,11 +35,15 @@ The client takes the host's address, so run it from a terminal. It lives inside
 the app bundle and gets no icon of its own, because double-clicking it would
 have nowhere to connect:
 
-  "/Applications/Universal Screens.app/Contents/Resources/extender-client" 192.168.1.42:9000
+  "/Applications/Universal Screens.app/Contents/Resources/extender-client" 192.168.1.42:9000 --pin 1234
+
+--pin is the 4-digit PIN the host shows (under "More details"). It is only
+needed the first time: the pairing is remembered, so later runs connect
+without it.
 
 Options: --monitor N to pick a display, --res N to drop the resolution if the
 stream is choppy, --mirror to view the host's primary display instead of a new
-virtual one.
+virtual one (this is how you watch a PC's screen on this Mac).
 
 
 Permissions macOS will ask for

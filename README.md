@@ -143,8 +143,9 @@ platform's API unconditionally — so every job names its packages.
 - **iOS**: generate the Xcode project from the scaffold (incl. an AppIcon).
 
 **Untested combos:**
-- Desktop client on **macOS** (the Windows → Mac path) — cross-platform crate,
-  not yet verified building on macOS.
+- Desktop client on **macOS** (the Windows → Mac path) — builds on macOS and
+  pairs with `--pin` (verified against the Mac host, 2026-11-04); not yet run
+  against a Windows host.
 - ⚠️ **The Linux host has never injected a keystroke.** It compiles, links, passes
   its tests and packages into an AppImage that starts and accepts a connection —
   all proven in a container, which by definition has no `/dev/uinput` and no
