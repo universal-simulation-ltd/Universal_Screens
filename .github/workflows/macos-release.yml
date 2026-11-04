@@ -46,16 +46,16 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # Pillow renders the .icns from the shared artwork.
-      - name: Install Pillow
-        run: python3 -m pip install --disable-pip-version-check --quiet --break-system-packages Pillow
+      # No Pillow and no icon step: the build uses the committed
+      # crates/host-macos/assets/AppIcon.icns. make-mac-icns.py redraws artwork
+      # superseded in Aug 2026, so running it here reverted the mark on every
+      # release — v0.4.3's DMG shipped with the old icon because of it. The mark
+      # comes from app-marks/desktop-icons.mjs now — see the banner at the top
+      # of scripts/make-mac-icns.py.
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-app
-
-      - name: Generate the app icon
-        run: python3 scripts/make-mac-icns.py
 
       - name: Build app + DMG
         run: ./scripts/build-app-macos.sh
