@@ -116,7 +116,8 @@ echo "==> guards passed: universal (arm64 + x86_64), minos $MIN_OS"
 
 # ── Icon ──────────────────────────────────────────────────────────────────────
 ICNS="$REPO/crates/host-macos/assets/AppIcon.icns"
-[[ -f "$ICNS" ]] || { echo "Missing $ICNS -- run: python3 scripts/make-mac-icns.py" >&2; exit 1; }
+# ⚠️ NOT make-mac-icns.py -- that redraws the artwork superseded in Aug 2026.
+[[ -f "$ICNS" ]] || { echo "Missing $ICNS -- regenerate the mark with: node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens" >&2; exit 1; }
 
 # ── Assemble the .app ─────────────────────────────────────────────────────────
 DIST="$REPO/dist"; mkdir -p "$DIST"
