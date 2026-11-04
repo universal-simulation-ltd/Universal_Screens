@@ -7,7 +7,7 @@ you're sharing) and, optionally, the **desktop client**.
 Build it:
 
 ```powershell
-.\scripts\build-installer.ps1          # -> dist\UniversalScreens-Setup-0.1.0.exe
+.\scripts\build-installer.ps1          # -> dist\UniversalScreens-Setup-0.4.3.exe
 .\scripts\build-installer.ps1 -SkipBuild   # repackage without recompiling
 ```
 
@@ -55,7 +55,7 @@ matters because a good number of the people this is for are on a managed work
 laptop. IT can still deploy it machine-wide:
 
 ```powershell
-UniversalScreens-Setup-0.1.0.exe /ALLUSERS /VERYSILENT /NORESTART
+UniversalScreens-Setup-0.4.3.exe /ALLUSERS /VERYSILENT /NORESTART
 ```
 
 **No firewall rule at install time.** The host adds one from its own UI, at the
@@ -84,6 +84,17 @@ host launches its GUI *and* runs headless (`extender-host-windows.exe
 127.0.0.1:9000`, accepting a TCP connection) → silent uninstall removes the
 directory, the shortcuts and the registry entry.
 
-**Not covered by that:** an upgrade over an existing install, a machine-wide
-`/ALLUSERS` install, and what SmartScreen actually does on a machine that has
-never seen this binary (this one has, so it can't be tested here).
+**Upgrades are covered now** (2026-11-04): 0.4.2 installed silently over that
+0.1.0 install, then 0.4.3 over 0.4.2 — both per-user, both with no UAC prompt.
+Add/Remove Programs showed **0.4.3**, publisher Universal Simulation Ltd;
+`extender-host-windows.exe` reported FileVersion 0.4.3; the installed
+`app-icon.ico` was byte-identical to the committed brand file and the icon
+embedded in the `.exe` was the orange brand mark (the check that caught the
+icon-regeneration bug above); the host ran headless on `127.0.0.1:9101`
+(protocol v10, accepting a TCP connection) and the GUI opened its "Universal
+Screens" window.
+
+**Still not covered:** a machine-wide `/ALLUSERS` install, what SmartScreen
+actually does on a machine that has never seen this binary (this one has, so it
+can't be tested here), and a first install onto a PC with no earlier version
+present. Sign-in on the installed host has not been driven either.

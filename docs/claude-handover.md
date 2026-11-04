@@ -22,6 +22,53 @@ newest entry at the top.
 - **Deploy state:** pushed to main; James's Mac has `/Applications/Universal
   Screens.app` built from this commit (0.4.2, ad-hoc signed). No release cut.
 
+## Update — 2026-11-04 (the Windows build quietly redrew the icon it was meant to embed)
+
+**James asked for a build from current `main` installed over the 0.1.0 copy
+(Aug 2026) on the Windows box.** Done twice: 0.4.2 (`bed4da5`), then 0.4.3
+(`cda88e0`) after the fix below. Both are **local builds in `dist/` on that box
+only — no tag and no GitHub release, so the latest release is still v0.4.1
+(11 Oct 2026)** and none of this is user-visible yet.
+
+**The regression, and why it hid** (`fa22b83`): `scripts/build-installer.ps1`
+ran `scripts/make-win-ico.py` on *every* build, and that script redraws the old
+laptop-and-phone artwork through `render_icon()` in `make-app-icon.py` — artwork
+superseded on 2026-08-27 by the suite generator
+(`backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs
+Universal_Screens`). So every Windows build overwrote the committed brand
+`crates/host-windows/assets/app-icon.ico` and stamped the pre-rebrand drawing
+into `extender-host-windows.exe`, both Start Menu shortcuts and Add/Remove
+Programs. The 0.4.2 install carried it. Nothing failed and nothing was printed;
+the only symptom was an icon, on a surface nobody re-checks after a version bump.
+
+- **The fix is to refuse, not to regenerate.** `build-installer.ps1` now uses
+  the committed `.ico` and throws if it is missing; `make-win-ico.py` carries
+  the same SUPERSEDED banner as `make-app-icon.py`.
+- **The lesson that generalises:** a generated asset that is *also committed*
+  has two writers, and the build script is the one that wins silently. Either
+  the generator is the only writer and the artefact is gitignored, or the
+  artefact is committed and no build step may touch it. A build script writing
+  into `assets/` is the smell.
+- **Python and Pillow are no longer build prerequisites.**
+  `docs/WINDOWS-INSTALLER.md` drops them, corrects the file table, and says to
+  regenerate the mark with `desktop-icons.mjs`.
+
+**Verified on this Windows 11 box (0.4.3):** Add/Remove Programs shows Universal
+Screens 0.4.3, publisher Universal Simulation Ltd; `extender-host-windows.exe`
+FileVersion 0.4.3; the installed `app-icon.ico` is byte-identical to the
+committed brand one and the icon embedded in the `.exe` is the orange brand mark;
+the host runs headless (`127.0.0.1:9101`, protocol v10, accepts a TCP
+connection) and the GUI opens its "Universal Screens" window. Both installs were
+silent per-user upgrades over the existing install, no UAC — the first time an
+**upgrade** has been round-tripped at all, so the "not covered" line in
+`docs/WINDOWS-INSTALLER.md` is updated.
+
+**Not done:** no tag, no GitHub release, nothing published or uploaded. The
+**Linux AppImage and macOS DMG were not rebuilt** — both are still 0.4.1
+upstream — and **whether their build scripts revert the icon the same way was
+not investigated.** The Windows script was not special, so that is the next
+question. Sign-in was not driven on the installed host.
+
 ## Update — 2026-10-20 (sign-in BACK; the saved-computers file kept)
 
 **Overrides the login-free entry below.** James, later on 2026-10-20: Screens
