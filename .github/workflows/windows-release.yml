@@ -40,9 +40,9 @@ jobs:
       - name: Add NASM to PATH
         run: echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
-      # Pillow renders the multi-resolution .ico from the shared artwork.
-      - name: Install Pillow
-        run: python -m pip install --disable-pip-version-check --quiet Pillow
+      # No Pillow step: the build uses the committed app-icon.ico and never
+      # regenerates it. It used to, from artwork superseded in Aug 2026, which
+      # meant every release reverted the mark. See docs/WINDOWS-INSTALLER.md.
 
       - uses: Swatinem/rust-cache@v2
         with:
