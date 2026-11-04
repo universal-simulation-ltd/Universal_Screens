@@ -4,6 +4,63 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-04 (v0.4.3 and v0.4.4 released; the Mac had the Windows icon bug)
+
+**Two releases in one evening, because the first one shipped the old icon on the
+Mac.** `v0.4.3` was tagged off `da467fa` (18:09 UTC) and `v0.4.4` off `11ee696`
+(19:58 UTC). Both ran Windows, macOS and Linux green, and each GitHub release
+carries six assets — installer / DMG / AppImage plus a `.sha256` beside each.
+The entry below this one says "no release cut"; that is no longer true.
+
+- **The v0.4.3 tag deliberately includes other sessions' work from the same
+  day:** the desktop client's `--pin` pairing (`15875d0`) and the Mac host's
+  "Show another computer here" (`56994b3`). A release's notes here cannot be
+  derived from one session's commits — read `git log <previous-tag>..HEAD`.
+- **`macos-release.yml` had the exact bug `build-installer.ps1` had.** It ran
+  `python3 scripts/make-mac-icns.py`, which redraws the artwork superseded on
+  2026-08-27 — so **v0.4.3's DMG was released with the pre-rebrand icon.** Fixed
+  in `142294e`: the "Install Pillow" and "Generate the app icon" steps are gone
+  and the build uses the committed `crates/host-macos/assets/AppIcon.icns`
+  (`build-app-macos.sh` already refused to package without it). The Windows
+  workflow's now-dead Pillow step went in `da467fa`. **Linux was never
+  affected** — `build-appimage.sh` copies the committed
+  `crates/host-linux/assets/app-icon.png`. Lesson for the next one: fixing a
+  generated-asset bug on one platform proves nothing about the other two; grep
+  every build script and workflow for steps that *write* into `assets/`.
+  ⚠️ `scripts/build-app-macos.sh`'s missing-file error still says
+  "run: python3 scripts/make-mac-icns.py" — the superseded script. The file is
+  committed, so that hint should point at the suite generator instead; left as
+  a code change for whoever is next in that script.
+- **v0.4.4 is the same app as v0.4.3** plus that icon fix, and the version bump
+  itself. Nothing else changed between them.
+- **downloads.unisim.co.uk lists Screens now**, following Universal PDF's
+  pattern but flat: the R2 folder `universal-screens/` in the `unisim-downloads`
+  bucket holds the three installers beside a `latest.json` (version, url, notes
+  and a `files` array with each file's size and sha256), content type per
+  platform and `no-cache` on the feed. The listing shows **only 0.4.4** — the
+  `downloads-site` Worker's newest-version rule hides 0.4.3, which is still
+  reachable by direct link. Updating that feed is part of cutting a release now;
+  skip it and the site keeps advertising the previous version.
+- **Open, and James's call:** Screens has no *own* desktop icon the way
+  Universal PDF does (`ownNativeIcon` / `ownDesktopIcon` in the suite's
+  `app-marks/marks.mjs`, drawn by the app's own `scripts/app-icon.mjs`). Four
+  proposals were drawn and rendered 512 → 32 px on four grounds, A-on-teal
+  recommended. **Nothing is committed** — the renders are scratch files. It sits
+  in the suite backlog as a decision.
+
+**Verified:** both releases green with six assets each; the macOS job's step
+list no longer contains "Install Pillow" or "Generate the app icon"; the
+committed `AppIcon.icns` is the orange screen-and-phone brand mark;
+`universal-screens/latest.json` fetched cache-busted and reporting 0.4.4, with
+`/universal-screens/` on the root listing. **0.4.4 installed on the Windows box
+from the CI-built installer off the release** (not a local build): Add/Remove
+Programs 0.4.4, exe FileVersion 0.4.4, headless on `127.0.0.1:9103` (protocol
+v10), GUI window opened, and all three published `.sha256` files matched.
+**Not driven:** the DMG opened on a Mac or the AppImage on a Linux desktop — so
+the fixed Mac icon is proven as a committed file and a deleted build step, not
+as a Dock icon — sign-in on the installed host, a machine-wide `/ALLUSERS`
+install, and SmartScreen on a machine that has never seen the binary.
+
 ## Update — 2026-11-04 (desktop client takes `--pin`; PC → Mac mirror)
 
 - **`extender-client --pin NNNN`** (`crates/client/src/main.rs`): the desktop

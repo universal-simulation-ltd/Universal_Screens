@@ -16,6 +16,28 @@ CI does the same thing on a clean runner via `.github/workflows/macos-release.ym
 
 ---
 
+## ⚠️ The icon is committed, and the build must not redraw it
+
+The app icon is the committed `crates/host-macos/assets/AppIcon.icns`.
+`build-app-macos.sh` copies it into the bundle and refuses to package without
+it — **and nothing in the release path regenerates it any more.**
+
+It used to. `.github/workflows/macos-release.yml` installed Pillow and ran
+`python3 scripts/make-mac-icns.py` before every build, and that script redraws
+the laptop-and-phone artwork superseded on 2026-08-27 — the same bug
+`build-installer.ps1` had on Windows. **v0.4.3's DMG was released (2026-11-04)
+with the pre-rebrand icon because of it**; both steps were removed the same
+evening and v0.4.4 re-cut. When the mark changes, regenerate every surface at
+once with the suite generator and commit what it writes:
+
+```bash
+node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+```
+
+Any generated asset that is also committed has two writers, and the build
+script wins silently. Do not re-add an icon step here.
+(`scripts/make-mac-icns.py` carries the same warning at the top of the file.)
+
 ## ⚠️ The deployment target is load-bearing
 
 The script exports `MACOSX_DEPLOYMENT_TARGET=12.3` before building, and refuses

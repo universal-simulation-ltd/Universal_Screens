@@ -30,7 +30,26 @@ SPAKE2 and are then remembered by key (see the root `README.md` Security note an
 | `M2-…` – `M6-…` | Milestone design docs for the core pipeline: input round-trip (M2), virtual display (M3), HiDPI deferral notes (M4), mobile clients / remote control (M5), presentation clicker (M6). |
 | `M7-…` – `M9-…` | Milestone docs for the browser era: browser client (M7), Windows second screen plan (M7), browser receiver + rendezvous (M8), WebRTC media (M8e), phone self-capture design (M8f), LAN discovery (M9). |
 | `M10-transport-encryption.md` | Noise (snow) transport encryption over the LAN TCP protocol, keyed by the pairing PIN — the `extender-transport` crate. |
+| `WINDOWS-INSTALLER.md`, `MACOS-APP.md`, `LINUX-APP.md`, `LINUX-HOST.md` | Packaging and install runbooks per platform — the Inno Setup installer, the `.app` + DMG, the AppImage, and the Linux host's session/permission constraints. Read the platform's own doc before changing anything in its build script. |
 | `claude-handover.md` | Dated session-handover log for AI-assisted development — newest entry first. |
+
+## Releases and downloads
+
+**A release is driven by the tag.** Pushing `vX.Y.Z` runs all three release
+workflows (`.github/workflows/windows-release.yml`, `macos-release.yml`,
+`linux-release.yml`); each attaches its artefact plus a `.sha256` beside it, so
+a complete release carries six assets. The latest is **v0.4.4** (2026-11-04).
+
+Builds also go to the public downloads site, which is **not** automatic:
+
+| Where | What is there |
+|---|---|
+| GitHub releases | Every version — Windows `.exe`, macOS `.dmg`, Linux `.AppImage`, each with its `.sha256`. |
+| `downloads.unisim.co.uk/universal-screens/` | The R2 folder (`unisim-downloads` bucket), flat: the three installers of the current version beside a `latest.json` holding `version`, `url`, `notes` and a `files` array with each file's size and sha256. The folder listing shows only the newest version; older files stay reachable by direct link. The feed is served `no-cache`. |
+
+The copies in R2 are the same artefacts, uploaded after the release is cut —
+so **a release is not finished until that folder and its `latest.json` are
+updated**, or the download page keeps offering the previous version.
 
 ## Suite context
 

@@ -55,7 +55,7 @@ matters because a good number of the people this is for are on a managed work
 laptop. IT can still deploy it machine-wide:
 
 ```powershell
-UniversalScreens-Setup-0.4.3.exe /ALLUSERS /VERYSILENT /NORESTART
+UniversalScreens-Setup-0.4.4.exe /ALLUSERS /VERYSILENT /NORESTART
 ```
 
 **No firewall rule at install time.** The host adds one from its own UI, at the
@@ -93,6 +93,14 @@ embedded in the `.exe` was the orange brand mark (the check that caught the
 icon-regeneration bug above); the host ran headless on `127.0.0.1:9101`
 (protocol v10, accepting a TCP connection) and the GUI opened its "Universal
 Screens" window.
+
+**And the released installer is covered now** (2026-11-04): v0.4.4's
+`UniversalScreens-Setup-0.4.4.exe`, downloaded from the GitHub release rather
+than built locally, installed silently over 0.4.3 on the same box. Add/Remove
+Programs showed **0.4.4**, the exe reported FileVersion 0.4.4, the host ran
+headless on `127.0.0.1:9103` (protocol v10) and the GUI window opened. All
+three of that release's published `.sha256` files matched their assets, and the
+copy on `downloads.unisim.co.uk/universal-screens/` is the same artefact.
 
 **Still not covered:** a machine-wide `/ALLUSERS` install, what SmartScreen
 actually does on a machine that has never seen this binary (this one has, so it
