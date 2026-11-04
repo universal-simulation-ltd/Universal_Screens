@@ -44,6 +44,9 @@ pub use pairing::{name_paired_device, pairing_store, PairedDevicesPanel};
 pub mod remote;
 pub use remote::{RemoteAccessPanel, REMOTE_CLIENT_URL};
 
+pub mod viewer;
+pub use viewer::ViewerPanel;
+
 use std::net::TcpListener;
 
 use eframe::egui;

@@ -100,6 +100,9 @@ struct HostApp {
     /// "Remote access": the shared panel (host-ui `remote`), which mints a code,
     /// dials the rendezvous and drops the code when the session ends.
     remote: extender_host_ui::RemoteAccessPanel,
+    /// "Show another computer here": runs the bundled desktop client to watch
+    /// another host (host-ui `viewer`). Clicking a Nearby computer fills it in.
+    viewer: extender_host_ui::ViewerPanel,
     /// The connection QR the user tapped to enlarge for easier scanning (None =
     /// not enlarged). `qr_zoom_armed` guards against the very click that opened
     /// the overlay also closing it on the same frame.
@@ -169,6 +172,7 @@ impl HostApp {
             renaming_id: None,
             renaming_peer: None,
             remote: extender_host_ui::RemoteAccessPanel::default(),
+            viewer: extender_host_ui::ViewerPanel::default(),
             qr_zoom: None,
             qr_zoom_armed: false,
         }
@@ -456,10 +460,12 @@ impl HostApp {
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Nearby").strong());
             if let Some(peer) = nearby_orbit(ui, &nearby, "This Mac") {
-                let url = connect_url(&format!("{}:{}", peer.addr, peer.port), 0, None);
-                let _ = std::process::Command::new("open").arg(url).spawn();
+                self.viewer.choose(&peer.addr, peer.port);
             }
         }
+
+        ui.add_space(8.0);
+        self.viewer.ui(ui);
 
         ui.add_space(8.0);
         egui::CollapsingHeader::new("More details").default_open(false).show(ui, |ui| {

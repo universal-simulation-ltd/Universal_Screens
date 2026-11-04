@@ -13,6 +13,16 @@ newest entry at the top.
   hint. Verified on the Mac against the Mac GUI host over the LAN: no PIN →
   NeedsCode + hint, wrong PIN → WrongCode (so the PIN reaches the host). A
   correct-PIN connect was NOT exercised (the PIN sits under "More details").
+- **"Show another computer here"** (host-ui `viewer.rs`, `ViewerPanel`): a
+  panel in the Mac window — address + PIN + "Show its screen" — that runs the
+  bundled client with `--mirror` and shows the client's error (e.g. needs its
+  PIN) when it fails. Clicking a computer under **Nearby** now fills the panel
+  in; it used to open the phone pairing lander in a browser, a dead end on a
+  desktop. Built, installed and seen in the window; the click-through was NOT
+  driven (no Accessibility permission for osascript here). **Windows is not
+  wired yet**: its Nearby click still opens the lander — a 3-line swap in
+  `host-windows/src/gui.rs` (the installer's client is an optional component,
+  and the panel says so if it's missing).
 - **PC → Mac mirror** (James's ask): run the client bundled in the Mac app,
   `"/Applications/Universal Screens.app/Contents/Resources/extender-client" <PC-IP>:9000 --mirror --pin NNNN`,
   or use the browser via the PC host's Remote access code at `/screens/app/`.

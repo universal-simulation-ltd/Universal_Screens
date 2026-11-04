@@ -31,9 +31,12 @@ Run it headless from a terminal instead if you prefer:
 The client  --  "use THIS Mac as a screen for another computer"
 ----------------------------------------------------------------
 
-The client takes the host's address, so run it from a terminal. It lives inside
-the app bundle and gets no icon of its own, because double-clicking it would
-have nowhere to connect:
+Open Universal Screens and expand "Show another computer here". Click the other
+computer under "Nearby" (or type its address), enter the PIN that computer
+shows, and click "Show its screen". Its screen opens in a window of its own.
+
+Or run the client from a terminal. It lives inside the app bundle and gets no
+icon of its own, because double-clicking it would have nowhere to connect:
 
   "/Applications/Universal Screens.app/Contents/Resources/extender-client" 192.168.1.42:9000 --pin 1234
 
