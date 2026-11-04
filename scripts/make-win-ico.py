@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate the Windows .ico from the shared app-icon artwork.
+"""⚠️ SUPERSEDED 2026-08-27 — DO NOT RUN. See make-app-icon.py's banner.
+
+This builds the .ico from `render_icon()`, which still draws the OLD laptop-and-
+phone artwork. Running it overwrites the committed brand .ico with that drawing,
+and the next build stamps it into the .exe, the Start Menu shortcuts and
+Add/Remove Programs. The icons come from the suite mark now:
+
+    node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+
+Kept only because it records how the old artwork was cut to size.
+
+Generate the Windows .ico from the shared app-icon artwork.
 
 Reuses `render_icon()` from make-app-icon.py (single source of truth) and writes:
   crates/host-windows/assets/app-icon.ico   (multi-resolution, 16-256 px)

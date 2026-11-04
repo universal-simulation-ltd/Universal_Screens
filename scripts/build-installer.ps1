@@ -72,15 +72,18 @@ try {
         throw "Inno Setup's ISCC.exe not found. Install with: winget install JRSoftware.InnoSetup"
     }
 
-    # ── Icon: regenerated from the shared artwork so it can't drift ──────────
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        Write-Host "==> app icon" -ForegroundColor Cyan
-        python (Join-Path $repo 'scripts\make-win-ico.py')
-    } else {
-        Write-Warning "python not found -- reusing the committed app-icon.ico"
-    }
+    # ── Icon: the COMMITTED one, never regenerated here ──────────────────────
+    # This step used to run scripts/make-win-ico.py. That script draws the old
+    # laptop-and-phone artwork, superseded on 2026-08-27 by the suite mark the
+    # icons are generated from now, so every build silently reverted the .ico to
+    # the pre-rebrand drawing and stamped it into the .exe, the shortcuts and
+    # Add/Remove Programs. Regenerate the mark deliberately instead:
+    #   node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+    # and commit what it writes.
     $ico = Join-Path $repo 'crates\host-windows\assets\app-icon.ico'
-    if (-not (Test-Path $ico)) { throw "Missing $ico -- run: python scripts/make-win-ico.py" }
+    if (-not (Test-Path $ico)) {
+        throw "Missing $ico -- regenerate it with desktop-icons.mjs (see docs/WINDOWS-INSTALLER.md)"
+    }
 
     # ── Binaries ─────────────────────────────────────────────────────────────
     $outDir = Join-Path $repo "target\$target\release"

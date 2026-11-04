@@ -20,14 +20,23 @@ do it on a clean runner and attach it to a GitHub release.
 |---|---|
 | [`installer/universal-screens.iss`](../installer/universal-screens.iss) | the Inno Setup script — everything about the install lives here |
 | [`installer/README-installed.txt`](../installer/README-installed.txt) | dropped next to the binaries; the "Read me" Start Menu entry |
-| [`scripts/build-installer.ps1`](../scripts/build-installer.ps1) | compiles, regenerates the icon, runs ISCC, writes a `.sha256` |
-| [`scripts/make-win-ico.py`](../scripts/make-win-ico.py) | multi-resolution `.ico` from the shared `render_icon()` artwork |
+| [`scripts/build-installer.ps1`](../scripts/build-installer.ps1) | compiles, runs ISCC, writes a `.sha256` |
+| [`scripts/make-win-ico.py`](../scripts/make-win-ico.py) | **superseded** — draws the pre-rebrand artwork; do not run it |
 | [`crates/host-windows/build.rs`](../crates/host-windows/build.rs) | embeds that icon + version metadata into the `.exe` |
 
 Prerequisites on the build machine: Rust (MSVC), **NASM** (openh264 assembles
-from source), **Inno Setup 6** (`winget install JRSoftware.InnoSetup`), and
-Python with Pillow for the icon. The build script checks all four up front and
-tells you the fix rather than failing halfway through.
+from source) and **Inno Setup 6** (`winget install JRSoftware.InnoSetup`). The
+build script checks all three up front and tells you the fix rather than failing
+halfway through.
+
+The app icon is the committed `crates/host-windows/assets/app-icon.ico` and the
+build never regenerates it — it used to, from artwork superseded on 2026-08-27,
+which quietly reverted the mark on every build. When the mark changes, regenerate
+every surface at once with the suite generator and commit what it writes:
+
+```powershell
+node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+```
 
 ## The three decisions worth knowing about
 
