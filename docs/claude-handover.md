@@ -71,10 +71,26 @@ FAILS/FAILS — not a threshold, just marginal, which a pairing code must not be
 Radial is not offered at all (it is `frameShape: 'circle'` plus 'burst', neither
 ported).
 
-**Star is offered but weak**, and is the open question for James: a star behind
-a square code with a square light quiet zone can only ever show its points, so
-it reads as five orange arrowheads. Making it read as a star costs roughly 40%
-of the code's size on screen.
+**Star needed a second pass** (`8c7fb45`), and the lesson is the one this
+crate's own header states. James said it did not look right; it did not. Two of
+its numbers were invented rather than copied:
+
+- the inner radius was 0.42, written from memory. `frames.ts` pins
+  `STAR_INNER_RATIO` at **0.62** and says why — deliberately generous, "rather
+  than the ~0.38 of a classic thin star". Thin star, thin points, and thin
+  points around a square read as arrowheads.
+- the canvas came from a padding constant picked by eye. There is a real one:
+  `STAR_BEHIND_CODE_SCALE` = **0.72**, the code's side as a fraction of the
+  image, bounded by the star's geometry rather than taste (side points at
+  x = 0.976, bottom two at y = 0.905, so a square wider than 0.81 swallows the
+  bottom points).
+
+With both ported all five points show and the code covers the notches, which is
+what 'behind' means. The restored white square is now exactly the code plus its
+quiet zone, so 0.72 holds by construction rather than by a near-enough constant.
+
+⚠️ If you touch any other ported value here, go and read it in design.ts or
+frames.ts first. Both of these looked plausible and neither was right.
 
 ⚠️ `extender-qr` was missing from `tests.yml`'s shared-crate list, so its tests
 ran **nowhere** — the trap that file's own header warns about. Fixed in
