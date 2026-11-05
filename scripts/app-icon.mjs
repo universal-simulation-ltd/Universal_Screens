@@ -19,18 +19,23 @@
 // Screens' INSTALLED apps are its own now, not the suite mark on the orange
 // tile, so the suite generators skip them (`ownNativeIcon` and
 // `ownDesktopIcon` in backoffice/universal-platform/scripts/app-marks/
-// marks.mjs). Following Universal PDF's precedent exactly, four things stay
+// marks.mjs). Following Universal PDF's precedent exactly, two things stay
 // the suite's and are NOT written here:
 //
-//   • the favicon and app-switcher glyph — a 16px tab cannot carry this
 //   • the installer icon (crates/host-windows/assets/installer-icon.ico, the
 //     orange tile with the globe seal): an installer is not the app
-//   • the portal and website tiles
 //   • the IN-APP product logo — apps/android/.../drawable/app_icon.png and
 //     apps/ios/.../AppLogo.imageset/logo.png. Those are the phone client's
 //     masthead mark, the equivalent of PDF's ProductLogo in a navbar, and the
 //     suite mark is what belongs in a suite chrome. desktop-icons.mjs still
 //     writes both.
+//
+// The WEB surfaces are this icon too, not the orange mark: James, 2026-11-03,
+// "where an application has been published on any device other than web use
+// the new logo everywhere (including favicon); keep the orange logos
+// specifically for web based apps to easily tell them apart". Screens ships a
+// desktop app and two phone clients, so it qualifies. That side is the suite
+// generator's job via `webIcon` + SVG_OUT below, not this script's.
 //
 // What it writes:
 //   Windows  crates/host-windows/assets/app-icon.png (256) — the window and
@@ -151,6 +156,17 @@ function svg({ wide = false, back = true, front = true } = {}) {
   ${back ? ground : ''}
   ${front ? art : ''}
 </svg>`
+}
+
+// SVG_OUT=<file>: write the icon as one SVG (the 1024 square, every layer) and
+// stop. The suite's marks generator puts that file on every web surface once
+// the app is published beyond the web (James, 2026-11-03): the favicon, the
+// header logo, the app switcher, the portal and the marketing site. It lives
+// at backoffice/universal-platform/scripts/app-marks/own-icons/<id>.svg, and
+// `webIcon` on the Universal_Screens entry in marks.mjs points at it.
+if (process.env.SVG_OUT) {
+  writeFileSync(process.env.SVG_OUT, svg() + '\n')
+  process.exit(0)
 }
 
 const browser = await chromium.launch()

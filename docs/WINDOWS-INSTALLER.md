@@ -53,6 +53,14 @@ installer icon (`crates/host-windows/assets/installer-icon.ico` — an installer
 is not the app) and the phone clients' in-app masthead logo. Both come from
 `node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens`.
 
+The **web** surfaces are this icon too — favicon, header logo, app switcher,
+portal and marketing site — because Screens is published beyond the web (James,
+2026-11-03: the orange marks are kept for browser-only apps, so the two kinds
+can be told apart). `SVG_OUT=… node scripts/app-icon.mjs` writes the drawing to
+`backoffice/universal-platform/scripts/app-marks/own-icons/screens.svg`, which
+`webIcon` on the `Universal_Screens` entry in `marks.mjs` points at; the suite's
+own `build.mjs` / `rasterise.mjs` run is what pushes it out to those surfaces.
+
 ## The three decisions worth knowing about
 
 **Static CRT — this is load-bearing.** The binaries are built with

@@ -49,6 +49,14 @@ installer icon (`crates/host-windows/assets/installer-icon.ico` — an installer
 is not the app) and the phone clients' in-app masthead logo. Both come from
 `node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens`.
 
+The **web** surfaces are this icon too — favicon, header logo, app switcher,
+portal and marketing site — because Screens is published beyond the web (James,
+2026-11-03: the orange marks are kept for browser-only apps, so the two kinds
+can be told apart). `SVG_OUT=… node scripts/app-icon.mjs` writes the drawing to
+`backoffice/universal-platform/scripts/app-marks/own-icons/screens.svg`, which
+`webIcon` on the `Universal_Screens` entry in `marks.mjs` points at; the suite's
+own `build.mjs` / `rasterise.mjs` run is what pushes it out to those surfaces.
+
 Any generated asset that is also committed has two writers, and the build
 script wins silently. Do not re-add an icon step here.
 (`scripts/make-mac-icns.py` carries the same warning at the top of the file.)
