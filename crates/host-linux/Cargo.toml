@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # Host control window (GUI mode). "persistence" saves preferences across launches.
 eframe = { version = "0.29", features = ["persistence"] }
-qrcode = { version = "0.14", default-features = false }
+extender-qr = { path = "../qr" }
 
 [target.'cfg(target_os="linux")'.dependencies]
 # Input injection through the kernel's uinput device. Deliberately NOT the XDG

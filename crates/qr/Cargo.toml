@@ -1,0 +1,16 @@
+[package]
+name = "extender-qr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qrcode = { version = "0.14", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+# Pure-Rust QR decoder, used only by the tests. The whole point of this crate
+# is that a style is picked at RANDOM for a code people have to scan to pair a
+# phone, so "it still decodes" cannot be an assumption — every preset is
+# decoded at several sizes before it can ship. See the module docs.
+rqrr = "0.7"

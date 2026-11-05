@@ -4,7 +4,7 @@
 //! the middle.
 
 use eframe::egui;
-use image::{imageops, Rgba, RgbaImage};
+use image::{imageops};
 
 /// The UNI·SIM mark (globe + orbiting stars, 256×256), embedded at build time.
 /// Used for the suite changelog mark and the centre of the connection QR.
@@ -14,48 +14,33 @@ const LOGO_PNG: &[u8] = include_bytes!("../assets/unisim-icon.png");
 /// product logo.
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/app-icon.png");
 
-/// Build a black-on-white QR of `text` with the Universal Screens app icon centred,
-/// as an `egui::ColorImage`. Scanned *in the app* it deep-links to connect; scanned
-/// with a plain camera it lands on the friendly `/screens/connect` page.
-/// `None` if the text won't fit in a QR code.
+/// Build a QR of `text` with the Universal Screens app icon in the middle, as
+/// an `egui::ColorImage`. Scanned *in the app* it deep-links to connect;
+/// scanned with a plain camera it lands on the friendly `/screens/connect`
+/// page. `None` if the text will not fit in a QR code.
+///
+/// The drawing lives in `extender-qr`, shared by all three hosts — this used
+/// to be three copies of the same renderer, quietly drifting. Each code is
+/// dealt a style at random from Universal QR's presets (James, 2026-11-05);
+/// every one of them is decode-tested in that crate, because a style nobody
+/// can scan would leave the user typing an address and a PIN by hand.
 pub fn branded_qr_app(text: &str) -> Option<egui::ColorImage> {
-    branded_qr_with(text, APP_ICON_PNG)
-}
-
-fn branded_qr_with(text: &str, centre_png: &[u8]) -> Option<egui::ColorImage> {
-    let code =
-        qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::H).ok()?;
-    let modules = code.width();
-    let colors = code.to_colors();
-
-    let quiet = 4usize;
-    let scale = 8usize;
-    let dim = ((modules + quiet * 2) * scale) as u32;
-
-    // White canvas with black modules (inside the quiet-zone border).
-    let mut img = RgbaImage::from_pixel(dim, dim, Rgba([255, 255, 255, 255]));
-    for y in 0..modules {
-        for x in 0..modules {
-            if colors[y * modules + x] != qrcode::Color::Dark {
-                continue;
-            }
-            for dy in 0..scale {
-                for dx in 0..scale {
-                    let px = ((x + quiet) * scale + dx) as u32;
-                    let py = ((y + quiet) * scale + dy) as u32;
-                    img.put_pixel(px, py, Rgba([0, 0, 0, 255]));
-                }
-            }
-        }
+    // The style showing now, so the next code is visibly a different one
+    // rather than the same style re-dealt. Process-wide: there is one host
+    // window, and the alternative is threading state through the UI for a
+    // purely cosmetic choice.
+    static LAST_STYLE: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+    let last = LAST_STYLE.lock().ok().and_then(|g| *g);
+    let preset = extender_qr::random_preset(last);
+    if let Ok(mut g) = LAST_STYLE.lock() {
+        *g = Some(preset.name);
     }
-
-    overlay_logo(&mut img, dim, centre_png);
+    let r = extender_qr::render(text, preset, Some(APP_ICON_PNG))?;
     Some(egui::ColorImage::from_rgba_unmultiplied(
-        [dim as usize, dim as usize],
-        &img.into_raw(),
+        [r.dim as usize, r.dim as usize],
+        &r.rgba,
     ))
 }
-
 /// The UNI·SIM mark as an `egui::ColorImage` (square, `size` px), for the suite
 /// changelog mark. `None` if the embedded PNG can't be decoded.
 pub fn logo_image(size: u32) -> Option<egui::ColorImage> {
@@ -161,48 +146,6 @@ fn decode_square(png: &[u8], size: u32) -> Option<egui::ColorImage> {
         &rgba.into_raw(),
     ))
 }
-
-/// Composite the logo in the centre over a white pad, clearing the modules behind
-/// it (like the generator's `hideBackgroundDots`). EC level `H` keeps the code
-/// scannable despite the occlusion.
-fn overlay_logo(img: &mut RgbaImage, dim: u32, logo_png: &[u8]) {
-    let Ok(logo) = image::load_from_memory(logo_png) else {
-        return;
-    };
-    let logo_size = (dim as f32 * 0.26) as u32; // ~ the generator's logoSize 0.28
-    let pad = (dim as f32 * 0.32) as u32;
-    let logo = logo
-        .resize_exact(logo_size, logo_size, imageops::FilterType::Lanczos3)
-        .to_rgba8();
-
-    // White pad behind the logo.
-    let pad_x = (dim - pad) / 2;
-    let pad_y = (dim - pad) / 2;
-    for y in pad_y..pad_y + pad {
-        for x in pad_x..pad_x + pad {
-            img.put_pixel(x, y, Rgba([255, 255, 255, 255]));
-        }
-    }
-
-    // Alpha-composite the logo, centred.
-    let lx = (dim - logo_size) / 2;
-    let ly = (dim - logo_size) / 2;
-    for (x, y, px) in logo.enumerate_pixels() {
-        let a = f32::from(px.0[3]) / 255.0;
-        if a <= 0.0 {
-            continue;
-        }
-        let (dstx, dsty) = (lx + x, ly + y);
-        let bg = img.get_pixel(dstx, dsty).0;
-        let blend = |fg: u8, bg: u8| (f32::from(fg) * a + f32::from(bg) * (1.0 - a)) as u8;
-        img.put_pixel(
-            dstx,
-            dsty,
-            Rgba([blend(px.0[0], bg[0]), blend(px.0[1], bg[1]), blend(px.0[2], bg[2]), 255]),
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

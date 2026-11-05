@@ -48,6 +48,6 @@ extender-h264.workspace = true
 # Host control window (GUI mode) + connection QR code. "persistence" remembers
 # the "don't connect automatically" preference across launches.
 eframe = { version = "0.29", features = ["persistence"] }
-qrcode = { version = "0.14", default-features = false }
+extender-qr = { path = "../qr" }
 # Read the window handle to recolour the title bar (DWM) to match the app theme.
 raw-window-handle = "0.6"
