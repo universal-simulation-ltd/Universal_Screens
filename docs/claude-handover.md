@@ -4,6 +4,57 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-05 (the installed apps get their own icon: one picture, split)
+
+**Screens no longer wears the suite mark on its installed apps** (`3f35a91`,
+web surfaces `66bf782`; suite side `universal-platform@83475ed` + `@b8ddbcb`).
+This closes the decision the entry below left open as James's call. He picked
+**"H — one picture, split"**: a desk screen and a phone on teal with a single
+orange disc drawn across both. Teal because no other UNI·SIM app uses it.
+
+- `scripts/app-icon.mjs` is now the **only** source of the installed icons. One
+  `node scripts/app-icon.mjs` writes the Windows/macOS/Linux host icons (window,
+  taskbar, and the badge in the centre of the host's QR codes), `app-icon.ico`,
+  `AppIcon.icns` on Apple's 824/1024 dock grid, the Android launcher set with
+  its adaptive layers, and the opaque iOS catalogue image. `SVG_OUT=… node
+  scripts/app-icon.mjs` also writes the 1024 square out for the suite's
+  `app-marks/own-icons/screens.svg`.
+- ⚠️ **Every `make-*.py` in `scripts/` still draws the August 2026
+  laptop-and-phone artwork and will overwrite all of this if run.** Their
+  banners, `build-installer.ps1`, `build-app-macos.sh` and both platform docs
+  now point at `scripts/app-icon.mjs` instead — including the missing-icon error
+  the entry below flagged as a leftover.
+- **The disc is one circle clipped to two glass faces**, so the arc leaving the
+  monitor and the arc arriving on the phone are the same curve. That is why the
+  devices sit apart with a gap. The 68px gap and the disc radius of 300 are
+  load-bearing and invisible in the numbers: at 48px the pair read as one blob
+  below 32px, and at radius 290 the disc stops 2px short of the phone's glass
+  and looks like a rendering fault. Judge a change here from a 512 → 32 → 16px
+  raster, never from the parameters.
+- **What is still the suite's mark:** `crates/host-windows/assets/installer-icon.ico`
+  (an installer is not the app) and the phone clients' in-app masthead logo
+  (`apps/android/.../drawable/app_icon.png`,
+  `apps/ios/.../AppLogo.imageset/logo.png`). Those three files are still written
+  by the suite's `desktop-icons.mjs Universal_Screens`, and it now writes
+  **nothing else** for this app.
+- The web surfaces take the new icon too (favicon, header, switcher, portal,
+  marketing site) under James's 2026-11-03 rule. ⚠️ **Not yet visible
+  anywhere:** the suite's `build.mjs` / `rasterise.mjs` were not run, so the
+  flag and the SVG are inert. And **no release carries the new icon** — 0.4.4
+  was tagged before it, and the builds take the committed assets, so the next
+  release is the first download that shows it.
+- **Verified:** `cargo test -p extender-host-windows qr` with the new icon
+  embedded (`build.rs` re-stamped the `.exe`), all seven `.ico` frames with
+  transparent corners, the `.icns` type codes + PNG payloads, the iOS image RGB
+  with no alpha, the Android foreground layer transparent. **Not seen on a
+  device:** the Mac Dock, a Linux desktop, or a real Android/iOS launcher.
+- ⚠️ **Pre-existing and not fixed:** `installer-icon.ico` is stale — regenerating
+  it from the new (2026-11-01) outline-globe suite master gives a washed-out
+  pale seal instead of the dark sphere with latitude lines and stars the
+  committed file shows, so the regeneration was reverted. The fix belongs in
+  `installerHtml()` in the suite's `desktop-icons.mjs` and probably affects every
+  app's installer icon. It is in the suite backlog.
+
 ## Update — 2026-11-04 (v0.4.3 and v0.4.4 released; the Mac had the Windows icon bug)
 
 **Two releases in one evening, because the first one shipped the old icon on the
