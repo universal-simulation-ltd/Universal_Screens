@@ -222,15 +222,25 @@ pub struct Rendered {
 
 const QUIET: usize = 4;
 const SCALE: usize = 8;
-/// Extra quiet zone, in modules, when a star is painted behind the code.
+/// The code's side, as a fraction of the image, when the star is behind it.
 ///
-/// The star is only ever visible OUTSIDE the code's restored quiet zone, so
-/// this number is the width of the band it gets to show in. At 5 the only
-/// parts clearing the square were the five point-tips, which read as stray
-/// orange arrowheads rather than as a star; 10 shows the points and enough of
-/// the body between them to be recognisable. It costs canvas, which is why it
-/// is not larger still.
-const STAR_PAD: usize = 10;
+/// Copied from `STAR_BEHIND_CODE_SCALE` in frames.ts, where it is bounded by
+/// the star's own geometry rather than chosen by eye: the side points sit at
+/// x = 0.976 and the bottom two at y = 0.905, so a centred square wider than
+/// 0.81 swallows the bottom points and one wider than 0.95 swallows the sides.
+/// 0.72 clears the nearest of those by 4.5% of the image — a visible spike
+/// rather than a sliver.
+const STAR_BEHIND_CODE_SCALE: f32 = 0.72;
+
+/// The star's inner radius as a fraction of its outer one.
+///
+/// ⚠️ Copied from `STAR_INNER_RATIO` in frames.ts, and the comment there says
+/// why it is 0.62 rather than the ~0.38 of a classic thin star: a generous
+/// inner radius keeps the shape broad. I first wrote 0.42 here from memory,
+/// and the result read as five orange arrowheads rather than as a star —
+/// which is exactly the failure this module's header warns about two
+/// paragraphs in. Copy values; never invent them.
+const STAR_INNER_RATIO: f32 = 0.62;
 
 /// Render `text` as a branded QR in `preset`'s style, with `logo_png`
 /// composited over the middle. `None` if the text will not fit in a QR code.
@@ -245,13 +255,14 @@ pub fn render(text: &str, preset: &Preset, logo_png: Option<&[u8]>) -> Option<Re
         x < modules && y < modules && colors[y * modules + x] == qrcode::Color::Dark
     };
 
-    let pad = QUIET
-        + if preset.star_backdrop.is_some() {
-            STAR_PAD
-        } else {
-            0
-        };
-    let dim = ((modules + pad * 2) * SCALE) as u32;
+    // The code plus its own quiet zone — the white square the star sits
+    // behind. Everything beyond it is the star's to show in.
+    let code_square = ((modules + QUIET * 2) * SCALE) as u32;
+    let dim = if preset.star_backdrop.is_some() {
+        (code_square as f32 / STAR_BEHIND_CODE_SCALE).round() as u32
+    } else {
+        code_square
+    };
     let mut rgba = vec![0u8; (dim * dim * 4) as usize];
 
     // Background first, everywhere.
@@ -272,9 +283,10 @@ pub fn render(text: &str, preset: &Preset, logo_png: Option<&[u8]>) -> Option<Re
         // background colour leaves the star showing only OUTSIDE that, which
         // is what 'behind' means in design.ts anyway: a backdrop with its
         // points around the code, never under it.
-        let keep = (STAR_PAD * SCALE) as u32;
-        for y in keep..(dim - keep) {
-            for x in keep..(dim - keep) {
+        let lo = (dim - code_square) / 2;
+        let hi = lo + code_square;
+        for y in lo..hi {
+            for x in lo..hi {
                 let i = ((y * dim + x) * 4) as usize;
                 rgba[i] = preset.bg[0];
                 rgba[i + 1] = preset.bg[1];
@@ -284,7 +296,8 @@ pub fn render(text: &str, preset: &Preset, logo_png: Option<&[u8]>) -> Option<Re
         }
     }
 
-    let origin = (pad * SCALE) as f32;
+    // Centre the modules in whatever canvas we ended up with.
+    let origin = (dim as f32 - (modules * SCALE) as f32) / 2.0;
     let span = (modules * SCALE) as f32;
 
     // The three finder patterns, drawn as whole shapes rather than as modules,
@@ -510,12 +523,12 @@ fn inside(fx: f32, fy: f32, x0: f32, y0: f32, s: f32, shape: Shape) -> bool {
 /// `starPlacement: 'behind'` in design.ts: the star is a backdrop with its
 /// points showing around the code, not a plate the code is cut into. It is
 /// painted before any module and sized so its points live in the quiet zone
-/// STAR_PAD widens — no module is ever drawn on top of it, which is what keeps
+/// the code square leaves — no module is ever drawn on top of it, which keeps
 /// this style as readable as the others.
 fn paint_star(rgba: &mut [u8], dim: u32, rgb: [u8; 3]) {
     let c = dim as f32 / 2.0;
     let outer = dim as f32 * 0.5;
-    let inner = outer * 0.42;
+    let inner = outer * STAR_INNER_RATIO;
     let mut pts = [(0.0f32, 0.0f32); 10];
     for (i, p) in pts.iter_mut().enumerate() {
         let r = if i % 2 == 0 { outer } else { inner };
