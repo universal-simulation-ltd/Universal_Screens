@@ -13,4 +13,4 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # is that a style is picked at RANDOM for a code people have to scan to pair a
 # phone, so "it still decodes" cannot be an assumption — every preset is
 # decoded at several sizes before it can ship. See the module docs.
-rqrr = "0.7"
+rxing = { version = "0.7", default-features = false }

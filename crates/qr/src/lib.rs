@@ -35,8 +35,20 @@
 //! `@zxing/library`. None of that applies to the painter below, and this code
 //! is the PAIRING path: a phone that cannot read it leaves the user typing an
 //! address and a PIN by hand. So every preset is decoded by this crate's own
-//! tests, at several sizes, with the centre logo in place. A style that will
-//! not decode does not ship — that is what `every_preset_decodes` is for.
+//! tests, at several payload lengths, with the centre mark in place. A style
+//! that will not decode does not ship — that is `every_preset_decodes`.
+//!
+//! ⚠️ MEASURE WITH THE DECODER THE CLIENTS ACTUALLY SHIP. This crate was first
+//! gated on `rqrr`, chosen for being pure Rust and strict. It binarises
+//! globally, the Android client scans with `zxing-android-embedded` and iOS
+//! with `AVCaptureMetadataOutput`, and both of those binarise locally — so
+//! rqrr represented nothing anybody uses. It rejected the Star style outright
+//! and rejected every rounded or dotted finder eye, and two of Universal QR's
+//! presets were flattened to square eyes on that evidence before anyone
+//! checked it against ZXing, which reads all of them. A stricter decoder is
+//! not a safety margin when it is strict about the wrong things; it is a
+//! source of confidently wrong design decisions. The tests use `rxing`, the
+//! Rust port of ZXing.
 //!
 //! Error correction is pinned at `H` for the same reason Universal QR pins it:
 //! the centre logo covers real modules.
@@ -51,10 +63,16 @@
 //!
 //! Those two are the whole of the **Radial** preset, so Radial is not offered
 //! here rather than being offered as something that looks nothing like it.
-//! **Star** IS offered, because its `starPlacement: 'behind'` only paints a
-//! backdrop in the margin — it never touches a module, so it costs nothing in
-//! legibility. Adding Radial means implementing the plate and the burst, and
-//! then adding it to the decode tests like everything else.
+//! Adding it means implementing the plate and the burst, and then adding it to
+//! the decode tests like everything else.
+//!
+//! **Star** IS offered, and it is drawn the way frames.ts draws it: the star is
+//! the BACKGROUND, the modules sit straight on the orange, and the code covers
+//! the star's notches so only its points show around the edge. It was briefly
+//! drawn as a white code with orange spikes poking out, which is what you get
+//! if you repaint a quiet zone over the star — it decoded, and it looked
+//! nothing like the original. Rendered side by side against Universal QR's own
+//! Star preset to confirm, rather than argued about.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -88,18 +106,7 @@ pub struct Preset {
     pub name: &'static str,
     /// `dotType`
     pub dot: DotShape,
-    /// `cornerSquareType`.
-    ///
-    /// ⚠️ ALWAYS `Square` here, which is a DELIBERATE divergence from
-    /// design.ts — Rounded and Dots ask for 'extra-rounded' and 'dot'. A
-    /// decoder finds a QR by scanning for the finder pattern's 1:1:3:1:1 run,
-    /// and rounding the outer ring changes that run. Swept against this
-    /// crate's decoder at corner radii 0.08/0.12/0.16/0.20/0.25/0.30 of the
-    /// eye, the results were decodes/FAILS/decodes/decodes/FAILS/FAILS — not a
-    /// threshold, just marginal. Marginal is the one thing a PAIRING code must
-    /// not be, so the styles differ in their modules, colours, gradient and
-    /// backdrop instead. The inner dot is free: it sits inside the 3 of the
-    /// run, and `cornerDotType: 'dot'` decodes everywhere.
+    /// `cornerSquareType`
     pub eye_outer: EyeShape,
     /// `cornerDotType`
     pub eye_dot: EyeShape,
@@ -139,7 +146,7 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         name: "Rounded",
         dot: DotShape::Rounded,
-        eye_outer: EyeShape::Square, // see the note on the field
+        eye_outer: EyeShape::Rounded, // 'extra-rounded'
         eye_dot: EyeShape::Dot,
         fg: [0x0f, 0x17, 0x2a],
         bg: [0xff, 0xff, 0xff],
@@ -151,7 +158,7 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         name: "Dots",
         dot: DotShape::Dot,
-        eye_outer: EyeShape::Square, // see the note on the field
+        eye_outer: EyeShape::Dot,
         eye_dot: EyeShape::Dot,
         fg: [0x1e, 0x29, 0x3b],
         bg: [0xff, 0xff, 0xff],
@@ -163,7 +170,7 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         name: "Sunset",
         dot: DotShape::ExtraRounded,
-        eye_outer: EyeShape::Square, // see the note on the field
+        eye_outer: EyeShape::Rounded, // 'extra-rounded'
         eye_dot: EyeShape::Dot,
         fg: [0xc2, 0x41, 0x0c],
         bg: [0xff, 0xf7, 0xed],
@@ -175,7 +182,7 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         name: "Star",
         dot: DotShape::ExtraRounded,
-        eye_outer: EyeShape::Square, // see the note on the field
+        eye_outer: EyeShape::Rounded, // 'extra-rounded'
         eye_dot: EyeShape::Dot,
         fg: [0x00, 0x00, 0x00],
         bg: [0xff, 0xff, 0xff],
@@ -232,6 +239,9 @@ const SCALE: usize = 8;
 /// rather than a sliver.
 const STAR_BEHIND_CODE_SCALE: f32 = 0.72;
 
+/// The centre mark's side, as a fraction of the code. See overlay_logo.
+const LOGO_SCALE: f32 = 0.20;
+
 /// The star's inner radius as a fraction of its outer one.
 ///
 /// ⚠️ Copied from `STAR_INNER_RATIO` in frames.ts, and the comment there says
@@ -283,17 +293,13 @@ pub fn render(text: &str, preset: &Preset, logo_png: Option<&[u8]>) -> Option<Re
         // background colour leaves the star showing only OUTSIDE that, which
         // is what 'behind' means in design.ts anyway: a backdrop with its
         // points around the code, never under it.
-        let lo = (dim - code_square) / 2;
-        let hi = lo + code_square;
-        for y in lo..hi {
-            for x in lo..hi {
-                let i = ((y * dim + x) * 4) as usize;
-                rgba[i] = preset.bg[0];
-                rgba[i + 1] = preset.bg[1];
-                rgba[i + 2] = preset.bg[2];
-                rgba[i + 3] = 255;
-            }
-        }
+        // ⚠️ No white square is painted back over it, and that is what makes
+        // this look like Universal QR's Star rather than like a square code
+        // with orange spikes. The star IS the background: the modules are
+        // drawn straight onto it and the code covers the star's notches,
+        // which is what frames.ts means by "the star is drawn UNDER a code
+        // that covers its notches". Rendered side by side with Universal QR's
+        // own Star preset to check, not assumed.
     }
 
     // Centre the modules in whatever canvas we ended up with.
@@ -579,6 +585,13 @@ fn point_in_poly(x: f32, y: f32, pts: &[(f32, f32)]) -> bool {
 /// Composite the centre logo over a pad of background, clearing the modules
 /// behind it. EcLevel H is what makes this safe.
 fn overlay_logo(rgba: &mut [u8], dim: u32, span: f32, png: &[u8], bg: [u8; 3]) {
+    // ⚠️ 0.20, where design.ts says logoSize 0.28. Not a transcription slip:
+    // design.ts pairs that with `hideBackgroundDots`, which blanks the modules
+    // under the mark so the decoder never sees a half-covered one, and this
+    // renderer does not implement it. Swept against ZXing with the mark in
+    // place, 0.25 and 0.23 lost the Star style at the longest payload while
+    // 0.21 held; 0.20 keeps a little room rather than sitting on the edge.
+    //
     // ⚠️ Sized against the CODE, not the canvas. Sizing it off `dim` looks
     // identical for every square style and then quietly breaks the moment a
     // style adds margin: Star widens the quiet zone for its points, so the
@@ -586,7 +599,7 @@ fn overlay_logo(rgba: &mut [u8], dim: u32, span: f32, png: &[u8], bg: [u8; 3]) {
     // decoding, while every other style was fine. Caught by the logo test, not
     // by eye. `span` is the code itself, which is what logoSize means in
     // design.ts.
-    let target = (span * 0.25).round() as u32;
+    let target = (span * LOGO_SCALE).round() as u32;
     let Ok(img) = image::load_from_memory(png) else {
         return;
     };
@@ -646,15 +659,33 @@ mod tests {
         "https://opensource.unisim.co.uk/screens/connect?host=192.168.1.144&port=9000&pin=0042#ssid=A%20Rather%20Long%20Network%20Name&auth=WPA&pass=correct-horse-battery-staple-9271",
     ];
 
+    /// Decode with ZXing.
+    ///
+    /// ⚠️ ZXing specifically, and the choice is evidence not taste. The
+    /// Android client scans with `com.journeyapps:zxing-android-embedded`
+    /// (see `apps/android/app/build.gradle.kts`) and the iOS client with
+    /// `AVCaptureMetadataOutput`; both binarise locally. This crate was first
+    /// gated on `rqrr`, which binarises globally and represents neither — and
+    /// that cost real design decisions before anyone noticed. Measured on the
+    /// same renders: rqrr rejected the Star style at every payload size and
+    /// rejected every rounded or dotted finder eye, while ZXing read all of
+    /// them. Two of Universal QR's presets had already been flattened to
+    /// square eyes on that bad evidence. A decoder that no client ships is not
+    /// a safety margin; it is a source of wrong answers.
     fn decode(r: &Rendered) -> Option<String> {
         let mut gray = image::GrayImage::new(r.dim, r.dim);
         for (i, px) in r.rgba.chunks_exact(4).enumerate() {
             let l = (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32) as u8;
             gray.put_pixel(i as u32 % r.dim, i as u32 / r.dim, image::Luma([l]));
         }
-        let mut img = rqrr::PreparedImage::prepare(gray);
-        let grids = img.detect_grids();
-        grids.first().and_then(|g| g.decode().ok()).map(|(_, s)| s)
+        rxing::helpers::detect_in_luma(
+            gray.into_raw(),
+            r.dim,
+            r.dim,
+            Some(rxing::BarcodeFormat::QR_CODE),
+        )
+        .ok()
+        .map(|res| res.getText().to_owned())
     }
 
     /// The one that matters. A style is chosen at RANDOM for a code the user
