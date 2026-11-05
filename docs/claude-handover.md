@@ -4,6 +4,89 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-05 (Nearby stopped listing this PC; QR styles are dealt at random)
+
+Two things after 0.4.6 went out, so **neither is in any release yet** — the
+newest tag is `v0.4.6` and both landed after it.
+
+### A host was listing itself in Nearby (`9b5e221`)
+
+James saw "SPECTRE" orbiting "This PC" on SPECTRE. One process, listing itself.
+
+Self-filtering compared a beacon's source IP against `own_ip` — the address the
+host shows in its UI, which on Windows is the first DHCP IPv4 the machine
+reports. ⚠️ **That is not the address multicast leaves from.** A multi-homed
+machine sends out of whichever interface wins the route, and the displayed one
+frequently loses.
+
+Measured, not assumed: SPECTRE has six IPv4 addresses; `best_lan_ip()` returns
+10.229.171.35 (Wi-Fi, route metric 45) while a sniffer joined to the group on
+every interface saw our own beacon arrive from **10.2.0.2, a ProtonVPN
+adapter**. Any VPN, Hyper-V switch, WSL adapter or second NIC reproduces it.
+
+The beacon sender is the only thing that can know, so it records it:
+`connect()` on the multicast target makes the OS pick the route immediately and
+bind the socket to the source it will really send from, which `local_addr()`
+then reports. That goes into a set the listener checks, re-read every tick
+because a VPN coming up moves the address under a running process.
+
+⚠️ The wire format is deliberately untouched. Adding an id field is the obvious
+fix and is wrong: the beacon is `USSCREENS\t{port}\t{name}` parsed with
+`splitn(3)`, so any field after the name lands **inside** the name, and every
+host already on the LAN would show the id as part of the machine's name.
+
+⚠️ **Open, and bigger than this fix:** if the beacon is leaving by the VPN
+adapter, it probably is not reaching the real LAN at all — so PC-to-PC
+discovery may simply not work while a VPN is up. Nobody has looked yet.
+
+### The QR is dealt a random style (`3be5887`, CI `420d9c3`)
+
+James asked for a random style per code, the star among them. The styles are
+Universal QR's presets (`packages/qr/src/design.ts` in universal-platform,
+shared as `@unisim/qr`), which already has `randomPreset(exclude)`.
+
+That package is TypeScript on `qr-code-styling` and cannot be reused from Rust,
+so the values are copied into a new **`extender-qr`** crate — which also
+collapses the three hosts' copies of the renderer (228/175/133 lines, drifting)
+into one. Hosts keep only the egui wrapper.
+
+⚠️ **The scannability guarantee does NOT travel with the values.** design.ts can
+promise "a random one is always scannable" because it measured that against
+`qr-code-styling` with `@zxing/library`. This is a different renderer and this
+is the PAIRING code, so `extender-qr` decode-tests every style itself, across
+three payload lengths, with and without the centre logo. On the first run **only
+the square style decoded at all.** It caught three faults invisible by eye:
+
+- Rounding each module independently turns a run of dark modules into separated
+  lozenges; `qr-code-styling` rounds only corners between two LIGHT modules.
+- The star was painted across the quiet zone. A quiet zone must be light — it is
+  how a decoder finds the code's edge — and orange is a mid-tone.
+- The logo was sized off the canvas rather than the code: identical for every
+  square style, silently fatal for the one style that adds margin.
+
+⚠️ Deliberate divergence from design.ts: the finder eyes stay **square**, where
+Rounded and Dots ask for 'extra-rounded' and 'dot'. Swept at corner radii
+0.08/0.12/0.16/0.20/0.25/0.30 the results were decodes/FAILS/decodes/decodes/
+FAILS/FAILS — not a threshold, just marginal, which a pairing code must not be.
+Radial is not offered at all (it is `frameShape: 'circle'` plus 'burst', neither
+ported).
+
+**Star is offered but weak**, and is the open question for James: a star behind
+a square code with a square light quiet zone can only ever show its points, so
+it reads as five orange arrowheads. Making it read as a star costs roughly 40%
+of the code's size on screen.
+
+⚠️ `extender-qr` was missing from `tests.yml`'s shared-crate list, so its tests
+ran **nowhere** — the trap that file's own header warns about. Fixed in
+`420d9c3`; do the same for the next platform-independent crate.
+
+**Verified:** four consecutive launches of the host dealt Rounded, Sunset and
+Dots; the QR sits behind an `is_none()` cache so a style lasts for the life of
+a code rather than being re-dealt each frame. **Not verified:** host-macos and
+host-linux do not compile on the Windows box (they want `apple_cf` /
+`core_graphics`), so their edits are mechanically identical but unbuilt locally;
+CI covers them.
+
 ## Update — 2026-11-05 (0.4.5 carries the icon; Nearby pauses where it is)
 
 Two small things on top of the icon entry below.
