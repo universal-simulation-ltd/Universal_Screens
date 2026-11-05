@@ -19,10 +19,48 @@
 //! multicast group without a restricted Apple entitlement, but Bonjour browsing
 //! needs none, so DNS-SD is the mobile-facing half of discovery.
 
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Every source address our own beacons have actually gone out from.
+///
+/// ⚠️ THIS IS NOT THE SAME AS THE HOST'S LAN ADDRESS, and assuming it was is
+/// exactly the bug this exists to fix. Self-filtering used to compare a
+/// beacon's source IP against `own_ip` — the address the host shows in its UI,
+/// which on Windows is the first DHCP IPv4 the machine reports. A multi-homed
+/// machine sends multicast out of whichever interface wins the route, and that
+/// is frequently NOT the one being displayed.
+///
+/// Observed on SPECTRE, 2026-11-05: `own_ip` was 10.229.171.35 (Wi-Fi, route
+/// metric 45) while the beacon left via 10.2.0.2 (a ProtonVPN adapter). The two
+/// never matched, so the host listed ITSELF in Nearby, under its own hostname,
+/// while also sitting in the middle of the ring as "This PC". Any VPN, Hyper-V
+/// switch, WSL adapter or second NIC reproduces it.
+///
+/// The beacon sender is the only thing that knows the answer, so it records it
+/// here and the listener reads it. Kept as a set, not a single value, because
+/// the route changes under you — bringing a VPN up or down moves the source
+/// address while the process keeps running.
+static OWN_SOURCES: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Note an address our beacons leave from. Cheap and idempotent; called every
+/// beacon tick so a route change is picked up within one interval.
+fn remember_own_source(ip: String) {
+    if let Ok(mut set) = OWN_SOURCES.lock() {
+        set.insert(ip);
+    }
+}
+
+/// Did one of our own beacons come from here?
+fn is_own_source(ip: &str) -> bool {
+    OWN_SOURCES
+        .lock()
+        .map(|set| set.contains(ip))
+        .unwrap_or(false)
+}
 
 /// Multicast group + port the beacon is sent to and the listener joins.
 pub const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
@@ -79,8 +117,14 @@ pub fn start_listener<F>(
                     SocketAddr::V4(a) => a.ip().to_string(),
                     SocketAddr::V6(_) => continue,
                 };
-                // Don't list ourselves.
-                if own_ip.lock().unwrap().as_deref() == Some(from_ip.as_str()) {
+                // Don't list ourselves. Two checks, because neither is
+                // sufficient alone: `is_own_source` knows where our beacons
+                // actually leave from (see OWN_SOURCES) and is the one that
+                // catches the multi-homed case, while `own_ip` still covers the
+                // window before this host has started beaconing at all.
+                if is_own_source(&from_ip)
+                    || own_ip.lock().unwrap().as_deref() == Some(from_ip.as_str())
+                {
                     continue;
                 }
                 let Some((port, name)) = parse_beacon(&buf[..n]) else {
@@ -114,10 +158,28 @@ pub fn start_beacon(name: String, port: u16, stop: Arc<AtomicBool>) {
         };
         let _ = sock.set_multicast_ttl_v4(1); // LAN only, don't cross routers
         let target = SocketAddr::from((MULTICAST_ADDR, DISCOVERY_PORT));
+        // ⚠️ connect(), not just send_to(). Connecting makes the OS choose the
+        // route NOW and bind this socket to the source address it will really
+        // send from, which local_addr() then reports as a concrete IP instead
+        // of 0.0.0.0. That address is what our own beacons arrive carrying, and
+        // the listener needs it to recognise them — see OWN_SOURCES. The wire
+        // format is untouched, so older hosts on the LAN are unaffected.
+        let connected = sock.connect(target).is_ok();
         let beacon = format!("USSCREENS\t{port}\t{name}");
         let pkt = beacon.as_bytes();
         while !stop.load(Ordering::Relaxed) {
-            let _ = sock.send_to(pkt, target);
+            // Re-read every tick: bringing a VPN up or down moves the source
+            // address under a process that is already running.
+            if let Ok(SocketAddr::V4(local)) = sock.local_addr() {
+                if !local.ip().is_unspecified() {
+                    remember_own_source(local.ip().to_string());
+                }
+            }
+            let _ = if connected {
+                sock.send(pkt)
+            } else {
+                sock.send_to(pkt, target)
+            };
             std::thread::sleep(BEACON_INTERVAL);
         }
     });
@@ -296,6 +358,56 @@ mod tests {
         let (port, name) = parse_beacon(beacon.as_bytes()).unwrap();
         assert_eq!(port, 9001);
         assert_eq!(name, "DESKTOP:1");
+    }
+
+    /// The exact failure seen on SPECTRE on 2026-11-05: the host showed its
+    /// Wi-Fi address while its beacon left via a ProtonVPN adapter, so the old
+    /// single-IP comparison never matched and the machine listed itself in
+    /// Nearby under its own hostname.
+    #[test]
+    fn a_beacon_from_our_other_interface_is_still_us() {
+        let shown_in_the_ui = Some("10.229.171.35".to_owned());
+        let actually_sent_from = "10.2.0.2";
+
+        // What the old check did, and why it failed.
+        assert_ne!(
+            shown_in_the_ui.as_deref(),
+            Some(actually_sent_from),
+            "the premise of this test is that the two addresses differ",
+        );
+
+        remember_own_source(actually_sent_from.to_owned());
+        assert!(
+            is_own_source(actually_sent_from),
+            "a beacon from an interface we send on must be recognised as ours",
+        );
+    }
+
+    /// And the filter must not swallow real peers.
+    #[test]
+    fn another_machine_is_not_mistaken_for_us() {
+        remember_own_source("198.51.100.7".to_owned());
+        assert!(!is_own_source("198.51.100.8"), "a different host is a peer");
+        assert!(!is_own_source("203.0.113.1"), "an unrelated host is a peer");
+    }
+
+    /// The sender must learn a concrete source address from the real stack —
+    /// the whole fix rests on `local_addr()` reporting something other than
+    /// 0.0.0.0 once the socket is connected to the multicast group.
+    #[test]
+    fn the_beacon_socket_knows_which_address_it_sends_from() {
+        let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
+        let target = SocketAddr::from((MULTICAST_ADDR, DISCOVERY_PORT));
+        if sock.connect(target).is_err() {
+            return; // no route to the group on this machine; nothing to assert
+        }
+        match sock.local_addr().expect("local_addr") {
+            SocketAddr::V4(local) => assert!(
+                !local.ip().is_unspecified(),
+                "connect() left the socket on 0.0.0.0 — self-filtering cannot work",
+            ),
+            SocketAddr::V6(_) => panic!("expected an IPv4 local address"),
+        }
     }
 
     #[test]
