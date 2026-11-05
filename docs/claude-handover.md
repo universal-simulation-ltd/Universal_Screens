@@ -80,8 +80,8 @@ of the code's size on screen.
 ran **nowhere** — the trap that file's own header warns about. Fixed in
 `420d9c3`; do the same for the next platform-independent crate.
 
-**Verified:** four consecutive launches of the host dealt Rounded, Sunset and
-Dots; the QR sits behind an `is_none()` cache so a style lasts for the life of
+**Verified:** of four consecutive launches, the three captured cleanly showed
+Rounded, Sunset and Dots (the first was caught before its window existed); the QR sits behind an `is_none()` cache so a style lasts for the life of
 a code rather than being re-dealt each frame. **Not verified:** host-macos and
 host-linux do not compile on the Windows box (they want `apple_cf` /
 `core_graphics`), so their edits are mechanically identical but unbuilt locally;
