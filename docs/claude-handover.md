@@ -64,33 +64,43 @@ the square style decoded at all.** It caught three faults invisible by eye:
 - The logo was sized off the canvas rather than the code: identical for every
   square style, silently fatal for the one style that adds margin.
 
-⚠️ Deliberate divergence from design.ts: the finder eyes stay **square**, where
-Rounded and Dots ask for 'extra-rounded' and 'dot'. Swept at corner radii
-0.08/0.12/0.16/0.20/0.25/0.30 the results were decodes/FAILS/decodes/decodes/
-FAILS/FAILS — not a threshold, just marginal, which a pairing code must not be.
-Radial is not offered at all (it is `frameShape: 'circle'` plus 'burst', neither
+⚠️ **The decode gate was measuring with the wrong decoder, and it cost three
+design decisions** (`73f797a`). The crate was first gated on `rqrr` — pure Rust,
+strict, chosen for being strict. It binarises **globally**. The Android client
+scans with `com.journeyapps:zxing-android-embedded` and iOS with
+`AVCaptureMetadataOutput`, and both binarise **locally**, so rqrr represented
+nothing this product ships. Orange sits at luma ~117, almost exactly between
+black modules and white paper, so a global threshold reads a star background as
+dark and kills the code; a local one never sees it.
+
+Measured on identical renders with `rxing` (the Rust port of ZXing):
+
+| | rqrr | ZXing |
+|---|---|---|
+| Star, star as the background | FAILS, every size | reads it |
+| rounded finder eyes | FAILS | reads it |
+| dot finder eyes | FAILS | reads it |
+
+What rqrr had cost: Star was drawn as a white code with orange spikes rather
+than as Universal QR draws it, and four presets had their finder eyes flattened
+to square and written up as a "deliberate divergence" with a radius sweep to
+justify it. All of it was rqrr's opinion. The tests use `rxing` now and rqrr is
+gone. **A stricter decoder is not a safety margin when it is strict about the
+wrong things.**
+
+Star now matches the reference — the star IS the background, modules sit on the
+orange, and the code covers the notches so only the points show. Checked by
+driving Universal QR in a browser, selecting its Star preset and pulling the
+canvas out of the page, not by argument.
+
+One real constraint did survive: the centre mark is **0.20** of the code where
+design.ts says 0.28, because design.ts pairs 0.28 with `hideBackgroundDots`
+(which blanks modules under the mark) and this renderer has no such thing.
+Swept against ZXing: 0.25 and 0.23 lost Star at the longest payload, 0.21 held,
+0.20 leaves room.
+
+Radial is still not offered (`frameShape: 'circle'` plus 'burst', neither
 ported).
-
-**Star needed a second pass** (`8c7fb45`), and the lesson is the one this
-crate's own header states. James said it did not look right; it did not. Two of
-its numbers were invented rather than copied:
-
-- the inner radius was 0.42, written from memory. `frames.ts` pins
-  `STAR_INNER_RATIO` at **0.62** and says why — deliberately generous, "rather
-  than the ~0.38 of a classic thin star". Thin star, thin points, and thin
-  points around a square read as arrowheads.
-- the canvas came from a padding constant picked by eye. There is a real one:
-  `STAR_BEHIND_CODE_SCALE` = **0.72**, the code's side as a fraction of the
-  image, bounded by the star's geometry rather than taste (side points at
-  x = 0.976, bottom two at y = 0.905, so a square wider than 0.81 swallows the
-  bottom points).
-
-With both ported all five points show and the code covers the notches, which is
-what 'behind' means. The restored white square is now exactly the code plus its
-quiet zone, so 0.72 holds by construction rather than by a near-enough constant.
-
-⚠️ If you touch any other ported value here, go and read it in design.ts or
-frames.ts first. Both of these looked plausible and neither was right.
 
 ⚠️ `extender-qr` was missing from `tests.yml`'s shared-crate list, so its tests
 ran **nowhere** — the trap that file's own header warns about. Fixed in
