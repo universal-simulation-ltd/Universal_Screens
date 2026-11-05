@@ -4,6 +4,38 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-05 (0.4.5 carries the icon; Nearby pauses where it is)
+
+Two small things on top of the icon entry below.
+
+**0.4.5 is built and installed on the Windows box** (`ceb0713`) — a version
+bump only, so the new icon reaches an installed app. Verified on the real
+install rather than on the build output: Add/Remove Programs shows 0.4.5, the
+`.exe` reports FileVersion 0.4.5, the installed `app-icon.ico` is byte-identical
+to the committed one, the Start Menu shortcut points its `IconLocation` at it,
+and the running window shows the new mark in its header and in the middle of its
+QR code. ⚠️ **No tag and no release**: the newest tag is still `v0.4.4`, so
+macOS, Linux and downloads.unisim.co.uk are all on the old mark, and the suite
+changelog entry for the icon is committed but deliberately **not pushed** (it
+promises users something only the next release delivers).
+
+**Nearby's orbit pauses in place on hover** (`c444a28`, `crates/host-ui`, so the
+macOS host gets it too). The rotation was `if hovered { 0.0 } else { time * 0.35 }`
+— which pauses the nodes at *angle zero*, so each one jumped to a fixed spot as
+the pointer arrived and jumped again on the way out. It is an accumulated phase
+now, in a pure `advance_orbit()` with four tests.
+
+⚠️ The per-frame step is clamped to 0.1s of clock and that is load-bearing. A
+pointer resting still over the orbit gives egui no reason to repaint, so no
+frame runs and the stored timestamp goes stale; without the clamp the frame
+where the pointer *leaves* would turn the ring by the whole paused interval in
+one step. The same clamp covers a minimised window and a sleeping machine.
+
+⚠️ Not verified on screen: this LAN has no other Universal Screens host, so the
+Nearby ring draws its centre node alone here and there was nothing orbiting to
+watch. The behaviour is proven by the tests — which all four fail against the
+old rule, checked by putting it back — not by eye.
+
 ## Update — 2026-11-05 (the installed apps get their own icon: one picture, split)
 
 **Screens no longer wears the suite mark on its installed apps** (`3f35a91`,
