@@ -74,12 +74,13 @@ try {
 
     # ── Icon: the COMMITTED one, never regenerated here ──────────────────────
     # This step used to run scripts/make-win-ico.py. That script draws the old
-    # laptop-and-phone artwork, superseded on 2026-08-27 by the suite mark the
-    # icons are generated from now, so every build silently reverted the .ico to
-    # the pre-rebrand drawing and stamped it into the .exe, the shortcuts and
-    # Add/Remove Programs. Regenerate the mark deliberately instead:
-    #   node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
-    # and commit what it writes.
+    # laptop-and-phone artwork, superseded on 2026-08-27, so every build
+    # silently reverted the .ico to the pre-rebrand drawing and stamped it into
+    # the .exe, the shortcuts and Add/Remove Programs. Regenerate the icon
+    # deliberately instead:
+    #   node scripts/app-icon.mjs
+    # and commit what it writes. (The sealed INSTALLER icon is a different file
+    # and still the suite's -- see docs/WINDOWS-INSTALLER.md.)
     $ico = Join-Path $repo 'crates\host-windows\assets\app-icon.ico'
     if (-not (Test-Path $ico)) {
         throw "Missing $ico -- regenerate it with desktop-icons.mjs (see docs/WINDOWS-INSTALLER.md)"

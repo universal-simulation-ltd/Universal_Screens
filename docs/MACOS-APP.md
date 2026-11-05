@@ -27,12 +27,27 @@ It used to. `.github/workflows/macos-release.yml` installed Pillow and ran
 the laptop-and-phone artwork superseded on 2026-08-27 — the same bug
 `build-installer.ps1` had on Windows. **v0.4.3's DMG was released (2026-11-04)
 with the pre-rebrand icon because of it**; both steps were removed the same
-evening and v0.4.4 re-cut. When the mark changes, regenerate every surface at
-once with the suite generator and commit what it writes:
+evening and v0.4.4 re-cut. When the icon changes, regenerate every surface at
+once and commit what it writes:
 
 ```bash
-node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+node scripts/app-icon.mjs
 ```
+
+The icon itself is **Screens' own**, not the suite mark on the orange tile: "one
+picture, split" — a desk screen and a phone on teal with a single orange disc
+drawn across both, so the arc leaving the monitor and the arc arriving on the
+phone are the same curve. `scripts/app-icon.mjs` draws it and writes every
+installed surface at once (Windows `.png`/`.ico`, macOS `.png`/`.icns`, Linux
+`.png`, the Android launcher set, the iOS asset catalogue). Universal PDF set
+the precedent; the flags that make the suite generators stand aside are
+`ownNativeIcon` / `ownDesktopIcon` on the `Universal_Screens` entry in
+`backoffice/universal-platform/scripts/app-marks/marks.mjs`.
+
+Two surfaces are still the **suite's** and must not be drawn here: the sealed
+installer icon (`crates/host-windows/assets/installer-icon.ico` — an installer
+is not the app) and the phone clients' in-app masthead logo. Both come from
+`node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens`.
 
 Any generated asset that is also committed has two writers, and the build
 script wins silently. Do not re-add an icon step here.

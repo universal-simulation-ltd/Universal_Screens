@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- GENERATED FILE — do not edit by hand.
+     Source: scripts/app-icon.mjs (Screens draws its own installed-app icon;
+     the suite generators skip it — see ownNativeIcon in
+     backoffice/universal-platform/scripts/app-marks/marks.mjs)
+     Regenerate: node scripts/app-icon.mjs -->
 <resources>
-    <color name="ic_launcher_background">#e05504</color>
+    <color name="ic_launcher_background">#063b44</color>
 </resources>

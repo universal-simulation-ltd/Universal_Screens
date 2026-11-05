@@ -31,12 +31,27 @@ halfway through.
 
 The app icon is the committed `crates/host-windows/assets/app-icon.ico` and the
 build never regenerates it — it used to, from artwork superseded on 2026-08-27,
-which quietly reverted the mark on every build. When the mark changes, regenerate
-every surface at once with the suite generator and commit what it writes:
+which quietly reverted the mark on every build. When the icon changes, regenerate
+every surface at once and commit what it writes:
 
 ```powershell
-node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens
+node scripts/app-icon.mjs
 ```
+
+The icon itself is **Screens' own**, not the suite mark on the orange tile: "one
+picture, split" — a desk screen and a phone on teal with a single orange disc
+drawn across both, so the arc leaving the monitor and the arc arriving on the
+phone are the same curve. `scripts/app-icon.mjs` draws it and writes every
+installed surface at once (Windows `.png`/`.ico`, macOS `.png`/`.icns`, Linux
+`.png`, the Android launcher set, the iOS asset catalogue). Universal PDF set
+the precedent; the flags that make the suite generators stand aside are
+`ownNativeIcon` / `ownDesktopIcon` on the `Universal_Screens` entry in
+`backoffice/universal-platform/scripts/app-marks/marks.mjs`.
+
+Two surfaces are still the **suite's** and must not be drawn here: the sealed
+installer icon (`crates/host-windows/assets/installer-icon.ico` — an installer
+is not the app) and the phone clients' in-app masthead logo. Both come from
+`node backoffice/universal-platform/scripts/app-marks/desktop-icons.mjs Universal_Screens`.
 
 ## The three decisions worth knowing about
 
