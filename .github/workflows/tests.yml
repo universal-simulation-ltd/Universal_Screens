@@ -75,7 +75,7 @@ jobs:
           cargo test -p extender-protocol -p extender-transport -p extender-core \
                      -p extender-discovery -p extender-h264 -p extender-protocol-wasm \
                      -p extender-web-bridge -p extender-host-ui -p unisim-pake \
-                     -p extender-mobile-ffi
+                     -p extender-mobile-ffi -p extender-qr
 
       # ⚠️ `xvfb` here, not the whole script: the SECOND SCREEN needs a server
       # whose framebuffer can grow, which neither Xvfb nor this runner's Xorg
