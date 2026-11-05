@@ -486,9 +486,84 @@ pub fn paint_brand_strip(ctx: &egui::Context) {
 
 /// Draw the "Nearby" hosts as an orbit: this machine at the centre with a soft
 /// glow and dashed ring, each discovered peer a node circling it (portal-style).
-/// The nodes rotate slowly; hovering the area pauses them so a node is easy to
-/// click. `centre_label` names the local machine ("This PC" / "This Mac").
+/// The nodes rotate slowly; hovering the area pauses them WHERE THEY ARE so a
+/// node is easy to click, and moving off carries on from that angle rather than
+/// snapping. `centre_label` names the local machine ("This PC" / "This Mac").
 /// Returns the peer whose node was clicked this frame, if any.
+/// Radians per second the Nearby ring turns at.
+const ORBIT_SPEED: f64 = 0.35;
+
+/// Longest step the ring may turn in one frame, in seconds of clock.
+///
+/// ⚠️ Load-bearing, not a tidy-up. While the pointer rests still over the orbit
+/// egui has no reason to repaint, so no frame runs and the stored timestamp
+/// goes stale; without this clamp the frame where the pointer LEAVES would
+/// advance the phase by the whole paused interval in one step — reintroducing
+/// the jump this exists to remove, only worse. It covers the app being
+/// minimised or the machine sleeping for the same reason.
+const ORBIT_MAX_STEP: f64 = 0.1;
+
+/// Advance the Nearby ring's accumulated rotation by one frame.
+///
+/// `prev` is the `(phase, time)` kept from the last frame, `None` on the first.
+/// Returns the pair to draw with and store. Hovering holds the phase exactly
+/// where it is; releasing carries on from there, so neither entering nor
+/// leaving the area moves a node.
+fn advance_orbit(prev: Option<(f64, f64)>, now: f64, hovered: bool) -> (f64, f64) {
+    let (phase, last) = prev.unwrap_or((0.0, now));
+    let dt = (now - last).clamp(0.0, ORBIT_MAX_STEP);
+    (if hovered { phase } else { phase + dt * ORBIT_SPEED }, now)
+}
+
+#[cfg(test)]
+mod orbit_tests {
+    use super::{advance_orbit, ORBIT_MAX_STEP, ORBIT_SPEED};
+
+    /// The whole point: the ring must not move while the pointer is over it.
+    /// The old code set the angle to 0 instead, so every node jumped to a fixed
+    /// spot on hover and the one you were reaching for moved out from under you.
+    #[test]
+    fn hovering_holds_the_phase_exactly() {
+        let (p0, _) = advance_orbit(None, 100.0, false);
+        let (p1, t1) = advance_orbit(Some((p0, 100.0)), 100.05, false);
+        assert!(p1 > p0, "it should turn while not hovered");
+
+        let mut held = (p1, t1);
+        for step in 1..=20 {
+            held = advance_orbit(Some(held), 100.05 + f64::from(step) * 0.016, true);
+            assert_eq!(held.0, p1, "frame {step} moved while hovered");
+        }
+    }
+
+    /// And letting go must continue from where it stopped, not from wherever the
+    /// wall clock reached meanwhile — the second half of the same jump.
+    #[test]
+    fn releasing_continues_from_the_held_angle() {
+        let held = (1.234_f64, 500.0_f64);
+        // Five seconds of hovering, then one frame with the pointer gone.
+        let paused = advance_orbit(Some(held), 505.0, true);
+        assert_eq!(paused.0, held.0);
+        let (after, _) = advance_orbit(Some(paused), 505.016, false);
+        let step = after - held.0;
+        assert!(step > 0.0 && step < 0.01, "resumed with a jump of {step} rad");
+    }
+
+    /// A frame after a long gap (no repaints while hovering still, a minimised
+    /// window, a sleeping machine) turns by the clamp, never by the whole gap.
+    #[test]
+    fn a_long_gap_is_clamped_to_one_step() {
+        let (after, _) = advance_orbit(Some((0.0, 0.0)), 3_600.0, false);
+        assert!((after - ORBIT_MAX_STEP * ORBIT_SPEED).abs() < 1e-12, "{after}");
+    }
+
+    /// A clock that goes backwards must not wind the ring backwards.
+    #[test]
+    fn time_going_backwards_does_not_rewind() {
+        let (after, _) = advance_orbit(Some((2.0, 10.0)), 9.0, false);
+        assert_eq!(after, 2.0);
+    }
+}
+
 pub fn nearby_orbit(
     ui: &mut egui::Ui,
     peers: &[extender_discovery::DiscoveredPeer],
@@ -524,7 +599,8 @@ pub fn nearby_orbit(
     }
 
     // Pulsing glow behind the centre.
-    let t = ui.input(|i| i.time) as f32;
+    let t_now = ui.input(|i| i.time);
+    let t = t_now as f32;
     let pulse = 0.5 + 0.5 * (t * 1.6).sin();
     let glow = egui::Color32::from_rgba_unmultiplied(BRAND.r(), BRAND.g(), BRAND.b(), (26.0 + 20.0 * pulse) as u8);
     painter.circle_filled(centre, 34.0 + 5.0 * pulse, glow);
@@ -537,8 +613,20 @@ pub fn nearby_orbit(
 
     // Orbiting peer nodes. A slow global rotation, evenly spread; pause on hover
     // so a moving node stays clickable.
+    //
+    // ⚠️ The rotation is an ACCUMULATED phase, not `time * speed`. It used to be
+    // `if hovered { 0.0 } else { t * 0.35 }`, which does pause the nodes — at
+    // angle zero. Every node jumped to a fixed spot the moment the pointer
+    // entered, and jumped again to wherever the clock had got to when it left,
+    // so the one you were reaching for was never the one you ended up over.
+    // Accumulating instead means hovering freezes the ring in place and letting
+    // go carries on from there, with no discontinuity either way.
     let hovered_area = ui.rect_contains_pointer(rect);
-    let spin = if hovered_area { 0.0 } else { t * 0.35 }; // radians
+    let spin_id = ui.id().with("orbit_phase");
+    let prev = ui.data_mut(|d| d.get_temp::<(f64, f64)>(spin_id));
+    let (phase, _) = advance_orbit(prev, t_now, hovered_area);
+    ui.data_mut(|d| d.insert_temp(spin_id, (phase, t_now)));
+    let spin = phase as f32; // radians
     let mut clicked = None;
     let node_r = 22.0;
 
