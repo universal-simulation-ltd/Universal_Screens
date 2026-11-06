@@ -773,25 +773,41 @@
     <header class="un-head">
       <div class="un-inner">
         <div class="un-identity">
-          <!-- The catalogue mark for Universal Screens, verbatim from the
-               generated brand set (universal-platform/scripts/app-marks).
-               A phone driving the desktop — the second surface is the one with
-               the pointer on it. -->
-          <svg class="un-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Universal Screens">
-            <defs>
-              <linearGradient id="un-screens-tile" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#fe8c01"/>
-                <stop offset="1" stop-color="#e05504"/>
-              </linearGradient>
+          <!-- Universal Screens' own icon, "one picture, split" (2026-11-05),
+               not the orange catalogue mark: an app published beyond the web
+               wears its own icon on the web too (BRANDING.md, 2026-11-03).
+               Verbatim from universal-platform/scripts/app-marks — ownIconSvg()
+               on own-icons/screens.svg, uid "un-screens", decorative because
+               the name is printed beside it. Drawn by scripts/app-icon.mjs. -->
+          <svg class="un-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" aria-hidden="true"><defs><clipPath id="un-screens-tile"><rect width="1024" height="1024" rx="224"/></clipPath></defs><g clip-path="url(#un-screens-tile)"><defs>
+              <linearGradient id="un-screens-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a7a80"/><stop offset="1" stop-color="#063b44"/></linearGradient>
+              <linearGradient id="un-screens-cream" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="#fbf9f4"/><stop offset="1" stop-color="#f4f1ea"/></linearGradient>
+              <linearGradient id="un-screens-orange" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#fe8c01"/><stop offset="1" stop-color="#e05504"/></linearGradient>
+              <clipPath id="un-screens-faces">
+                <rect x="92" y="218" width="506" height="426" rx="22"/>
+                <rect x="708" y="350" width="224" height="444" rx="40"/>
+              </clipPath>
             </defs>
-            <rect width="64" height="64" rx="14" fill="url(#un-screens-tile)"/>
-            <rect x="6" y="11" width="33" height="24" rx="4" fill="none" stroke-width="4.4" stroke="#fed7aa"/>
-            <g fill="none" stroke-width="4.4" stroke-linecap="round" stroke="#ffffff">
-              <rect x="37" y="23" width="18" height="29" rx="5"/>
-              <path d="M43 47h6"/>
-            </g>
-            <path d="M42.73 30v8.84l2.18-2.18 1.63 3.26 1.63-.82-1.63-3.26h2.72z" fill="#ffffff"/>
-          </svg>
+            <rect x="-340" y="-340" width="1704" height="1704" fill="url(#un-screens-bg)"/>
+
+              <g transform="translate(14 22)" fill="rgba(0,0,0,0.26)">
+                <rect x="70" y="196" width="550" height="470" rx="40" fill="rgba(0,0,0,0.26)"/>
+                <rect x="277" y="666" width="136" height="56" rx="0" fill="rgba(0,0,0,0.26)"/>
+                <rect x="191" y="718" width="308" height="48" rx="24" fill="rgba(0,0,0,0.26)"/>
+                <rect x="688" y="330" width="264" height="484" rx="58" fill="rgba(0,0,0,0.26)"/>
+              </g>
+              <rect x="70" y="196" width="550" height="470" rx="40" fill="#d9d2c2"/>
+              <rect x="92" y="218" width="506" height="426" rx="22" fill="url(#un-screens-cream)"/>
+              <rect x="277" y="666" width="136" height="56" rx="0" fill="#d9d2c2"/>
+              <rect x="191" y="718" width="308" height="48" rx="24" fill="#d9d2c2"/>
+              <rect x="688" y="330" width="264" height="484" rx="58" fill="#d9d2c2"/>
+              <rect x="708" y="350" width="224" height="444" rx="40" fill="url(#un-screens-cream)"/>
+              <rect x="782" y="768" width="76" height="14" rx="7" fill="#b7bfcd"/>
+              <g clip-path="url(#un-screens-faces)">
+                <circle cx="636" cy="470" r="300" fill="url(#un-screens-orange)"/>
+                <circle cx="636" cy="470" r="300" fill="none"
+                        stroke="#e05504" stroke-width="18" opacity="0.35"/>
+              </g></g></svg>
           <span class="un-name">Universal Screens</span>
         </div>
 
