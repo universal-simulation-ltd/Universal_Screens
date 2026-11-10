@@ -1,6 +1,18 @@
 # Claude session handover
 
-Newest entry first. Each dated `## Update` overrides anything older that conflicts.
+Newest entry first. Each dated `## Update — 2026-11-10 (downloads.unisim.co.uk shows Screens' icon)
+
+The `universal-screens/` folder in the `unisim-downloads` R2 bucket now has a
+`.icon.png`: `crates/host-linux/assets/app-icon.png` (the rounded teal tile)
+shrunk to 256 px with sharp. The downloads front page, the folder heading and
+its Latest card show it; the installer rows keep the plain file mark (the
+Worker's rule). It is the rounded tile rather than a render of
+`own-icons/screens.svg` because that SVG is a full-bleed square, and the other
+apps' icons on the site are rounded tiles. If the icon is redrawn, re-upload:
+`wrangler r2 object put unisim-downloads/universal-screens/.icon.png --file <png> --content-type image/png --remote`
+(run from `backoffice/downloads-site`).
+
+## Update` overrides anything older that conflicts.
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
