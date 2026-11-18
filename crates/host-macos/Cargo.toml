@@ -27,6 +27,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # Host control window (GUI mode). "persistence" saves preferences across launches.
 eframe = { version = "0.29", features = ["persistence"] }
 extender-qr = { path = "../qr" }
+# Interface list for the address the window shows. Already in the tree through
+# mdns-sd, so this adds nothing new to the build.
+if-addrs = "0.15"
 
 [target.'cfg(target_os="macos")'.dependencies]
 apple-cf        = "0.9.3"

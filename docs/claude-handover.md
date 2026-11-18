@@ -1,6 +1,31 @@
 # Claude session handover
 
-Newest entry first. Each dated `## Update — 2026-11-10 (downloads.unisim.co.uk shows Screens' icon)
+Newest entry first. Each dated `## Update` overrides anything older that conflicts.
+A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
+newest entry at the top.
+
+## Update — 2026-11-18 (the Mac host showed its VPN address)
+
+With ProtonVPN on, the Mac app showed **10.2.0.2:9000** (the `utun6` tunnel)
+under More details and in its QR. Nothing on the LAN can reach that; the laptop
+beside it needed **192.168.4.20** (Ethernet). The Mac's `best_lan_ip()` was
+still the bare default-route trick, which a VPN owns. Windows (DHCP filter) and
+Linux (interface-name filter) had already been fixed for the same reason.
+
+`crates/host-macos/src/gui.rs` now lists interfaces with `if-addrs` (already in
+the tree via `mdns-sd`) and keeps a private, non-link-local IPv4 on a real
+interface, skipping `utun`/`ipsec`/`ppp`/`awdl`/`llw`/`bridge`/etc. The
+default-route address still wins when it qualifies (so Wi-Fi vs Ethernet follows
+the route); otherwise the first by name; the route trick is the last resort.
+`pick_lan_ip` has four unit tests. Measured on the Mac with ProtonVPN up:
+route = 10.2.0.2, chosen = 192.168.4.20.
+
+**Not in any release** (newest tag `v0.4.6`); the installed app on the Mac is
+still 0.4.3 and shows the VPN address until a new DMG is cut. Workaround: type
+the Ethernet/Wi-Fi address by hand. Not re-run: the GUI itself with the new
+binary (the address is formatted straight from `best_lan_ip()`).
+
+## Update — 2026-11-10 (downloads.unisim.co.uk shows Screens' icon)
 
 The `universal-screens/` folder in the `unisim-downloads` R2 bucket now has a
 `.icon.png`: `crates/host-linux/assets/app-icon.png` (the rounded teal tile)
@@ -11,10 +36,6 @@ Worker's rule). It is the rounded tile rather than a render of
 apps' icons on the site are rounded tiles. If the icon is redrawn, re-upload:
 `wrangler r2 object put unisim-downloads/universal-screens/.icon.png --file <png> --content-type image/png --remote`
 (run from `backoffice/downloads-site`).
-
-## Update` overrides anything older that conflicts.
-A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
-newest entry at the top.
 
 ## Update — 2026-11-05 (Nearby stopped listing this PC; QR styles are dealt at random)
 

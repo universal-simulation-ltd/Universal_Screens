@@ -1607,6 +1607,7 @@ dependencies = [
  "extender-qr",
  "extender-transport",
  "extender-web-bridge",
+ "if-addrs",
  "image",
  "screencapturekit",
  "serde",

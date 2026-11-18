@@ -7,7 +7,7 @@
 //!   - No firewall management (macOS prompts automatically on first listen).
 //!   - Wi-Fi password not extracted (keychain dialog deferred to a later version).
 
-use std::net::{TcpListener, UdpSocket};
+use std::net::{Ipv4Addr, TcpListener, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -1097,10 +1097,101 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 
 
+/// The best LAN address for a phone or another computer to reach.
+///
+/// ⚠️ The default-route address is the wrong answer when a VPN owns the default
+/// route: with ProtonVPN on, this Mac showed 10.2.0.2 (its `utun` tunnel) while
+/// the laptop beside it could only reach 192.168.4.20 on Ethernet (2026-11-18).
+/// The Windows and Linux hosts had already been fixed for the same reason. So a
+/// private address on a real interface wins, and the route trick is the fallback.
 fn best_lan_ip() -> Option<String> {
+    let route = primary_lan_ip();
+    let candidates: Vec<(String, Ipv4Addr)> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.is_oper_up())
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v4) => Some((i.name, v4.ip)),
+            _ => None,
+        })
+        .collect();
+    pick_lan_ip(&candidates, route)
+        .or(route)
+        .map(|ip| ip.to_string())
+}
+
+/// Interface-name prefixes that are never the way another device reaches this
+/// Mac: VPN tunnels (`utun`, `ipsec`, `ppp`), AirDrop/AWDL (`awdl`, `llw`),
+/// bridges and the odd built-in pseudo-devices.
+const VIRTUAL_IFACES: &[&str] =
+    &["lo", "utun", "ipsec", "ppp", "tun", "tap", "awdl", "llw", "bridge", "gif", "stf", "anpi", "ap"];
+
+/// Pick the address to show from `(interface, address)` pairs. A private
+/// address on a real interface wins; among several (Ethernet and Wi-Fi both
+/// up) the default-route one is kept if it qualifies, else the first by
+/// interface name, so `en0` beats `en1`. Split out from [`best_lan_ip`] so
+/// the choice is testable without a network.
+fn pick_lan_ip(candidates: &[(String, Ipv4Addr)], route: Option<Ipv4Addr>) -> Option<Ipv4Addr> {
+    let mut real: Vec<&(String, Ipv4Addr)> = candidates
+        .iter()
+        .filter(|(name, ip)| {
+            !VIRTUAL_IFACES.iter().any(|p| name.starts_with(p))
+                && ip.is_private()
+                && !ip.is_link_local()
+        })
+        .collect();
+    if let Some(r) = route {
+        if real.iter().any(|(_, ip)| *ip == r) {
+            return Some(r);
+        }
+    }
+    real.sort_by(|a, b| a.0.cmp(&b.0));
+    real.first().map(|(_, ip)| *ip)
+}
+
+/// The address of the default-route interface (no packets are sent).
+fn primary_lan_ip() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
-    Some(socket.local_addr().ok()?.ip().to_string())
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) => Some(ip),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod lan_ip_tests {
+    use super::*;
+
+    fn c(name: &str, ip: &str) -> (String, Ipv4Addr) {
+        (name.to_owned(), ip.parse().unwrap())
+    }
+
+    #[test]
+    fn a_vpn_on_the_default_route_is_passed_over() {
+        let ifs = [c("lo0", "127.0.0.1"), c("en0", "192.168.4.20"), c("utun6", "10.2.0.2")];
+        let got = pick_lan_ip(&ifs, Some("10.2.0.2".parse().unwrap()));
+        assert_eq!(got, Some("192.168.4.20".parse().unwrap()));
+    }
+
+    #[test]
+    fn the_default_route_wins_when_it_is_a_real_interface() {
+        let ifs = [c("en0", "192.168.4.20"), c("en1", "192.168.1.7")];
+        let got = pick_lan_ip(&ifs, Some("192.168.1.7".parse().unwrap()));
+        assert_eq!(got, Some("192.168.1.7".parse().unwrap()));
+    }
+
+    #[test]
+    fn otherwise_the_first_real_interface_by_name() {
+        let ifs = [c("en1", "10.0.0.5"), c("en0", "172.16.0.9"), c("bridge100", "192.168.64.1")];
+        assert_eq!(pick_lan_ip(&ifs, None), Some("172.16.0.9".parse().unwrap()));
+    }
+
+    #[test]
+    fn link_local_and_public_addresses_are_not_offered() {
+        let ifs = [c("en0", "169.254.3.4"), c("en1", "81.2.69.160")];
+        assert_eq!(pick_lan_ip(&ifs, None), None);
+    }
 }
 
 
