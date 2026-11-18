@@ -6,8 +6,19 @@
 # binaries, wraps the host in Universal Screens.app, and packages that into a
 # UniversalScreens-<version>.dmg with an /Applications symlink to drag it into.
 #
-# Output lands in dist/. Nothing is notarised and the signature is ad-hoc --
-# see docs/MACOS-APP.md.
+# Output lands in dist/. Signing depends on the environment -- see
+# docs/MACOS-APP.md:
+#
+#   MACOS_SIGN_IDENTITY   e.g. "Developer ID Application: Universal Simulation
+#                         Ltd (ZH9C5TS86A)". Set: hardened-runtime Developer ID
+#                         signature on the app, the client and the DMG.
+#                         Unset: ad-hoc, which runs but loses its privacy
+#                         permissions on every update.
+#   NOTARY_KEY_PATH       An App Store Connect API key (.p8), with
+#   NOTARY_KEY_ID         its key ID and issuer ID. All three set (and an
+#   NOTARY_ISSUER         identity): the DMG is notarised and stapled.
+#   REQUIRE_SIGNING=1     Fail rather than fall back to ad-hoc / un-notarised.
+#                         The release workflow sets it on tags.
 #
 # Usage:
 #   ./scripts/build-app-macos.sh              # full build
@@ -57,6 +68,19 @@ if [[ -z "$VERSION" ]]; then
   [[ -n "$VERSION" ]] || { echo "Couldn't read version from [workspace.package] in Cargo.toml" >&2; exit 1; }
 fi
 echo "==> Universal Screens $VERSION (min macOS $MIN_OS)"
+
+# Refuse early, before a long compile, if a release build can't be signed.
+SIGN_ID="${MACOS_SIGN_IDENTITY:-}"
+NOTARISE=0
+[[ -n "$SIGN_ID" && -n "${NOTARY_KEY_PATH:-}" && -n "${NOTARY_KEY_ID:-}" && -n "${NOTARY_ISSUER:-}" ]] && NOTARISE=1
+if [[ "${REQUIRE_SIGNING:-0}" == 1 && $NOTARISE == 0 ]]; then
+  echo "REQUIRE_SIGNING=1 but MACOS_SIGN_IDENTITY / NOTARY_KEY_PATH / NOTARY_KEY_ID / NOTARY_ISSUER are not all set." >&2
+  exit 1
+fi
+if [[ -n "$SIGN_ID" ]] && ! security find-identity -v -p codesigning | grep -qF "\"$SIGN_ID\""; then
+  echo "Signing identity not in any keychain: $SIGN_ID" >&2
+  exit 1
+fi
 
 for tool in cargo lipo codesign hdiutil sips; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
@@ -168,13 +192,30 @@ PLIST
 cp "$REPO/LICENSE" "$STAGE/LICENSE.txt"
 sed -e "s/{VERSION}/$VERSION/g" "$REPO/installer/README-macos.txt" > "$STAGE/README.txt"
 
-# ⚠️ Ad-hoc signature, not decoration. macOS REFUSES to execute an unsigned
-# arm64 binary outright -- it is killed at exec, not merely warned about. This is
-# what makes the app launch at all on Apple Silicon. It is not notarisation and
-# Gatekeeper will still challenge a downloaded copy; README.txt covers that.
-codesign --force --deep --sign - --timestamp=none "$APP"
-codesign --verify --strict "$APP" || { echo "codesign verification failed" >&2; exit 1; }
-echo "==> ad-hoc signed and verified"
+# ⚠️ Some signature is not optional: macOS REFUSES to execute an unsigned arm64
+# binary outright -- it is killed at exec, not merely warned about.
+#
+# ⚠️ Ad-hoc is the fallback, and it has a cost users feel: macOS keys an ad-hoc
+# app's Screen Recording and Accessibility grants to that exact build, so after
+# every update the switches still show ON while macOS refuses -- a connecting
+# device gets "stream ended" and a black window, or a picture with no control
+# (James, 2026-11-18). A Developer ID signature is keyed to the team and bundle
+# ID instead, so the grants survive updates.
+if [[ -n "$SIGN_ID" ]]; then
+  # Inside out, no --deep: the nested client first, then the bundle. Hardened
+  # runtime + secure timestamp are what notarisation demands; the host needs no
+  # entitlements (not sandboxed; ScreenCaptureKit and the private
+  # CGVirtualDisplay are gated by TCC, not by entitlements).
+  codesign --force --options runtime --timestamp --sign "$SIGN_ID" \
+           --identifier "${BUNDLE_ID%.host}.client" "$APP/Contents/Resources/$CLIENT_BIN"
+  codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+  codesign --verify --deep --strict "$APP" || { echo "codesign verification failed" >&2; exit 1; }
+  echo "==> Developer ID signed and verified: $SIGN_ID"
+else
+  codesign --force --deep --sign - --timestamp=none "$APP"
+  codesign --verify --strict "$APP" || { echo "codesign verification failed" >&2; exit 1; }
+  echo "==> ad-hoc signed and verified (set MACOS_SIGN_IDENTITY for a Developer ID build)"
+fi
 
 # ── DMG ───────────────────────────────────────────────────────────────────────
 ln -s /Applications "$STAGE/Applications"
@@ -182,6 +223,36 @@ DMG="$DIST/UniversalScreens-$VERSION.dmg"
 rm -f "$DMG"
 hdiutil create -volname "$APP_NAME $VERSION" -srcfolder "$STAGE" \
                -ov -format UDZO -quiet "$DMG"
+
+if [[ -n "$SIGN_ID" ]]; then
+  codesign --force --timestamp --sign "$SIGN_ID" "$DMG"
+fi
+
+# ── Notarise + staple ─────────────────────────────────────────────────────────
+# Apple's automated malware scan, not App Review: nothing is published. The
+# stapled ticket lets Gatekeeper open a downloaded copy without the "cannot
+# check it for malicious software" refusal, even offline. The DMG submission
+# covers the app inside it.
+if [[ $NOTARISE == 1 ]]; then
+  echo "==> notarising (usually a few minutes)"
+  out="$(xcrun notarytool submit "$DMG" --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" \
+           --issuer "$NOTARY_ISSUER" --wait --timeout 45m --output-format json)" || true
+  status="$(printf '%s' "$out" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  id="$(printf '%s' "$out" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  if [[ "$status" != "Accepted" ]]; then
+    echo "Notarisation did not succeed (status: ${status:-none}). Output: $out" >&2
+    [[ -n "$id" ]] && xcrun notarytool log "$id" --key "$NOTARY_KEY_PATH" \
+                        --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" >&2 || true
+    exit 1
+  fi
+  xcrun stapler staple -q "$DMG"
+  xcrun stapler validate -q "$DMG"
+  spctl --assess --type open --context context:primary-signature "$DMG" \
+    || { echo "Gatekeeper rejected the notarised DMG" >&2; exit 1; }
+  echo "==> notarised ($id) and stapled"
+elif [[ -n "$SIGN_ID" ]]; then
+  echo "==> signed but NOT notarised (NOTARY_KEY_PATH / NOTARY_KEY_ID / NOTARY_ISSUER unset)"
+fi
 
 shasum -a 256 "$DMG" | awk -v n="$(basename "$DMG")" '{print $1"  "n}' > "$DMG.sha256"
 
