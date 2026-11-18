@@ -11,11 +11,15 @@
 //! `--pin` is the 4-digit code the host shows. It is only needed the first time:
 //! the pairing is remembered, so later runs reconnect without it.
 
+mod keep_awake;
+
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use extender_core::{connect_problem, ConnectProblem, Session, StreamEvent};
-use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, DisplaySide, Input};
+use extender_protocol::{
+    self as protocol, Button, CaptureMode, ClientHello, DisplaySide, HelloExtras, Input,
+};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -60,9 +64,15 @@ type Shared = Arc<Mutex<Option<Frame>>>;
 /// Connect to the host (via the shared `extender-core` session, which owns the
 /// socket + handshake + input upload) and feed decoded frames into `shared`
 /// until the stream ends. Runs on its own thread; errors are reported here.
-fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>, hello: ClientHello) {
+fn run_network(
+    addr: String,
+    shared: Shared,
+    input_rx: Receiver<Input>,
+    hello: ClientHello,
+    extras: HelloExtras,
+) {
     println!("connecting to {addr}...");
-    let session = match Session::connect(&addr, &hello, input_rx) {
+    let session = match Session::connect_with(&addr, &hello, &extras, input_rx) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("client error: {e}");
@@ -503,19 +513,20 @@ impl Gpu {
 /// on. `index` selects from `available_monitors()` (in order); otherwise the
 /// primary monitor is used. Falls back to the window's current monitor, then
 /// [`FALLBACK_RES`], if enumeration comes up empty.
+/// The chosen monitor's native pixel size and its scale factor (1.5 = 150%).
 fn native_resolution(
     event_loop: &ActiveEventLoop,
     window: &Window,
     index: Option<usize>,
-) -> (u32, u32) {
+) -> ((u32, u32), f64) {
     let monitors: Vec<_> = event_loop.available_monitors().collect();
     if monitors.is_empty() {
         if let Some(m) = window.current_monitor() {
             let s = m.size();
-            return (s.width, s.height);
+            return ((s.width, s.height), m.scale_factor());
         }
         eprintln!("no monitors detected; reporting {}x{}", FALLBACK_RES.0, FALLBACK_RES.1);
-        return FALLBACK_RES;
+        return (FALLBACK_RES, 1.0);
     }
 
     let primary = event_loop.primary_monitor();
@@ -524,7 +535,8 @@ fn native_resolution(
         let s = m.size();
         let name = m.name().unwrap_or_else(|| "<unnamed>".to_string());
         let tag = if primary.as_ref() == Some(m) { " (primary)" } else { "" };
-        println!("  [{i}] {name} {}x{}{tag}", s.width, s.height);
+        let pct = scale_percent(m.scale_factor());
+        println!("  [{i}] {name} {}x{} at {pct}%{tag}", s.width, s.height);
     }
 
     let chosen = match index {
@@ -536,7 +548,7 @@ fn native_resolution(
         None => primary.as_ref().unwrap_or(&monitors[0]),
     };
     let s = chosen.size();
-    (s.width, s.height)
+    ((s.width, s.height), chosen.scale_factor())
 }
 
 /// Scale `native` by `percent`, preserving aspect ratio. Both dimensions are
@@ -567,13 +579,25 @@ fn cap_to_decodable(w: u32, h: u32) -> (u32, u32) {
 /// the chosen [`SCALE_PRESETS`] entry (default `[0]`, native), then clamp it to
 /// what openh264 can decode ([`cap_to_decodable`]). Prints the preset menu so
 /// the user can re-run with a different `--res N`.
+///
+/// Also returns the chosen monitor's own scaling, as a percentage.
 fn resolve_resolution(
     event_loop: &ActiveEventLoop,
     window: &Window,
     monitor_index: Option<usize>,
     res_index: Option<usize>,
-) -> (u32, u32) {
-    let native = native_resolution(event_loop, window, monitor_index);
+    size: Option<(u32, u32)>,
+) -> ((u32, u32), u16) {
+    let (native, factor) = native_resolution(event_loop, window, monitor_index);
+    let own_scale = scale_percent(factor);
+    if let Some((w, h)) = size {
+        let (cw, ch) = cap_to_decodable(w, h);
+        if (cw, ch) != (w, h) {
+            println!("capping {w}x{h} -> {cw}x{ch} for the openh264 decoder (max ~4K UHD)");
+        }
+        println!("reporting {cw}x{ch} (--size) to host");
+        return ((cw, ch), own_scale);
+    }
 
     println!("resolution presets (pick with --res N):");
     for (i, &pct) in SCALE_PRESETS.iter().enumerate() {
@@ -596,7 +620,7 @@ fn resolve_resolution(
         println!("capping {w}x{h} -> {cw}x{ch} for the openh264 decoder (max ~4K UHD)");
     }
     println!("reporting [{idx}] {cw}x{ch} ({pct}%) to host");
-    (cw, ch)
+    ((cw, ch), own_scale)
 }
 
 struct App {
@@ -611,6 +635,10 @@ struct App {
     addr: String,
     monitor_index: Option<usize>,
     res_index: Option<usize>,
+    /// `--size`: an exact pixel size, overriding the preset.
+    size: Option<(u32, u32)>,
+    /// `--scale`: the second screen's scaling; `None` = this screen's own.
+    scale: Option<u16>,
     /// Which display the host should stream: a virtual second screen (default) or
     /// a mirror of the host's primary display (`--mirror`, remote-control mode).
     capture_mode: CaptureMode,
@@ -634,8 +662,23 @@ impl ApplicationHandler for App {
         // Now that winit can enumerate monitors, pick the resolution to advertise
         // and start the network thread (deferred from main until this is known).
         if let Some(input_rx) = self.input_rx.take() {
-            let (width, height) =
-                resolve_resolution(event_loop, &window, self.monitor_index, self.res_index);
+            let ((width, height), own_scale) = resolve_resolution(
+                event_loop,
+                &window,
+                self.monitor_index,
+                self.res_index,
+                self.size,
+            );
+            // Things on the second screen look as big as on this one unless
+            // `--scale` says otherwise. An older host ignores it.
+            let scale = self.scale.unwrap_or(own_scale);
+            if self.capture_mode == CaptureMode::VirtualDisplay {
+                println!(
+                    "scaling {scale}%{} (change with --scale N)",
+                    if self.scale.is_none() { ", the same as this screen" } else { "" }
+                );
+            }
+            let extras = HelloExtras { scale_percent: scale };
             let hello = ClientHello {
                 protocol_version: protocol::PROTOCOL_VERSION,
                 width,
@@ -648,7 +691,7 @@ impl ApplicationHandler for App {
             };
             let addr = self.addr.clone();
             let shared = self.shared.clone();
-            std::thread::spawn(move || run_network(addr, shared, input_rx, hello));
+            std::thread::spawn(move || run_network(addr, shared, input_rx, hello, extras));
         }
 
         let gpu = pollster::block_on(Gpu::new(window.clone()));
@@ -761,33 +804,73 @@ impl ApplicationHandler for App {
 }
 
 /// Parse the command line: one positional `HOST_ADDR`, plus optional
-/// `--monitor N` / `-m N`, `--res N` / `-r N`, `--pin NNNN` / `-p NNNN`,
-/// `--side left|right|above|below`, and `--mirror` flags.
-#[allow(clippy::type_complexity)]
-fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32, Option<DisplaySide>) {
+/// Everything the command line can set.
+struct Args {
+    addr: String,
+    monitor_index: Option<usize>,
+    res_index: Option<usize>,
+    /// `--size WxH`: an exact pixel size, instead of a `--res` preset.
+    size: Option<(u32, u32)>,
+    /// `--scale N`: how big things look on the second screen, in percent.
+    /// `None` = the same as this screen's own scaling.
+    scale: Option<u16>,
+    capture_mode: CaptureMode,
+    pin: u32,
+    side: Option<DisplaySide>,
+    /// `--allow-sleep`: let this screen turn off while it shows the host.
+    allow_sleep: bool,
+}
+
+/// `--monitor N` / `-m N`, `--res N` / `-r N`, `--size WxH`, `--scale N`,
+/// `--pin NNNN` / `-p NNNN`, `--side left|right|above|below`, `--allow-sleep`
+/// and `--mirror` flags.
+fn parse_args() -> Args {
+    let mut args = Args {
+        addr: DEFAULT_ADDR.to_string(),
+        monitor_index: None,
+        res_index: None,
+        size: None,
+        scale: None,
+        capture_mode: CaptureMode::VirtualDisplay,
+        pin: 0,
+        side: None,
+        allow_sleep: false,
+    };
     let mut addr: Option<String> = None;
-    let mut monitor_index = None;
-    let mut res_index = None;
-    let mut capture_mode = CaptureMode::VirtualDisplay;
-    let mut pin = 0;
-    let mut side = None;
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
+    let mut it = std::env::args().skip(1);
+    while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--monitor" | "-m" => monitor_index = args.next().and_then(|s| s.parse().ok()),
-            "--res" | "-r" => res_index = args.next().and_then(|s| s.parse().ok()),
-            "--mirror" => capture_mode = CaptureMode::MirrorPrimary,
+            "--monitor" | "-m" => args.monitor_index = it.next().and_then(|s| s.parse().ok()),
+            "--res" | "-r" => args.res_index = it.next().and_then(|s| s.parse().ok()),
+            "--size" => {
+                let text = it.next().unwrap_or_default();
+                args.size = parse_size(&text);
+                if args.size.is_none() {
+                    eprintln!("ignoring --size {text:?}: expected WIDTHxHEIGHT, e.g. 2560x1600");
+                }
+            }
+            "--scale" => {
+                let text = it.next().unwrap_or_default();
+                match text.trim().trim_end_matches('%').parse::<u16>() {
+                    Ok(n) if (HelloExtras::MIN_SCALE..=HelloExtras::MAX_SCALE).contains(&n) => {
+                        args.scale = Some(n);
+                    }
+                    _ => eprintln!("ignoring --scale {text:?}: expected a percentage from 100 to 300"),
+                }
+            }
+            "--mirror" => args.capture_mode = CaptureMode::MirrorPrimary,
+            "--allow-sleep" => args.allow_sleep = true,
             "--side" | "-s" => {
-                let name = args.next().unwrap_or_default();
-                side = DisplaySide::parse(&name);
-                if side.is_none() {
+                let name = it.next().unwrap_or_default();
+                args.side = DisplaySide::parse(&name);
+                if args.side.is_none() {
                     eprintln!("ignoring --side {name:?}: expected left, right, above or below");
                 }
             }
             "--pin" | "-p" => {
-                let code = args.next().unwrap_or_default();
+                let code = it.next().unwrap_or_default();
                 match code.trim().parse::<u32>() {
-                    Ok(n @ 1..=9999) => pin = n,
+                    Ok(n @ 1..=9999) => args.pin = n,
                     _ => eprintln!("ignoring --pin {code:?}: expected the host's 4-digit PIN"),
                 }
             }
@@ -796,26 +879,40 @@ fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32, Opti
             _ => eprintln!("ignoring extra argument: {arg}"),
         }
     }
-    (
-        addr.unwrap_or_else(|| DEFAULT_ADDR.to_string()),
-        monitor_index,
-        res_index,
-        capture_mode,
-        pin,
-        side,
-    )
+    if let Some(addr) = addr {
+        args.addr = addr;
+    }
+    args
+}
+
+/// `2560x1600` (or `2560×1600`, `2560X1600`) → (2560, 1600), even-rounded.
+fn parse_size(text: &str) -> Option<(u32, u32)> {
+    let text = text.trim().replace(['×', 'X'], "x");
+    let (w, h) = text.split_once('x')?;
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    (w >= 320 && h >= 240).then_some((w & !1, h & !1))
+}
+
+/// A monitor's scale factor (1.5 on a Windows screen set to 150%) as the
+/// nearest percentage Windows offers, held to the supported range.
+fn scale_percent(factor: f64) -> u16 {
+    let pct = (factor * 100.0 / 25.0).round() * 25.0;
+    (pct as u16).clamp(HelloExtras::MIN_SCALE, HelloExtras::MAX_SCALE)
 }
 
 fn main() {
     // The network thread starts in `resumed` once winit can enumerate monitors
     // (we need the chosen monitor's size before we can send the hello).
-    let (addr, monitor_index, res_index, capture_mode, pin, side) = parse_args();
+    let args = parse_args();
+    let capture_mode = args.capture_mode;
     let shared: Shared = Arc::new(Mutex::new(None));
     let (input_tx, input_rx) = mpsc::channel::<Input>();
     // Queued now, sent as the first input once the session is up.
-    if let (Some(side), CaptureMode::VirtualDisplay) = (side, capture_mode) {
+    if let (Some(side), CaptureMode::VirtualDisplay) = (args.side, capture_mode) {
         let _ = input_tx.send(Input::PlaceDisplay { side });
     }
+    // Held for the life of the window (dropped when `main` returns).
+    let _awake = (!args.allow_sleep).then(keep_awake::KeepAwake::hold);
 
     if capture_mode == CaptureMode::MirrorPrimary {
         println!("mirror mode: requesting the host's primary display (remote control)");
@@ -831,12 +928,38 @@ fn main() {
         gpu: None,
         input_tx,
         input_rx: Some(input_rx),
-        addr,
-        monitor_index,
-        res_index,
+        addr: args.addr,
+        monitor_index: args.monitor_index,
+        res_index: args.res_index,
+        size: args.size,
+        scale: args.scale,
         capture_mode,
-        pin,
+        pin: args.pin,
         grabbed: false,
     };
     event_loop.run_app(&mut app).expect("run app");
+}
+
+#[cfg(test)]
+mod arg_tests {
+    use super::*;
+
+    #[test]
+    fn sizes_parse_in_the_usual_spellings() {
+        assert_eq!(parse_size("2560x1600"), Some((2560, 1600)));
+        assert_eq!(parse_size(" 1921 × 1081 "), Some((1920, 1080)));
+        assert_eq!(parse_size("1920X1200"), Some((1920, 1200)));
+        assert_eq!(parse_size("wide"), None);
+        assert_eq!(parse_size("100x100"), None);
+    }
+
+    #[test]
+    fn monitor_scaling_rounds_to_what_windows_offers() {
+        assert_eq!(scale_percent(1.0), 100);
+        assert_eq!(scale_percent(1.5), 150);
+        assert_eq!(scale_percent(1.25), 125);
+        assert_eq!(scale_percent(2.0), 200);
+        assert_eq!(scale_percent(0.8), 100);
+        assert_eq!(scale_percent(1.749), 175);
+    }
 }

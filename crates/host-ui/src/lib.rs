@@ -45,7 +45,7 @@ pub mod remote;
 pub use remote::{RemoteAccessPanel, REMOTE_CLIENT_URL};
 
 pub mod viewer;
-pub use viewer::ViewerPanel;
+pub use viewer::{ViewerPanel, ViewerPrefs};
 
 use std::net::TcpListener;
 
@@ -147,6 +147,9 @@ pub fn gen_pin() -> u32 {
 
 /// The eframe storage key for "Use my own PIN". One key for all three hosts.
 pub const OWN_PIN_KEY: &str = "own_pin";
+/// Storage key for the "Show another computer here" panel's choices
+/// ([`ViewerPrefs`]: size, scaling, side, keep-awake, last address).
+pub const VIEWER_KEY: &str = "viewer";
 
 /// Parse the PIN typed into "Use my own PIN": exactly four digits.
 ///

@@ -295,6 +295,64 @@ pub fn write_framed<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()
     Ok(())
 }
 
+/// Optional settings a client appends after its [`ClientHello`], in the same
+/// frame (added 2026-11-18, protocol still v10).
+///
+/// ⚠️ Why a trailing block rather than new `ClientHello` fields: postcard
+/// encodes a struct as its fields in order, so a new field would break every
+/// host that decodes the old shape, and every phone client still sending it.
+/// `postcard::from_bytes` ignores bytes after the value, so an older host reads
+/// the hello and skips this; a newer host reads it with [`read_hello`], and a
+/// hello without it decodes to [`HelloExtras::default`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloExtras {
+    /// How big things should look on a second screen, as a percentage, like
+    /// Windows' display scaling: 150 = everything one and a half times the
+    /// size, so a 2880×1800 panel "looks like" 1920×1200. 100 = 1:1.
+    pub scale_percent: u16,
+}
+
+impl Default for HelloExtras {
+    fn default() -> Self {
+        Self { scale_percent: 100 }
+    }
+}
+
+impl HelloExtras {
+    /// The supported range, matching what Windows offers.
+    pub const MIN_SCALE: u16 = 100;
+    pub const MAX_SCALE: u16 = 300;
+
+    /// `scale_percent` held to the supported range.
+    pub fn scale(self) -> u16 {
+        self.scale_percent.clamp(Self::MIN_SCALE, Self::MAX_SCALE)
+    }
+}
+
+/// Write a [`ClientHello`] followed by its [`HelloExtras`], as one frame.
+///
+/// # Errors
+/// Returns an error if the write fails.
+pub fn write_hello<W: Write>(w: &mut W, hello: &ClientHello, extras: &HelloExtras) -> io::Result<()> {
+    let mut body = postcard::to_stdvec(hello).map_err(io::Error::other)?;
+    body.extend(postcard::to_stdvec(extras).map_err(io::Error::other)?);
+    let len = u32::try_from(body.len()).map_err(|_| io::Error::other("message too large"))?;
+    w.write_all(&len.to_le_bytes())?;
+    w.write_all(&body)
+}
+
+/// Read a hello frame: the [`ClientHello`], and its [`HelloExtras`] if the
+/// client sent any (else the defaults).
+///
+/// # Errors
+/// Returns an error if the stream ends or the hello itself doesn't decode.
+pub fn read_hello<R: Read>(r: &mut R) -> io::Result<(ClientHello, HelloExtras)> {
+    let body = read_frame(r)?;
+    let (hello, rest) = postcard::take_from_bytes::<ClientHello>(&body).map_err(io::Error::other)?;
+    let extras = postcard::from_bytes::<HelloExtras>(rest).unwrap_or_default();
+    Ok((hello, extras))
+}
+
 /// The largest frame body [`read_frame`] will accept: 64 MiB.
 ///
 /// ⚠️ The length prefix is read from the peer **before** anything has proved who
@@ -503,6 +561,41 @@ mod tests {
             let got: Message = read_framed(&mut cursor).unwrap();
             assert_eq!(&got, expected);
         }
+    }
+
+    fn sample_hello() -> ClientHello {
+        ClientHello {
+            protocol_version: PROTOCOL_VERSION,
+            width: 2880,
+            height: 1800,
+            capture_mode: CaptureMode::VirtualDisplay,
+            platform: ClientPlatform::Windows,
+            pin: 0,
+            device_name: "SPECTRE".to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_older_host_still_reads_a_hello_with_extras() {
+        let mut buf = Vec::new();
+        write_hello(&mut buf, &sample_hello(), &HelloExtras { scale_percent: 150 }).unwrap();
+        // What every host before HelloExtras does:
+        let old: ClientHello = read_framed(&mut io::Cursor::new(&buf)).unwrap();
+        assert_eq!(old, sample_hello());
+        // And a new one gets both:
+        let (hello, extras) = read_hello(&mut io::Cursor::new(&buf)).unwrap();
+        assert_eq!(hello, sample_hello());
+        assert_eq!(extras.scale_percent, 150);
+    }
+
+    #[test]
+    fn a_hello_without_extras_means_100_percent() {
+        let mut buf = Vec::new();
+        write_framed(&mut buf, &sample_hello()).unwrap();
+        let (_, extras) = read_hello(&mut io::Cursor::new(&buf)).unwrap();
+        assert_eq!(extras, HelloExtras::default());
+        assert_eq!(HelloExtras { scale_percent: 40 }.scale(), 100);
+        assert_eq!(HelloExtras { scale_percent: 900 }.scale(), 300);
     }
 
     #[test]

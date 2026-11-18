@@ -33,7 +33,9 @@ const FPS: i32 = 60;
 const BITRATE: i32 = 40_000_000;
 
 extern "C" {
-    fn extender_vdisplay_create(width: u32, height: u32, name: *const c_char) -> u32;
+    /// `width`/`height` are the display's size in points; with `hidpi` set it is
+    /// backed by a framebuffer twice that in each direction (Retina).
+    fn extender_vdisplay_create(width: u32, height: u32, name: *const c_char, hidpi: bool) -> u32;
     /// Release a virtual display so the window server removes it. Returns 1 if a
     /// display with that id was held, else 0.
     fn extender_vdisplay_destroy(id: u32) -> u32;
@@ -46,7 +48,11 @@ type Bounds = (f64, f64, f64, f64);
 #[derive(Clone)]
 pub(crate) struct Display {
     pub(crate) id: u32,
+    /// The pixel size the client asked for, which is what gets captured.
     pub(crate) size: (u32, u32),
+    /// The client's scaling (100 = 1:1); above 100 the display is HiDPI at
+    /// `size / scale` points, so things look as big as on the client.
+    pub(crate) scale: u16,
     bounds: Bounds,
     /// The descriptor name the display was actually created with — i.e. the
     /// resolved label `resolved_name(friendly, device)`. A `CGVirtualDisplay`
@@ -106,13 +112,14 @@ pub(crate) fn serve_session(
     mode: CaptureMode,
     target_w: u32,
     target_h: u32,
+    scale: u16,
     name: &str,
     vdisplays: &Arc<Mutex<VDisplays>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
 
     let (id, size, bounds) = match mode {
-        CaptureMode::VirtualDisplay => ensure_display(vdisplays, target_w, target_h, name)?,
+        CaptureMode::VirtualDisplay => ensure_display(vdisplays, target_w, target_h, scale, name)?,
         CaptureMode::MirrorPrimary | CaptureMode::ControlOnly => primary_display()?,
     };
 
@@ -417,6 +424,7 @@ pub(crate) fn ensure_display(
     state: &Arc<Mutex<VDisplays>>,
     w: u32,
     h: u32,
+    scale: u16,
     device_name: &str,
 ) -> Result<(u32, (u32, u32), Bounds), Box<dyn std::error::Error>> {
     let desired_name = {
@@ -434,7 +442,7 @@ pub(crate) fn ensure_display(
         if let Some(d) = s
             .entries
             .iter()
-            .find(|d| d.size == (w, h) && d.name == desired_name)
+            .find(|d| d.size == (w, h) && d.scale == scale && d.name == desired_name)
             .cloned()
         {
             return Ok((d.id, d.size, d.bounds));
@@ -448,13 +456,17 @@ pub(crate) fn ensure_display(
     }
 
     let c_name = CString::new(desired_name.as_str()).unwrap_or_default();
-    let id = unsafe { extender_vdisplay_create(w, h, c_name.as_ptr()) };
+    let ((pw, ph), hidpi) = display_points(w, h, scale);
+    let id = unsafe { extender_vdisplay_create(pw, ph, c_name.as_ptr(), hidpi) };
     if id == 0 {
         return Err("CGVirtualDisplay rejected the requested size".into());
     }
     let mut bounds = wait_for_display(id)
         .ok_or("virtual display did not register with the window server")?;
-    println!("created virtual display {id}: \"{desired_name}\" {w}x{h} px");
+    println!(
+        "created virtual display {id}: \"{desired_name}\" {pw}x{ph} pt{}, captured at {w}x{h} px",
+        if hidpi { " (HiDPI)" } else { "" }
+    );
     // macOS puts a new display wherever it likes; put it back where this device
     // was last placed.
     if let Some(side) = crate::placement::saved(device_name) {
@@ -466,12 +478,31 @@ pub(crate) fn ensure_display(
     let d = Display {
         id,
         size: (w, h),
+        scale,
         bounds,
         name: desired_name,
         device_base: device_name.to_string(),
     };
     state.lock().unwrap().entries.push(d.clone());
     Ok((d.id, d.size, d.bounds))
+}
+
+/// The virtual display's size in points, and whether it is HiDPI, for a
+/// client asking for `w`×`h` pixels at `scale` percent.
+///
+/// At 100% the display is `w`×`h` at 1:1, as it always was. Above that it is
+/// HiDPI at `w`×`h` ÷ scale points (a 2880×1800 laptop at 150% → 1920×1200 pt,
+/// a 3840×2400 framebuffer), and capture scales that down to the client's
+/// 2880×1800: crisp, and everything as big as on the client's own screen.
+/// docs/M4-hidpi-deferred.md recorded HiDPI not sticking on macOS 26.2; on
+/// macOS 27 the mode is current straight away when the descriptor's maximum
+/// pixel size is twice the mode (probed 2026-11-18).
+fn display_points(w: u32, h: u32, scale: u16) -> ((u32, u32), bool) {
+    if scale <= 100 {
+        return ((w, h), false);
+    }
+    let shrink = |px: u32| ((u64::from(px) * 100 / u64::from(scale)) as u32).max(1) & !1;
+    ((shrink(w), shrink(h)), true)
 }
 
 fn primary_display() -> Result<(u32, (u32, u32), Bounds), Box<dyn std::error::Error>> {
@@ -649,4 +680,22 @@ fn hid_to_macos(usage: u32) -> Option<u16> {
         _ => return None,
     };
     Some(keycode)
+}
+
+#[cfg(test)]
+mod display_points_tests {
+    use super::display_points;
+
+    #[test]
+    fn one_hundred_percent_is_one_to_one() {
+        assert_eq!(display_points(2880, 1800, 100), ((2880, 1800), false));
+    }
+
+    #[test]
+    fn scaling_gives_a_hidpi_display_that_looks_like_the_client() {
+        assert_eq!(display_points(2880, 1800, 150), ((1920, 1200), true));
+        assert_eq!(display_points(2880, 1800, 200), ((1440, 900), true));
+        // Odd results are rounded down to even, which video encoders want.
+        assert_eq!(display_points(1366, 768, 125), ((1092, 614), true));
+    }
 }

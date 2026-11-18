@@ -47,10 +47,16 @@ double-clicking it would have nowhere to connect:
 --pin is the 4-digit PIN the host shows. It is only needed the first time: the
 pairing is remembered, so later runs connect without it.
 
-Options: --side left|right|above|below to place the screen, --monitor N to
-pick a display, --res N to drop the resolution if the
-stream is choppy, --mirror to view the host's primary display instead of a new
-virtual one.
+Options: --size 2560x1600 for an exact size (or --res N for a preset, if the
+stream is choppy), --scale 150 for how big things look (default: the same as
+this PC's own display scaling), --side left|right|above|below to place the
+screen, --monitor N to pick a display, --allow-sleep to let this screen turn
+off (by default it stays on while it shows the other computer), --mirror to
+view the host's primary display instead of a new virtual one.
+
+Size, scaling and "Let this screen turn off" are also in the app, under "Show
+another computer here", and it remembers them. Scaling needs a Mac running
+Universal Screens 0.4.8 or newer; an older one shows the screen at 100%.
 
 
 Letting a phone reach the host

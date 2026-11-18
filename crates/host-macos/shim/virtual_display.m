@@ -6,12 +6,13 @@
 // lifetime; macOS tears it down when the process exits. Interface shape follows
 // the widely-used reverse-engineering (e.g. Chromium's virtual_display_mac_util).
 //
-// NOTE: this creates a standard (non-HiDPI) display at the requested size. True
-// Retina/HiDPI was attempted (settings.hiDPI + explicit CGDisplaySetDisplayMode)
-// but a standalone virtual display doesn't reliably adopt a HiDPI mode without
-// being mirrored to a physical display (the force-hidpi approach), which doesn't
-// fit a capture workflow — so it's deferred. See docs/M4-hidpi-deferred.md.
+// NOTE: at 100% scaling this creates a standard display at the requested size.
+// When the client asks for scaling (150% etc.) it is HiDPI: the mode is the
+// point size and the maximum pixel size twice that, which macOS 27 adopts as the
+// current mode straight away (it didn't on 26.2 with other shapes; see
+// docs/M4-hidpi-deferred.md, 2026-11-18 update).
 
+#include <stdbool.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 
@@ -77,10 +78,15 @@ uint32_t extender_vdisplay_destroy(uint32_t displayID) {
     return 0;
 }
 
-// Create one virtual display at the given pixel size, labelled `name` (the
-// connecting device — falls back to a default when null/empty). Retained until
-// destroyed (or process exit). Returns its CGDirectDisplayID, or 0 on failure.
-uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *name) {
+// Create one virtual display of `width`×`height` points, labelled `name` (the
+// connecting device — falls back to a default when null/empty). With `hidpi`
+// it is Retina: a framebuffer twice the point size each way, which is what makes
+// a client's 150% scaling crisp. Retained until destroyed (or process exit).
+// Returns its CGDirectDisplayID, or 0 on failure.
+//
+// HiDPI note: the maximum pixel size must be the doubled size, or macOS keeps
+// the display at 1x (docs/M4-hidpi-deferred.md; works on macOS 27).
+uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *name, bool hidpi) {
     NSString *displayName = (name != NULL && name[0] != '\0')
         ? [NSString stringWithUTF8String:name]
         : nil;
@@ -91,8 +97,9 @@ uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *n
     CGVirtualDisplayDescriptor *descriptor = [[CGVirtualDisplayDescriptor alloc] init];
     descriptor.queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0);
     descriptor.name = displayName;
-    descriptor.maxPixelsWide = width;
-    descriptor.maxPixelsHigh = height;
+    uint32_t factor = hidpi ? 2 : 1;
+    descriptor.maxPixelsWide = width * factor;
+    descriptor.maxPixelsHigh = height * factor;
     descriptor.sizeInMillimeters = CGSizeMake(25.4 * width / 109.0, 25.4 * height / 109.0);
     descriptor.productID = 0x1234;
     descriptor.vendorID = 0x3456;
@@ -111,7 +118,7 @@ uint32_t extender_vdisplay_create(uint32_t width, uint32_t height, const char *n
                                                                       height:height
                                                                  refreshRate:60.0];
     CGVirtualDisplaySettings *settings = [[CGVirtualDisplaySettings alloc] init];
-    settings.hiDPI = 0;
+    settings.hiDPI = hidpi ? 1 : 0;
     settings.modes = @[ mode ];
 
     if (![display applySettings:settings]) {

@@ -31,7 +31,7 @@ use extender_host_ui::{
     about_panel, connect_url, device_icon, first_free_port, gen_pin, nearby_orbit,
     paint_brand_strip, platform_display, platform_tag, sep_dot, startup_pin, style_navbar,
     DeviceKind, OwnPinChange, OwnPinEditor, BASE_PORT, BRAND, CHANGELOG, CHANGELOG_URL,
-    OPENSOURCE_ROOT, OPENSOURCE_URL, OWN_PIN_KEY, RECENT_MAX, SIBLING_APPS,
+    OPENSOURCE_ROOT, OPENSOURCE_URL, OWN_PIN_KEY, RECENT_MAX, SIBLING_APPS, VIEWER_KEY,
 };
 
 /// This app's version, surfaced in the changelog popup.
@@ -211,7 +211,14 @@ impl HostApp {
             firewall_ok: None,
             remote: extender_host_ui::RemoteAccessPanel::default(),
             discovered_peers,
-            viewer: extender_host_ui::ViewerPanel::default(),
+            viewer: {
+                // Size, scaling, side and keep-awake are kept between launches.
+                let mut viewer = extender_host_ui::ViewerPanel::default();
+                if let Some(prefs) = storage.and_then(|s| eframe::get_value(s, VIEWER_KEY)) {
+                    viewer.set_prefs(prefs);
+                }
+                viewer
+            },
             listener_stop,
             own_ip,
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
@@ -876,6 +883,7 @@ impl HostApp {
 
 impl eframe::App for HostApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, VIEWER_KEY, &self.viewer.prefs());
         eframe::set_value(storage, "auto_connect", &self.auto_connect);
         eframe::set_value(storage, "dark_mode", &self.dark_mode);
         eframe::set_value(storage, OWN_PIN_KEY, &self.own_pin);

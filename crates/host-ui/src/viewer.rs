@@ -52,6 +52,23 @@ enum Phase {
     Open { addr: String, mode: Mode },
 }
 
+/// The panel's choices that are worth keeping between launches. The host saves
+/// them with its other settings ([`ViewerPanel::prefs`] / [`ViewerPanel::set_prefs`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ViewerPrefs {
+    /// The last address shown, so a reopened app is one click from reconnecting.
+    pub address: String,
+    pub side: Option<extender_protocol::DisplaySide>,
+    /// The second screen's pixel size; `None` = this screen's full size.
+    pub size: Option<(u32, u32)>,
+    /// The second screen's scaling in percent; `None` = this screen's own.
+    pub scale: Option<u16>,
+    /// Let this screen turn off while it shows the other computer. Off (the
+    /// screen is kept awake) unless ticked: James's laptop kept going black.
+    pub allow_sleep: bool,
+}
+
 /// The panel's state. Hold one in the host's app struct, call [`Self::ui`]
 /// where the panel goes, and [`Self::choose`] when a nearby computer is clicked.
 pub struct ViewerPanel {
@@ -60,6 +77,12 @@ pub struct ViewerPanel {
     /// Which side of the other computer's main screen this one should sit on
     /// as its second screen. `None` = leave it where that computer last put it.
     side: Option<extender_protocol::DisplaySide>,
+    size: Option<(u32, u32)>,
+    /// What's typed in the custom size box, while "Custom" is chosen.
+    size_draft: String,
+    custom_size: bool,
+    scale: Option<u16>,
+    allow_sleep: bool,
     /// Set by [`Self::choose`] so the next frame opens the collapsed panel.
     reveal: bool,
     phase: Arc<Mutex<Phase>>,
@@ -71,6 +94,11 @@ impl Default for ViewerPanel {
             address: String::new(),
             pin: String::new(),
             side: None,
+            size: None,
+            size_draft: String::new(),
+            custom_size: false,
+            scale: None,
+            allow_sleep: false,
             reveal: false,
             phase: Arc::new(Mutex::new(Phase::Idle { note: None })),
         }
@@ -78,6 +106,29 @@ impl Default for ViewerPanel {
 }
 
 impl ViewerPanel {
+    /// What to save between launches.
+    pub fn prefs(&self) -> ViewerPrefs {
+        ViewerPrefs {
+            address: self.address.clone(),
+            side: self.side,
+            size: self.size,
+            scale: self.scale,
+            allow_sleep: self.allow_sleep,
+        }
+    }
+
+    /// Restore what [`Self::prefs`] saved.
+    pub fn set_prefs(&mut self, prefs: ViewerPrefs) {
+        self.address = prefs.address;
+        self.side = prefs.side;
+        self.size = prefs.size;
+        self.scale = prefs.scale;
+        self.allow_sleep = prefs.allow_sleep;
+        if let Some((w, h)) = self.size {
+            self.size_draft = format!("{w}×{h}");
+        }
+    }
+
     /// Fill in a computer found on the network and open the panel on it.
     pub fn choose(&mut self, addr: &str, port: u16) {
         self.address = format!("{addr}:{port}");
@@ -132,6 +183,7 @@ impl ViewerPanel {
             }
             Phase::Idle { note } => {
                 let ready = !self.address.trim().is_empty();
+                self.second_screen_options(ui);
                 // Only meaningful for "Be its second screen"; asked for only when
                 // chosen, because a host older than 0.4.8 can't take it.
                 ui.horizontal_wrapped(|ui| {
@@ -167,6 +219,91 @@ impl ViewerPanel {
         }
     }
 
+    /// Size and scaling for "Be its second screen", and whether this screen may
+    /// sleep while it shows the other computer.
+    fn second_screen_options(&mut self, ui: &mut egui::Ui) {
+        // This screen, as egui sees it: size in points and pixels per point.
+        let (native, own_scale) = ui.ctx().input(|i| {
+            let vp = i.viewport();
+            let ppp = vp.native_pixels_per_point.unwrap_or(i.pixels_per_point);
+            let px = vp.monitor_size.map(|s| ((s.x * ppp).round() as u32 & !1, (s.y * ppp).round() as u32 & !1));
+            (px, ((ppp * 4.0).round() * 25.0) as u16)
+        });
+        let own_scale = own_scale.clamp(100, 300);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Size:");
+            let full = match native {
+                Some((w, h)) => format!("full size of this screen ({w}×{h})"),
+                None => "full size of this screen".to_owned(),
+            };
+            let current = if self.custom_size {
+                "custom".to_owned()
+            } else {
+                match self.size {
+                    None => full.clone(),
+                    Some((w, h)) => format!("{w}×{h}"),
+                }
+            };
+            egui::ComboBox::from_id_salt("viewer-size")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(self.size.is_none() && !self.custom_size, full).clicked() {
+                        self.size = None;
+                        self.custom_size = false;
+                    }
+                    if let Some(native) = native {
+                        // The client's own presets, with their real pixel sizes.
+                        for pct in [75u32, 67, 50] {
+                            let w = (native.0 * pct / 100) & !1;
+                            let h = (native.1 * pct / 100) & !1;
+                            let label = format!("{w}×{h} ({pct}%)");
+                            if ui.selectable_label(self.size == Some((w, h)) && !self.custom_size, label).clicked() {
+                                self.size = Some((w, h));
+                                self.custom_size = false;
+                            }
+                        }
+                    }
+                    if ui.selectable_label(self.custom_size, "custom…").clicked() {
+                        self.custom_size = true;
+                    }
+                });
+            if self.custom_size {
+                let edit = ui.add(
+                    egui::TextEdit::singleline(&mut self.size_draft)
+                        .hint_text("2560×1600")
+                        .desired_width(90.0),
+                );
+                if edit.changed() {
+                    self.size = parse_size(&self.size_draft);
+                }
+                if self.size.is_none() && !self.size_draft.trim().is_empty() {
+                    ui.small("width × height, e.g. 2560×1600");
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Scaling:");
+            let same = format!("same as this screen ({own_scale}%)");
+            let current = self.scale.map_or(same.clone(), |s| format!("{s}%"));
+            egui::ComboBox::from_id_salt("viewer-scale")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(self.scale.is_none(), same).clicked() {
+                        self.scale = None;
+                    }
+                    for pct in [100u16, 125, 150, 175, 200, 225, 250, 300] {
+                        if ui.selectable_label(self.scale == Some(pct), format!("{pct}%")).clicked() {
+                            self.scale = Some(pct);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("How big things look on the second screen, like Windows' display scaling");
+        });
+        ui.checkbox(&mut self.allow_sleep, "Let this screen turn off while it shows the other computer");
+    }
+
     /// Run the client on the typed address, and wait for it on a thread that
     /// puts the panel back to `Idle` — with the client's own explanation if it
     /// failed — when it exits.
@@ -180,8 +317,19 @@ impl ViewerPanel {
         let addr = normalise_addr(&self.address);
         let mut cmd = Command::new(client);
         cmd.arg(&addr).args(mode.args());
-        if let (Mode::SecondScreen, Some(side)) = (mode, self.side) {
-            cmd.arg("--side").arg(side.as_str());
+        if mode == Mode::SecondScreen {
+            if let Some(side) = self.side {
+                cmd.arg("--side").arg(side.as_str());
+            }
+            if let Some((w, h)) = self.size {
+                cmd.arg("--size").arg(format!("{w}x{h}"));
+            }
+            if let Some(scale) = self.scale {
+                cmd.arg("--scale").arg(scale.to_string());
+            }
+        }
+        if self.allow_sleep {
+            cmd.arg("--allow-sleep");
         }
         let pin = self.pin.trim();
         if !pin.is_empty() {
@@ -238,6 +386,14 @@ fn client_path() -> Option<PathBuf> {
     [dir.join("../Resources").join(name), dir.join(name)].into_iter().find(|p| p.is_file())
 }
 
+/// `2560×1600` (or `2560x1600`) → (2560, 1600), even-rounded; the client's rule.
+fn parse_size(text: &str) -> Option<(u32, u32)> {
+    let text = text.trim().replace(['×', 'X'], "x");
+    let (w, h) = text.split_once('x')?;
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    (w >= 320 && h >= 240).then_some((w & !1, h & !1))
+}
+
 /// Default the port: a bare address means the host's usual one.
 fn normalise_addr(typed: &str) -> String {
     let typed = typed.trim();
@@ -266,6 +422,21 @@ mod tests {
     fn a_bare_address_gets_the_usual_port() {
         assert_eq!(normalise_addr(" 192.168.1.42 "), format!("192.168.1.42:{}", crate::BASE_PORT));
         assert_eq!(normalise_addr("192.168.1.42:9003"), "192.168.1.42:9003");
+    }
+
+    #[test]
+    fn prefs_survive_a_round_trip_through_the_panel() {
+        let prefs = ViewerPrefs {
+            address: "192.168.4.20:9000".to_owned(),
+            side: Some(extender_protocol::DisplaySide::Right),
+            size: Some((2560, 1600)),
+            scale: Some(150),
+            allow_sleep: true,
+        };
+        let mut panel = ViewerPanel::default();
+        panel.set_prefs(prefs.clone());
+        assert_eq!(panel.prefs(), prefs);
+        assert_eq!(parse_size("2560×1600"), Some((2560, 1600)));
     }
 
     #[test]

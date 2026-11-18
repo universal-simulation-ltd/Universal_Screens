@@ -21,6 +21,36 @@ its own Dock icon". **Not released.** It ships with 0.4.8 (signing session).
 James may need `killall Dock` after updating. The installed 0.4.3 also has the
 pre-rebrand full-bleed `.icns`, so it's oversized either way until he updates.
 
+## Update — 2026-11-18 (second-screen size, scaling and keep-awake)
+
+James wanted to set the second screen's size (W×H) and scaling (150%, as in
+Windows) from the app, and a stay-awake option because the laptop went black
+after a minute or two. On main, **not released** (goes out in 0.4.8):
+- **Protocol:** `HelloExtras { scale_percent }` is written after the
+  `ClientHello` **in the same frame** (`write_hello` / `read_hello`). postcard's
+  `from_bytes` ignores trailing bytes, so older hosts still read the hello (a
+  test pins it); a hello without extras = 100%. Still v10. `core` gains
+  `Session::connect_with`; `connect` (phones) is byte-for-byte unchanged.
+- **Mac host:** above 100% the virtual display is **HiDPI** at client pixels ÷
+  scale points (2880×1800 @150% → 1920×1200 pt, 3840×2400 px), captured at the
+  client's pixel size. HiDPI works on macOS 27 when `maxPixels` = 2× the mode
+  (probe, plus a live run: display 1120×630 pt / 2240×1260 px at 200%);
+  M4-hidpi-deferred.md updated. Display reuse is keyed on scale too.
+- **Client:** `--size WxH`, `--scale N` (default = the monitor's own scale
+  factor, rounded to 25%), and keep-awake **by default**, `--allow-sleep` to
+  opt out (`keep_awake.rs`: Windows `SetThreadExecutionState`, macOS
+  `caffeinate -d -i -w <pid>`, Linux `systemd-inhibit`).
+- **Panel:** Size (full / 75 / 67 / 50% with real pixels / custom W×H),
+  Scaling (same as this screen / 100–300%), and an unticked "Let this screen
+  turn off…" (house rule: tick boxes start unticked). Kept between launches
+  under the `viewer` storage key (`ViewerPrefs`, also the side and address).
+- **Not verified:** a picture end to end. In the local runs no frames arrived
+  at 100% either (the iMac's screen looked asleep: not in the active display
+  list), so streaming wasn't proven either way. ⚠️ The test runs left two
+  "Mac" virtual displays (ids 9 and 10, temporary serials 0x0077/0x0078) in
+  the online list after their processes had exited. They should go when the
+  Mac wakes, or at logout.
+
 ## Update — 2026-11-18 (Nearby works with a VPN up)
 
 James asked why the Mac's Nearby orbit didn't show the Windows laptop. Two

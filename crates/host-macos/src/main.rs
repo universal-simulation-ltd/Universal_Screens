@@ -126,7 +126,7 @@ pub(crate) fn serve_loop(
                          brute-forced for the PIN — update that app"
                     );
                 }
-                if let Some((platform, mode, w, h, name)) =
+                if let Some((platform, mode, w, h, name, scale)) =
                     read_hello(&mut conn, &peer, expected_pin, &mut guard)
                 {
                     let _ = conn.end_handshake();
@@ -144,7 +144,7 @@ pub(crate) fn serve_loop(
                     on_event(HostEvent::Connected { peer: peer.clone(), platform });
                     let result = match mode {
                         CaptureMode::ControlOnly => host::serve_control_only(conn),
-                        _ => host::serve_session(conn, mode, w, h, &name, vdisplays),
+                        _ => host::serve_session(conn, mode, w, h, scale, &name, vdisplays),
                     };
                     if let Err(e) = result {
                         on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
@@ -169,8 +169,9 @@ fn read_hello(
     peer: &str,
     expected_pin: u32,
     guard: &mut PinGuard,
-) -> Option<(ClientPlatform, CaptureMode, u32, u32, String)> {
-    let hello: ClientHello = match protocol::read_framed(stream) {
+) -> Option<(ClientPlatform, CaptureMode, u32, u32, String, u16)> {
+    // `read_hello` also picks up the scaling a newer client appends (else 100%).
+    let (hello, extras): (ClientHello, protocol::HelloExtras) = match protocol::read_hello(stream) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("client {peer} sent no valid hello: {e}");
@@ -212,8 +213,9 @@ fn read_hello(
     } else {
         hello.device_name.clone()
     };
+    let scale = extras.scale();
     println!(
-        "client {peer} hello: {}x{}, mode {:?}, platform {:?}, device {display_name:?}",
+        "client {peer} hello: {}x{} at {scale}%, mode {:?}, platform {:?}, device {display_name:?}",
         hello.width, hello.height, hello.capture_mode, hello.platform
     );
     Some((
@@ -222,6 +224,7 @@ fn read_hello(
         hello.width,
         hello.height,
         display_name,
+        scale,
     ))
 }
 

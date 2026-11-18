@@ -189,7 +189,30 @@ impl Session {
         input_rx: Receiver<Input>,
     ) -> io::Result<Session> {
         let mut store = open_pairing_store()?;
-        Session::connect_inner(addr, hello, input_rx, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, &mut store)
+        Session::connect_inner(addr, hello, None, input_rx, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, &mut store)
+    }
+
+    /// [`connect`](Session::connect), also sending [`HelloExtras`] (the second
+    /// screen's scaling) after the hello. An older host ignores them.
+    ///
+    /// # Errors
+    /// As [`connect`](Session::connect).
+    pub fn connect_with(
+        addr: &str,
+        hello: &ClientHello,
+        extras: &protocol::HelloExtras,
+        input_rx: Receiver<Input>,
+    ) -> io::Result<Session> {
+        let mut store = open_pairing_store()?;
+        Session::connect_inner(
+            addr,
+            hello,
+            Some(extras),
+            input_rx,
+            CONNECT_TIMEOUT,
+            HANDSHAKE_TIMEOUT,
+            &mut store,
+        )
     }
 
     /// [`connect`](Session::connect) with the two deadlines and the pairing store
@@ -198,6 +221,7 @@ impl Session {
     fn connect_inner(
         addr: &str,
         hello: &ClientHello,
+        extras: Option<&protocol::HelloExtras>,
         input_rx: Receiver<Input>,
         connect_timeout: Duration,
         handshake_timeout: Duration,
@@ -211,7 +235,11 @@ impl Session {
 
         // Handshake first, on the caller's thread, so a failure surfaces as an
         // error from `connect` rather than dying silently in a background thread.
-        protocol::write_framed(&mut conn, hello)?;
+        // Without extras the frame is byte-for-byte what it always was.
+        match extras {
+            Some(extras) => protocol::write_hello(&mut conn, hello, extras)?,
+            None => protocol::write_framed(&mut conn, hello)?,
+        }
 
         // Session is live: drop the handshake deadlines so the downstream reader
         // parks on the socket waiting for the next frame (which may be seconds out)
@@ -680,6 +708,7 @@ mod tests {
         let result = Session::connect_inner(
             &addr,
             &hello,
+            None,
             input_rx,
             Duration::from_secs(5),
             Duration::from_millis(300),
@@ -754,7 +783,7 @@ mod tests {
 
     fn connect_with(addr: &str, pin: u32, store: &mut PairingStore) -> io::Result<Session> {
         let (_tx, rx) = mpsc::channel();
-        Session::connect_inner(addr, &hello(pin), rx, Duration::from_secs(5), Duration::from_secs(5), store)
+        Session::connect_inner(addr, &hello(pin), None, rx, Duration::from_secs(5), Duration::from_secs(5), store)
     }
 
     #[test]

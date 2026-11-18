@@ -1530,6 +1530,7 @@ dependencies = [
  "openh264",
  "pollster",
  "wgpu 29.0.3",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
@@ -1627,6 +1628,7 @@ dependencies = [
  "extender-transport",
  "extender-web-bridge",
  "getrandom 0.2.17",
+ "serde",
  "ureq",
 ]
 

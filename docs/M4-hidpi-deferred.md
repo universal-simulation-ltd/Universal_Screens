@@ -1,5 +1,15 @@
 # M4 — HiDPI/Retina: deferred (notes for a future attempt)
 
+> **Update 2026-11-18: works on macOS 27, and shipped for client scaling.** A
+> descriptor whose `maxPixelsWide/High` are **twice** the mode, `hiDPI = 1`
+> and a single point-size mode comes up with that HiDPI mode current straight
+> away (probe: 1920×1200 pt / 3840×2400 px, no `CGDisplaySetDisplayMode`).
+> The host uses it when a client sends a scaling above 100% (`HelloExtras`):
+> the display is `client pixels ÷ scale` points, HiDPI, captured at the
+> client's pixel size. At 100% it is the old 1:1 display. Not checked on
+> macOS 12–26: if a display comes up at 1×, capture still scales it, just
+> less sharply. The notes below are the original deferral.
+
 **Status:** deferred. The virtual display is a standard **non-HiDPI** display at the requested resolution. It works reliably; it's just not 2×-crisp when blown up fullscreen on a Retina client.
 
 ## What we want
