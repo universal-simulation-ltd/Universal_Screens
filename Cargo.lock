@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "extender-android-jni"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-core",
  "jni 0.21.1",
@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "extender-client"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-core",
  "extender-protocol",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "extender-core"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "dirs",
  "extender-protocol",
@@ -1545,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "extender-discovery"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "if-addrs",
  "mdns-sd",
@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "extender-h264"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-protocol",
  "image",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "apple-cf",
  "cc",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-linux"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "eframe",
  "evdev",
@@ -1598,7 +1598,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-macos"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "apple-cf",
  "cc",
@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-ui"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "dirs",
  "eframe",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "extender-host-windows"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "eframe",
  "extender-discovery",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "extender-mobile-ffi"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-core",
  "extender-transport",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "extender-protocol"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "postcard",
  "serde",
@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "extender-protocol-wasm"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-protocol",
  "extender-transport",
@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "extender-qr"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "image",
  "qrcode",
@@ -1690,7 +1690,7 @@ dependencies = [
 
 [[package]]
 name = "extender-transport"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "getrandom 0.2.17",
  "sha2",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "extender-web-bridge"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "extender-discovery",
  "extender-protocol",
@@ -4640,7 +4640,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unisim-pake"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "getrandom 0.2.17",
  "hkdf",
