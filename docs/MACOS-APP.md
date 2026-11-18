@@ -98,16 +98,76 @@ Finder refuses the launch outright with a clear message instead.
 Both facts were measured on the real binaries with `vtool -show-build`, not
 assumed.
 
-## ⚠️ The ad-hoc signature is what makes it run at all
+## Signing: Developer ID, notarised (since 0.4.8)
 
-`codesign --sign -` is not decoration and not a substitute for notarisation.
-macOS **refuses to execute an unsigned arm64 binary** — it is killed at exec
-rather than warned about. Without this step the app does not launch on any Apple
-Silicon Mac.
+Some signature is not optional: macOS **refuses to execute an unsigned arm64
+binary**, killing it at exec. Which signature depends on the environment
+`build-app-macos.sh` runs in:
 
-It is still not notarised, so a *downloaded* copy is challenged by Gatekeeper
-("cannot check it for malicious software"). The user has to right-click → Open
-once. `installer/README-macos.txt` explains that, and so does the download page.
+| Variable | Effect |
+|---|---|
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: Universal Simulation Ltd (ZH9C5TS86A)`. Signs `Resources/extender-client` (identifier `com.universalsim.screens.client`), then the app, with hardened runtime + secure timestamp, then the DMG. Unset: ad-hoc. |
+| `NOTARY_KEY_PATH` / `NOTARY_KEY_ID` / `NOTARY_ISSUER` | An App Store Connect API key (`V366TJ4SJ5`). With an identity, the DMG goes to `notarytool submit --wait`, is stapled, and must pass `spctl --assess`. |
+| `REQUIRE_SIGNING=1` | Fail instead of falling back. The release workflow sets it on tags, so **a tagged release can never ship ad-hoc or un-notarised**. |
+
+No entitlements: the host is not sandboxed, and ScreenCaptureKit, Accessibility
+and the private `CGVirtualDisplay` are gated by TCC, not entitlements.
+
+### ⚠️ Why ad-hoc was dropped: it loses the privacy grants on every update
+
+TCC keys an ad-hoc app's Screen Recording and Accessibility grants to that exact
+build. After an update the switches in System Settings **still show on** while
+macOS refuses: a connecting device gets the virtual display, then "stream ended"
+and a black window (the host logs `The user declined TCCs for application,
+window, display capture`), or a picture with no control. Found 2026-11-18 on
+James's Mac running 0.4.3. A Developer ID build's designated requirement is the
+team (`ZH9C5TS86A`) + bundle ID, so grants survive updates.
+
+**Moving from an ad-hoc build (≤ 0.4.7) to a signed one counts as a new signer
+once**: remove Universal Screens from Screen & System Audio Recording and from
+Accessibility with −, add it back, restart. Never again after that.
+
+### CI secrets (`universal-simulation-ltd/Universal_Screens`)
+
+`macos-release.yml` imports the certificate into a throwaway keychain, writes the
+API key to `$RUNNER_TEMP`, and deletes both at the end of the job.
+
+| Secret | What |
+|---|---|
+| `MACOS_CERT_P12_BASE64` | base64 of a .p12 holding only the Developer ID Application certificate + key |
+| `MACOS_CERT_PASSWORD` | that .p12's password |
+| `MACOS_SIGN_IDENTITY` | the identity name above |
+| `ASC_API_KEY_P8_BASE64` | base64 of `AuthKey_V366TJ4SJ5.p8` (`~/.unisim-keys/`) |
+| `ASC_API_KEY_ID` / `ASC_API_ISSUER_ID` | `V366TJ4SJ5` / the team issuer ID |
+
+A branch dispatch (`gh workflow run macos-release.yml --ref main`) signs and
+notarises too when the secrets exist, but publishes nothing: use it to prove a
+change to signing before tagging.
+
+Proven 2026-11-18: run 44333503441 on main signed, notarised and stapled, and
+its artifact passed `spctl` as "Notarized Developer ID". Two traps from setting
+it up: the first export held the neighbouring **Apple Development** certificate
+(the script now lists the identities it finds when the wanted one is missing),
+and GitHub's arm64 macOS runners repeatedly failed to pick the job up at all
+("The job was not acquired by Runner … capacity constraints") — that is not a
+signing failure; dispatch again.
+
+### ⚠️ The certificate expires 1 February 2027
+
+Apps signed before then keep running (the secure timestamp proves when they were
+signed), but **new releases fail to sign** after it. Renew in
+developer.apple.com → Certificates (Developer ID Application), install it in
+the login keychain, export it from Keychain Access as a .p12 and replace the two
+`MACOS_CERT_*` secrets. Keychain export needs James: Claude's sandbox may not
+read private keys out of the keychain.
+
+### ⚠️ Notarisation stops when Apple's agreement lapses
+
+`notarytool` returns **HTTP 403 "A required agreement is missing or has
+expired"** whenever Apple publishes an updated Developer Program License
+Agreement and nobody has accepted it yet (developer.apple.com/account banner, or
+App Store Connect → Business). Only the account holder can accept it. With
+`REQUIRE_SIGNING=1` the release fails rather than shipping un-notarised.
 
 ## ⚠️ Universal, or Intel Macs get nothing
 
@@ -149,6 +209,4 @@ of anyone who runs the script locally.
 - **The x86_64 slice has never been run.** It is built and its architecture and
   deployment target are asserted, but development is on Apple Silicon — no Intel
   Mac has executed it.
-- **Gatekeeper on a machine that has never seen the app.** This one has.
-- **Notarisation**, deliberately — a recurring Developer ID cost, not paid for a
-  free tool.
+- **Gatekeeper on a machine that has never seen the app.** The notarised DMG passes `spctl` here; a first launch on a clean Mac has not been watched.

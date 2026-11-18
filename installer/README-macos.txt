@@ -58,11 +58,12 @@ Three, and the app is not much use without the first two:
   Screen Recording   -- to capture what it sends. System Settings > Privacy &
                         Security > Screen Recording. macOS requires a restart
                         of the app after granting this one.
-                        After installing a new version the switch can still
-                        show as on while macOS refuses (the other device
-                        connects, then gets no picture): remove Universal
-                        Screens from that list with the minus button, add it
-                        back, and restart the app.
+                        If a device connects but gets no picture while the
+                        switch shows on (it happens once, when updating from
+                        0.4.7 or older): remove Universal Screens from that
+                        list with the minus button, add it back, and restart
+                        the app. Do the same under Accessibility if the
+                        picture comes but the mouse and keyboard do nothing.
   Accessibility      -- to let a connected phone move the pointer and type.
                         Without it you get picture but no control.
   Local Network      -- so devices on the same Wi-Fi can discover this host.
@@ -73,22 +74,18 @@ All three are macOS system prompts. Nothing is sent anywhere: the stream goes
 directly to the device you paired with, over your own network.
 
 
-macOS says it cannot check the app for malicious software
----------------------------------------------------------
+Signed and notarised
+--------------------
 
-It is signed only ad-hoc, and not notarised. A Developer ID and notarisation are
-a recurring cost we have chosen not to pass on for a free tool.
+Universal Screens is signed with Universal Simulation Ltd's Developer ID and
+notarised by Apple, so it opens like any other app -- no right-click or "Open
+Anyway" needed. If you would rather not take our word for it, the whole thing
+is on GitHub -- read it, or build it yourself in a couple of commands.
 
-Do NOT double-click again -- that dialog has no way forward. Instead:
-
-  Right-click (or Control-click) the app and choose Open, then Open again.
-
-On newer macOS there may be no Open button at all. Go to System Settings >
-Privacy & Security, scroll down, and click "Open Anyway". Either way macOS
-remembers, so you only do this once.
-
-If you would rather not take our word for it, the whole thing is on GitHub --
-read it, or build it yourself in a couple of commands.
+Updating from 0.4.7 or older? Those were signed differently, so macOS treats
+this version as a new app once: if a connecting device gets a black window, or
+a picture you cannot control, follow the Screen Recording note above. Later
+updates keep their permissions.
 
 
 Uninstalling
