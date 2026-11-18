@@ -57,6 +57,29 @@ can be told apart). `SVG_OUT=… node scripts/app-icon.mjs` writes the drawing t
 `webIcon` on the `Universal_Screens` entry in `marks.mjs` points at; the suite's
 own `build.mjs` / `rasterise.mjs` run is what pushes it out to those surfaces.
 
+### ⚠️ The running app must not set its own Dock icon
+
+`AppIcon.icns` is drawn on Apple's grid: the art in a centred 824×824 rounded
+square (radius 22.4%) on the 1024 canvas, transparent margins, soft shadow.
+Measured the same as Calculator, Notes and App Store: tile 824×824 at (100,100).
+Only the macOS surfaces are inset. Windows, Linux, Android and iOS keep their
+full-bleed conventions, and `app-icon.png` stays full bleed because it's also
+the QR badge.
+
+That alone wasn't enough. Up to 0.4.7 Screens was **a size larger than every
+other app in the Dock and Cmd-Tab** while it ran (James, 2026-11-18). The cause
+was `gui.rs`: eframe's `ViewportBuilder::with_icon` isn't a window icon on macOS.
+eframe 0.29 passes it to `NSApplication.setApplicationIconImage`, which replaces
+the bundle's icon for the life of the process, and it was fed the full-bleed
+`app-icon.png`. A replaced icon also skips macOS's tinted and dark icon styles.
+Inside a `.app`, `run()` now passes `egui::IconData::default()`, which eframe
+reads as "set nothing". **Don't just leave `with_icon` out:** eframe then
+pushes egui's own logo instead. Only an unbundled `cargo run` gets the art.
+Checked in the Dock, side by side: the bundled build sits the same size as
+System Settings and takes the tint, and the unbundled one is oversized.
+
+After an update the Dock may keep the old picture cached: `killall Dock`.
+
 Any generated asset that is also committed has two writers, and the build
 script wins silently. Do not re-add an icon step here.
 (`scripts/make-mac-icns.py` carries the same warning at the top of the file.)

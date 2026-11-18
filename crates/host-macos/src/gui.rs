@@ -1088,7 +1088,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([440.0, 720.0])
         .with_title("Universal Screens");
-    if let Some(rgba) = crate::qr::app_icon_rgba(64) {
+    // ⚠️ On macOS a viewport icon is not a window icon: eframe 0.29 hands it to
+    // `NSApplication.setApplicationIconImage`, which REPLACES the Dock and
+    // Cmd-Tab icon for as long as the app runs. Fed app-icon.png (full bleed),
+    // that drew Screens a size larger than every other app, over the bundle's
+    // AppIcon.icns, which is correctly inset on Apple's 824/1024 grid. Inside
+    // the .app, pass the empty IconData: eframe reads it as "set nothing"
+    // (leaving the icon out instead makes it push egui's own logo). Only an
+    // unbundled `cargo run` has no .icns to show, so only that gets the art.
+    let bundled = std::env::current_exe()
+        .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+        .unwrap_or(false);
+    if bundled {
+        viewport = viewport.with_icon(egui::IconData::default());
+    } else if let Some(rgba) = crate::qr::app_icon_rgba(64) {
         viewport = viewport.with_icon(egui::IconData { rgba, width: 64, height: 64 });
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };

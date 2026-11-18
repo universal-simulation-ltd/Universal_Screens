@@ -4,6 +4,23 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-18 (Mac Dock icon no longer oversized)
+
+James saw Screens a size larger than every other app in the Dock and Cmd-Tab.
+The committed `AppIcon.icns` was already right: `scripts/app-icon.mjs` insets
+it on Apple's 824/1024 grid, it regenerates byte for byte, and it measures like
+Calculator (824×824 at (100,100)). The running app was overriding it:
+`gui.rs` passed the full-bleed `app-icon.png` to eframe's `with_icon`, and on
+macOS eframe 0.29 sends that to `setApplicationIconImage`. Inside a `.app` it
+now passes `IconData::default()` ("set nothing"; leaving it out would push
+egui's logo instead). Tested with a throwaway bundle beside an unbundled run
+(throwaway `HOME`, so the installed app's settings weren't touched): the bundled
+build matches System Settings' size and takes the Dock tint, and the unbundled
+build is oversized. Doc: `docs/MACOS-APP.md` § "The running app must not set
+its own Dock icon". **Not released.** It ships with 0.4.8 (signing session).
+James may need `killall Dock` after updating. The installed 0.4.3 also has the
+pre-rebrand full-bleed `.icns`, so it's oversized either way until he updates.
+
 ## Update — 2026-11-18 (Nearby works with a VPN up)
 
 James asked why the Mac's Nearby orbit didn't show the Windows laptop. Two
