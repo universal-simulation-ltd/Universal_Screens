@@ -132,6 +132,10 @@ struct HostApp {
     remote: extender_host_ui::RemoteAccessPanel,
     /// LAN peers discovered via UDP multicast beacon (PC → PC / PC → Mac).
     discovered_peers: Arc<Mutex<Vec<crate::discovery::DiscoveredPeer>>>,
+    /// "Show another computer here": runs the desktop client installed beside
+    /// this exe to watch another host, or to be its second screen (host-ui
+    /// `viewer`). Clicking a Nearby computer fills it in.
+    viewer: extender_host_ui::ViewerPanel,
     /// Stop flag for the always-on listener thread (set only when the app exits).
     listener_stop: Arc<AtomicBool>,
     /// Our own LAN IP, shared with the listener so it can filter out our beacon.
@@ -207,6 +211,7 @@ impl HostApp {
             firewall_ok: None,
             remote: extender_host_ui::RemoteAccessPanel::default(),
             discovered_peers,
+            viewer: extender_host_ui::ViewerPanel::default(),
             listener_stop,
             own_ip,
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
@@ -503,10 +508,14 @@ impl HostApp {
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Nearby").strong());
             if let Some(peer) = nearby_orbit(ui, &nearby, "This PC") {
-                let url = connect_url(&format!("{}:{}", peer.addr, peer.port), 0, None);
-                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                // A computer, not a phone: open it here rather than the phone
+                // pairing page, which can't show a screen on a desktop.
+                self.viewer.choose(&peer.addr, peer.port);
             }
         }
+
+        ui.add_space(8.0);
+        self.viewer.ui(ui);
 
         // Everything secondary lives here: the firewall fix, the manual
         // address/PIN, status, and recent connections.

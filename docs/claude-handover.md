@@ -4,6 +4,38 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-18 (Windows as a Mac's second screen from the app; "stream ended" explained)
+
+James ran the Windows client against the Mac: it connected, the Mac created the
+virtual display, then **"stream ended"** and a black window. The Mac's headless
+log (`open -a … --stdout f --stderr f --args 0.0.0.0:9000`, because the GUI only
+puts errors in a status line it rarely draws) said:
+`No shareable content available: … The user declined TCCs for application,
+window, display capture`. The Screen Recording switch showed as **on**. An
+ad-hoc-signed app gets a new code signature with every build, so an old grant
+stops matching while the switch still shows on. Fix on the Mac: remove Universal
+Screens from that list with −, add it back, restart. Claude may not change
+privacy settings, so that is James's step.
+
+Shipped (not in any release yet):
+- `host-ui` `ViewerPanel` has a second button, **"Be its second screen"** (the
+  client without `--mirror`, i.e. extend), beside "Show its screen".
+- The **Windows host now has the panel** (it was Mac-only since `56994b3`), and
+  clicking a Nearby computer fills it in instead of opening the phone pairing
+  page in a browser.
+- `extender-client`: a session that ends before any `StreamStart` now prints a
+  `client error:` plus the Screen Recording hint, so the panel shows why
+  instead of nothing.
+- Installer readmes (Windows + Mac) describe both buttons and the stale-grant
+  fix.
+
+⚠️ Not built locally for Windows (openh264 needs a Windows C++ compiler); the
+`tests.yml` Windows job builds it on push. Not yet run end to end: needs the
+grant re-done on the Mac, then a release for the Windows app to carry the panel.
+Worth doing later: Developer ID signing would keep grants across updates (the
+Apple Developer account is already paid for, so the readme's "recurring cost"
+reason is out of date).
+
 ## Update — 2026-11-18 (the Mac host showed its VPN address)
 
 With ProtonVPN on, the Mac app showed **10.2.0.2:9000** (the `utun6` tunnel)

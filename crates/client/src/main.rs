@@ -77,17 +77,33 @@ fn run_network(addr: String, shared: Shared, input_rx: Receiver<Input>, hello: C
         hello.width, hello.height, hello.protocol_version
     );
 
-    if let Err(e) = decode_loop(&session, &shared) {
-        eprintln!("client error: {e}");
-        return;
+    match decode_loop(&session, &shared) {
+        Err(e) => eprintln!("client error: {e}"),
+        // The host accepted us and then hung up without a picture. The protocol
+        // has no way to say why, and the commonest reason by far is a Mac whose
+        // Screen Recording permission no longer matches the app (it shows as on,
+        // but a new build carries a new ad-hoc signature): 2026-11-18, a Windows
+        // laptop saw only "stream ended" while the Mac logged "declined TCCs".
+        Ok(false) => {
+            eprintln!("client error: the other computer ended the connection before sending a picture");
+            eprintln!(
+                "if it is a Mac, open System Settings > Privacy & Security > Screen & System Audio \
+                 Recording there, remove Universal Screens with the minus button, add it back, \
+                 and restart Universal Screens"
+            );
+        }
+        Ok(true) => println!("stream ended"),
     }
-    println!("stream ended");
 }
 
 /// Drain `StreamEvent`s from the session, decoding each H.264 frame (software,
 /// portable `openh264`) into RGBA for the render loop. The session uploads input
 /// on its own thread, so this just consumes video.
-fn decode_loop(session: &Session, shared: &Shared) -> Result<(), Box<dyn std::error::Error>> {
+///
+/// Returns whether a stream ever started, so an immediate hang-up can be told
+/// apart from a session that ran and ended.
+fn decode_loop(session: &Session, shared: &Shared) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut started = false;
     let mut decoder: Option<Decoder> = None;
     let mut sps_pps: Vec<u8> = Vec::new();
 
@@ -95,6 +111,7 @@ fn decode_loop(session: &Session, shared: &Shared) -> Result<(), Box<dyn std::er
         match event {
             StreamEvent::Start { width, height, codec, parameter_sets } => {
                 println!("stream: {width}x{height} {codec:?}");
+                started = true;
                 sps_pps = protocol::annex_b_parameter_sets(&parameter_sets);
                 decoder = Some(Decoder::new()?);
             }
@@ -126,7 +143,7 @@ fn decode_loop(session: &Session, shared: &Shared) -> Result<(), Box<dyn std::er
             | StreamEvent::WindowList { .. } => {}
         }
     }
-    Ok(())
+    Ok(started)
 }
 
 /// Map a winit mouse button to the protocol button, ignoring extra buttons.

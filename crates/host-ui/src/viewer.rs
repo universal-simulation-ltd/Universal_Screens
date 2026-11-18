@@ -1,7 +1,13 @@
 //! "Show another computer here": the host window's way to WATCH another host,
 //! rather than be watched. It runs the desktop client (`extender-client`) that
 //! ships beside the host — inside the bundle's Resources on macOS, next to the
-//! host exe on Windows — in mirror mode, in a window of its own.
+//! host exe on Windows — in a window of its own, in one of two modes: mirror
+//! ("Show its screen") or extend ("Be its second screen": the other computer
+//! makes a virtual display the size of this one's, and this window shows it).
+//!
+//! The second-screen button arrived 2026-11-18, when James wanted his Windows
+//! laptop as a second screen for his Mac from the app rather than PowerShell;
+//! the Windows host got this panel at the same time (it had been Mac-only).
 //!
 //! Until 2026-11-04 the only way in was a terminal command, and clicking a
 //! computer under "Nearby" opened the phone pairing page in a browser, which
@@ -18,13 +24,32 @@ use std::thread;
 
 use eframe::egui;
 
+/// What the client is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    /// Watch (and drive) the other computer's main screen.
+    Mirror,
+    /// Be an extra screen for the other computer: it makes a virtual display.
+    SecondScreen,
+}
+
+impl Mode {
+    /// The client's flags for this mode. Extend is the client's default.
+    fn args(self) -> &'static [&'static str] {
+        match self {
+            Mode::Mirror => &["--mirror"],
+            Mode::SecondScreen => &[],
+        }
+    }
+}
+
 /// Where a viewer stands, shared with the thread that waits on the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Phase {
     /// Nothing open. `note` is how the last one ended, if it said anything.
     Idle { note: Option<String> },
     /// The client is running (connecting, or showing the screen).
-    Open { addr: String },
+    Open { addr: String, mode: Mode },
 }
 
 /// The panel's state. Hold one in the host's app struct, call [`Self::ui`]
@@ -67,8 +92,9 @@ impl ViewerPanel {
 
     fn contents(&mut self, ui: &mut egui::Ui) {
         ui.small(
-            "See another computer's screen in a window on this one, and drive it with this \
-             mouse and keyboard. Start Universal Screens on that computer first.",
+            "See another computer's screen in a window on this one, or make this one its \
+             second screen, and drive it with this mouse and keyboard. Start Universal \
+             Screens on that computer first.",
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -89,14 +115,30 @@ impl ViewerPanel {
 
         let phase = self.phase.lock().map(|p| p.clone()).unwrap_or(Phase::Idle { note: None });
         match &phase {
-            Phase::Open { addr } => {
-                ui.label(format!("Showing {addr} in its own window. Close that window to stop."));
+            Phase::Open { addr, mode } => {
+                let what = match mode {
+                    Mode::Mirror => format!("Showing {addr} in its own window."),
+                    Mode::SecondScreen => format!(
+                        "This is now a second screen for {addr}. Move windows onto it there; \
+                         press F in that window for full screen."
+                    ),
+                };
+                ui.label(format!("{what} Close that window to stop."));
             }
             Phase::Idle { note } => {
                 let ready = !self.address.trim().is_empty();
-                if ui.add_enabled(ready, egui::Button::new("Show its screen")).clicked() {
-                    self.launch();
-                }
+                ui.horizontal_wrapped(|ui| {
+                    if ui.add_enabled(ready, egui::Button::new("Show its screen")).clicked() {
+                        self.launch(Mode::Mirror);
+                    }
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Be its second screen"))
+                        .on_hover_text("The other computer gets an extra display the size of this screen")
+                        .clicked()
+                    {
+                        self.launch(Mode::SecondScreen);
+                    }
+                });
                 if let Some(note) = note {
                     ui.colored_label(ui.visuals().warn_fg_color, note);
                 }
@@ -107,7 +149,7 @@ impl ViewerPanel {
     /// Run the client on the typed address, and wait for it on a thread that
     /// puts the panel back to `Idle` — with the client's own explanation if it
     /// failed — when it exits.
-    fn launch(&mut self) {
+    fn launch(&mut self, mode: Mode) {
         let Some(client) = client_path() else {
             self.set(Phase::Idle {
                 note: Some("The viewer isn't installed with this copy of Universal Screens.".to_owned()),
@@ -116,7 +158,7 @@ impl ViewerPanel {
         };
         let addr = normalise_addr(&self.address);
         let mut cmd = Command::new(client);
-        cmd.arg(&addr).arg("--mirror");
+        cmd.arg(&addr).args(mode.args());
         let pin = self.pin.trim();
         if !pin.is_empty() {
             cmd.arg("--pin").arg(pin);
@@ -132,7 +174,7 @@ impl ViewerPanel {
             }
         };
         self.pin.clear();
-        self.set(Phase::Open { addr: addr.clone() });
+        self.set(Phase::Open { addr: addr.clone(), mode });
 
         let phase = Arc::clone(&self.phase);
         thread::spawn(move || {
@@ -200,6 +242,12 @@ mod tests {
     fn a_bare_address_gets_the_usual_port() {
         assert_eq!(normalise_addr(" 192.168.1.42 "), format!("192.168.1.42:{}", crate::BASE_PORT));
         assert_eq!(normalise_addr("192.168.1.42:9003"), "192.168.1.42:9003");
+    }
+
+    #[test]
+    fn second_screen_is_the_clients_default_mode() {
+        assert_eq!(Mode::Mirror.args(), ["--mirror"]);
+        assert!(Mode::SecondScreen.args().is_empty());
     }
 
     #[test]

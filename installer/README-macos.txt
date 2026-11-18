@@ -33,7 +33,8 @@ The client  --  "use THIS Mac as a screen for another computer"
 
 Open Universal Screens and expand "Show another computer here". Click the other
 computer under "Nearby" (or type its address), enter the PIN that computer
-shows, and click "Show its screen". Its screen opens in a window of its own.
+shows, and click "Show its screen" -- or "Be its second screen" to extend
+that computer onto this Mac. It opens in a window of its own.
 
 Or run the client from a terminal. It lives inside the app bundle and gets no
 icon of its own, because double-clicking it would have nowhere to connect:
@@ -57,6 +58,11 @@ Three, and the app is not much use without the first two:
   Screen Recording   -- to capture what it sends. System Settings > Privacy &
                         Security > Screen Recording. macOS requires a restart
                         of the app after granting this one.
+                        After installing a new version the switch can still
+                        show as on while macOS refuses (the other device
+                        connects, then gets no picture): remove Universal
+                        Screens from that list with the minus button, add it
+                        back, and restart the app.
   Accessibility      -- to let a connected phone move the pointer and type.
                         Without it you get picture but no control.
   Local Network      -- so devices on the same Wi-Fi can discover this host.

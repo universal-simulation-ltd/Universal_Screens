@@ -27,8 +27,14 @@ Run it from a terminal instead if you want it headless:
 The client  --  "use THIS PC as a screen for another computer"
 ---------------------------------------------------------------
 
-The client takes the host's address, so run it from a terminal (there is no
-Start menu shortcut, because double-clicking it would have nowhere to connect):
+Open Universal Screens and expand "Show another computer here". Click the other
+computer under "Nearby" (or type its address), enter the PIN that computer
+shows, and click "Be its second screen" -- or "Show its screen" to watch its
+main screen instead. It opens in a window of its own; press F there for full
+screen. (This needs the desktop client component, ticked in the installer.)
+
+Or run the client from a terminal. It has no Start menu shortcut, because
+double-clicking it would have nowhere to connect:
 
   extender-client.exe 192.168.1.42:9000 --pin 1234
 
