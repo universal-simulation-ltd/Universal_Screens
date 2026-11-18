@@ -4,6 +4,32 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-18 (0.4.8 released: the first Developer ID signed, notarised Mac build)
+
+- **v0.4.8 is out on all three platforms** (tag on `412733c`; Windows, macOS
+  and Linux workflows green, six assets) and on `downloads.unisim.co.uk/universal-screens/`
+  (three installers + `latest.json` 0.4.8, checksums verified against the
+  release). It carries placement (`801ff91`), Nearby over a VPN (`062613b`),
+  the Dock icon (`db42b91`), size/scaling + keep-awake (`7d49157`) and signing.
+- **Signing** (`bd353d3`, `88b9c28`; docs `c6a3ab7`, read docs/MACOS-APP.md →
+  Signing): Developer ID + hardened runtime + notarised + stapled DMG; tags set
+  `REQUIRE_SIGNING=1`. Six repo secrets hold the cert (.p12 James exported from
+  Keychain Access: Claude's sandbox may not export keys), its password, the
+  identity name and the ASC key `V366TJ4SJ5`. The released DMG passes `spctl`
+  as "Notarized Developer ID".
+- ⚠️ Traps hit today: notarytool 403 until James accepted Apple's updated
+  agreement (and ~5 more minutes after); the first .p12 held the "Apple
+  Development" cert; GitHub's arm64 macOS runners repeatedly never picked the
+  job up ("not acquired") — re-dispatch, it is not a signing failure.
+- ⚠️ **Cert expires 1 Feb 2027**: renew, re-export, replace the two
+  `MACOS_CERT_*` secrets before the next release after that.
+- Download page (opensource-portal `6970f62`) drops the Mac right-click steps
+  and shows 0.4.8 checksums. Changelog `2026.11.18.11`.
+- **James's step after installing 0.4.8 on the Mac:** one last remove/re-add
+  of Universal Screens under Screen & System Audio Recording and Accessibility
+  (new signer), then `killall Dock` if the icon still looks big. Not yet
+  watched: 0.4.8 installed on the Mac or the laptop.
+
 ## Update — 2026-11-18 (Mac Dock icon no longer oversized)
 
 James saw Screens a size larger than every other app in the Dock and Cmd-Tab.
