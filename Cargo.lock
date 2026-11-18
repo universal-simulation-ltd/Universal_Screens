@@ -1546,7 +1546,9 @@ dependencies = [
 name = "extender-discovery"
 version = "0.4.7"
 dependencies = [
+ "if-addrs",
  "mdns-sd",
+ "socket2",
 ]
 
 [[package]]

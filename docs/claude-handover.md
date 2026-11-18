@@ -4,6 +4,24 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-18 (Nearby works with a VPN up)
+
+James asked why the Mac's Nearby orbit didn't show the Windows laptop. Two
+reasons. First, the orbit lists computers with the Screens **app** open; the
+PowerShell client doesn't beacon. Second, with ProtonVPN up the OS routed the
+multicast group into the tunnel (`route get 224.0.0.251` → `utun6`), so the
+beacon went into the VPN and the default join listened there too. SPECTRE runs
+ProtonVPN as well (the 2026-11-05 entry saw its beacon leave from 10.2.0.2).
+
+`crates/discovery`: the listener now joins the group on every up,
+non-loopback, non-link-local IPv4 interface (rescanned every 10 s), and the
+beacon also sends from one socket per interface, pinned with
+`IP_MULTICAST_IF` (socket2), every tick. Every such address is recorded as an
+own source. New deps `if-addrs` and `socket2` were already in the tree via
+mdns-sd. Live check on the Mac: the route-chosen source was 10.2.0.2, and a
+beacon pinned to 192.168.4.20 reached a listener joined on Ethernet only.
+Not yet seen end to end with both machines on the new build (needs 0.4.8).
+
 ## Update — 2026-11-18 (choose which side the second screen sits on)
 
 James's laptop (SPECTRE) sat to the right of the Mac but came up on its left,

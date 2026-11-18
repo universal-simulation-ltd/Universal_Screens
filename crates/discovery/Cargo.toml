@@ -11,3 +11,8 @@ license.workspace = true
 #    for hosts via Android NSD / iOS Bonjour. See docs/M9-lan-discovery.md.
 [dependencies]
 mdns-sd = "0.20.1"
+# The machine's IPv4 interfaces, so the beacon is sent and heard on every one
+# rather than only the route's (a VPN owns that). Already in the tree via mdns-sd.
+if-addrs = "0.15"
+# IP_MULTICAST_IF on each beacon socket (cross-platform); also already in the tree.
+socket2 = "0.6"

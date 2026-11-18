@@ -19,7 +19,7 @@
 //! multicast group without a restricted Apple entitlement, but Bonjour browsing
 //! needs none, so DNS-SD is the mobile-facing half of discovery.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -62,11 +62,43 @@ fn is_own_source(ip: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Every IPv4 address this machine could reach a neighbour from: each up,
+/// non-loopback, non-link-local interface.
+///
+/// ⚠️ Why every one, rather than letting the OS choose: with a VPN up, the OS
+/// routes the multicast group into the tunnel. On James's Mac with ProtonVPN,
+/// `route get 224.0.0.251` said `utun6` (2026-11-18), so the beacon went into
+/// the VPN and the listener's default join listened there too. The Mac and the
+/// Windows laptop beside it (also on ProtonVPN) never saw each other in
+/// Nearby. Sending into a VPN as well is harmless: TTL 1 keeps it there.
+fn multicast_interfaces() -> Vec<Ipv4Addr> {
+    let mut ips: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.is_oper_up())
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v4) => Some(v4.ip),
+            _ => None,
+        })
+        .filter(|ip| usable_for_lan(*ip))
+        .collect();
+    ips.sort();
+    ips.dedup();
+    ips
+}
+
+/// Loopback and link-local (169.254/16, no DHCP answer) never reach a peer.
+fn usable_for_lan(ip: Ipv4Addr) -> bool {
+    !ip.is_loopback() && !ip.is_link_local() && !ip.is_unspecified()
+}
+
 /// Multicast group + port the beacon is sent to and the listener joins.
 pub const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 pub const DISCOVERY_PORT: u16 = 9001;
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 const PEER_TTL: Duration = Duration::from_secs(6);
+/// How often the listener looks for new interfaces to join the group on.
+const INTERFACE_RESCAN: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct DiscoveredPeer {
@@ -94,11 +126,24 @@ pub fn start_listener<F>(
             Ok(s) => s,
             Err(_) => return, // port already taken (e.g. second instance); silent no-op
         };
+        // Join on every interface (see `multicast_interfaces`), plus the OS's
+        // default as a fallback, and re-check now and then so a Wi-Fi change
+        // or a VPN coming up is picked up without a restart.
         let _ = sock.join_multicast_v4(&MULTICAST_ADDR, &Ipv4Addr::UNSPECIFIED);
+        let mut joined: BTreeSet<Ipv4Addr> = BTreeSet::new();
+        let mut last_scan: Option<Instant> = None;
         let _ = sock.set_read_timeout(Some(Duration::from_millis(500)));
 
         let mut buf = [0u8; 256];
         while !stop.load(Ordering::Relaxed) {
+            if last_scan.map_or(true, |t| t.elapsed() >= INTERFACE_RESCAN) {
+                last_scan = Some(Instant::now());
+                for ip in multicast_interfaces() {
+                    if !joined.contains(&ip) && sock.join_multicast_v4(&MULTICAST_ADDR, &ip).is_ok() {
+                        joined.insert(ip);
+                    }
+                }
+            }
             // Prune stale peers each loop iteration.
             {
                 let mut list = peers.lock().unwrap();
@@ -150,9 +195,13 @@ pub fn start_listener<F>(
     });
 }
 
-/// Spawn a beacon sender thread. Sends every 2s until `stop` is set.
+/// Spawn a beacon sender thread. Sends every 2s until `stop` is set, on every
+/// interface (see [`multicast_interfaces`]) as well as the route's.
 pub fn start_beacon(name: String, port: u16, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        // One socket per interface address, bound to it and pinned to it with
+        // IP_MULTICAST_IF, so the packet leaves there whatever the route says.
+        let mut per_interface: BTreeMap<Ipv4Addr, UdpSocket> = BTreeMap::new();
         let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
             return;
         };
@@ -180,9 +229,38 @@ pub fn start_beacon(name: String, port: u16, stop: Arc<AtomicBool>) {
             } else {
                 sock.send_to(pkt, target)
             };
+            let current = multicast_interfaces();
+            per_interface.retain(|ip, _| current.contains(ip));
+            for ip in current {
+                // Every address we send from is ours, so the listener can skip it.
+                remember_own_source(ip.to_string());
+                if let std::collections::btree_map::Entry::Vacant(slot) = per_interface.entry(ip) {
+                    if let Some(s) = interface_socket(ip) {
+                        slot.insert(s);
+                    }
+                }
+                if let Some(s) = per_interface.get(&ip) {
+                    if s.send_to(pkt, target).is_err() {
+                        per_interface.remove(&ip); // rebuilt next tick
+                    }
+                }
+            }
             std::thread::sleep(BEACON_INTERVAL);
         }
     });
+}
+
+/// A beacon socket that sends out of the interface holding `ip`.
+fn interface_socket(ip: Ipv4Addr) -> Option<UdpSocket> {
+    let sock = UdpSocket::bind((ip, 0)).ok()?;
+    sock.set_multicast_ttl_v4(1).ok()?;
+    set_multicast_if(&sock, ip).ok()?;
+    Some(sock)
+}
+
+/// `IP_MULTICAST_IF`, which std has no setter for.
+fn set_multicast_if(sock: &UdpSocket, ip: Ipv4Addr) -> std::io::Result<()> {
+    socket2::SockRef::from(sock).set_multicast_if_v4(&ip)
 }
 
 /// The DNS-SD service type the phone apps browse for (Android NSD passes it
@@ -407,6 +485,28 @@ mod tests {
                 "connect() left the socket on 0.0.0.0 — self-filtering cannot work",
             ),
             SocketAddr::V6(_) => panic!("expected an IPv4 local address"),
+        }
+    }
+
+    #[test]
+    fn only_addresses_a_neighbour_could_reach_are_used() {
+        assert!(usable_for_lan(Ipv4Addr::new(192, 168, 4, 20)));
+        assert!(usable_for_lan(Ipv4Addr::new(10, 2, 0, 2)), "a VPN too: sending there is harmless");
+        assert!(!usable_for_lan(Ipv4Addr::LOCALHOST));
+        assert!(!usable_for_lan(Ipv4Addr::new(169, 254, 3, 4)));
+    }
+
+    /// A socket pinned to an interface really does carry its address, which is
+    /// what lets the listener recognise our own per-interface beacons.
+    #[test]
+    fn an_interface_socket_sends_from_that_interface() {
+        let Some(ip) = multicast_interfaces().into_iter().next() else {
+            return; // no network on this machine
+        };
+        let sock = interface_socket(ip).expect("interface socket");
+        match sock.local_addr().expect("local_addr") {
+            SocketAddr::V4(local) => assert_eq!(*local.ip(), ip),
+            SocketAddr::V6(_) => panic!("expected IPv4"),
         }
     }
 
