@@ -33,6 +33,12 @@ shows, and click "Be its second screen" -- or "Show its screen" to watch its
 main screen instead. It opens in a window of its own; press F there for full
 screen. (This needs the desktop client component, ticked in the installer.)
 
+To choose which side of the other computer's screen this one sits on, pick
+"left of it", "right of it", "above it" or "below it" before clicking -- or,
+in the open window (not in control mode), press an arrow key. The other
+computer remembers the side for this PC. (A Mac running Universal Screens
+0.4.8 or newer; on the Mac, the Virtual displays list has the same buttons.)
+
 Or run the client from a terminal. It has no Start menu shortcut, because
 double-clicking it would have nowhere to connect:
 
@@ -41,7 +47,8 @@ double-clicking it would have nowhere to connect:
 --pin is the 4-digit PIN the host shows. It is only needed the first time: the
 pairing is remembered, so later runs connect without it.
 
-Options: --monitor N to pick a display, --res N to drop the resolution if the
+Options: --side left|right|above|below to place the screen, --monitor N to
+pick a display, --res N to drop the resolution if the
 stream is choppy, --mirror to view the host's primary display instead of a new
 virtual one.
 

@@ -173,6 +173,45 @@ pub enum Input {
     /// foreground, so subsequent keystrokes land in it. If `start_show` is set, the
     /// host also sends F5 afterwards to start the slideshow / presenter mode.
     FocusWindow { id: i64, start_show: bool },
+    /// Put the virtual display this client is showing on the given side of the
+    /// host's main display (a second screen sitting to the LEFT of a Mac should
+    /// not have to be dragged into place in System Settings). The host also
+    /// remembers the side for this device. A host without virtual displays, or
+    /// one that can't arrange them, ignores it. Appended last to keep existing
+    /// discriminants stable.
+    ///
+    /// ⚠️ A host older than this variant fails to decode it and stops reading
+    /// input for the session, so a client sends it only when the user asks.
+    PlaceDisplay { side: DisplaySide },
+}
+
+/// Where a second screen sits relative to the host's main display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DisplaySide {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+impl DisplaySide {
+    pub const ALL: [DisplaySide; 4] =
+        [DisplaySide::Left, DisplaySide::Right, DisplaySide::Above, DisplaySide::Below];
+
+    /// Lowercase name, for command-line flags and saved settings.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DisplaySide::Left => "left",
+            DisplaySide::Right => "right",
+            DisplaySide::Above => "above",
+            DisplaySide::Below => "below",
+        }
+    }
+
+    /// The inverse of [`Self::as_str`] (case-insensitive).
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.as_str().eq_ignore_ascii_case(s.trim()))
+    }
 }
 
 /// The lifecycle phase of a touch contact (mirrors the common touch APIs).
@@ -467,6 +506,23 @@ mod tests {
     }
 
     #[test]
+    fn place_display_keeps_the_older_discriminants() {
+        // Appended after FocusWindow (index 10), so it must encode as 11: every
+        // earlier variant keeps its wire number for older peers.
+        let bytes = postcard::to_allocvec(&Input::PlaceDisplay { side: DisplaySide::Right }).unwrap();
+        assert_eq!(bytes, [11, 1]);
+    }
+
+    #[test]
+    fn display_sides_parse_from_their_names() {
+        for side in DisplaySide::ALL {
+            assert_eq!(DisplaySide::parse(side.as_str()), Some(side));
+        }
+        assert_eq!(DisplaySide::parse(" Right "), Some(DisplaySide::Right));
+        assert_eq!(DisplaySide::parse("middle"), None);
+    }
+
+    #[test]
     fn input_messages_round_trip() {
         let inputs = vec![
             Input::MouseMove { x: 0.25, y: 0.75 },
@@ -484,6 +540,8 @@ mod tests {
             Input::ScanDeck,
             Input::ListWindows,
             Input::FocusWindow { id: 1234567890, start_show: true },
+            Input::PlaceDisplay { side: DisplaySide::Left },
+            Input::PlaceDisplay { side: DisplaySide::Below },
         ];
 
         let mut buf = Vec::new();

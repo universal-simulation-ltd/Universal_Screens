@@ -21,7 +21,8 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use extender_protocol::{
-    self as protocol, Button, CaptureMode, Codec as WireCodec, Gesture, Input, Message, TouchPhase,
+    self as protocol, Button, CaptureMode, Codec as WireCodec, DisplaySide, Gesture, Input, Message,
+    TouchPhase,
 };
 use extender_transport::Conn;
 use screencapturekit::prelude::*;
@@ -115,13 +116,31 @@ pub(crate) fn serve_session(
         CaptureMode::MirrorPrimary | CaptureMode::ControlOnly => primary_display()?,
     };
 
+    // Only a virtual display belongs to this device and can be moved by it.
+    let device = (mode == CaptureMode::VirtualDisplay).then(|| name.to_owned());
     match mode {
         CaptureMode::ControlOnly => {
-            receive_and_inject(stream, bounds, 1.0);
+            receive_and_inject(stream, id, 1.0, None);
             Ok(())
         }
-        _ => serve_video(stream, id, size, bounds),
+        _ => serve_video(stream, id, size, bounds, device),
     }
+}
+
+/// Put virtual display `id` on `side` of the main display and remember the side
+/// for `device`. Called from the GUI and from a client's `Input::PlaceDisplay`.
+pub(crate) fn place_display(id: u32, device: &str, side: DisplaySide) {
+    match crate::placement::place(id, side) {
+        Ok(()) => crate::placement::remember(device, side),
+        Err(e) => eprintln!("could not place display {id} {}: {e}", side.as_str()),
+    }
+}
+
+/// Where display `id` is right now. Read per input event rather than once, so
+/// moving the display mid-session (GUI or client) never misplaces the pointer.
+fn display_bounds(id: u32) -> Bounds {
+    let b = CGDisplay::new(id).bounds();
+    (b.origin.x, b.origin.y, b.size.width, b.size.height)
 }
 
 /// Control-only: inject the client's input into the real desktop, stream no video.
@@ -129,8 +148,8 @@ pub(crate) fn serve_control_only(
     stream: Conn,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
-    let (_, _, bounds) = primary_display()?;
-    receive_and_inject(stream, bounds, 1.0);
+    let (id, _, _) = primary_display()?;
+    receive_and_inject(stream, id, 1.0, None);
     Ok(())
 }
 
@@ -142,6 +161,7 @@ fn serve_video(
     target_id: u32,
     capture: (u32, u32),
     bounds: Bounds,
+    device: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = stream.set_nodelay(true);
     let content = SCShareableContent::get()?;
@@ -224,7 +244,8 @@ fn serve_video(
     let input_stream = stream.try_clone()?;
     // Remote control sends relative motion in stream pixels; convert to points.
     let rel_scale = bounds.2 / f64::from(width);
-    let input_thread = thread::spawn(move || receive_and_inject(input_stream, bounds, rel_scale));
+    let input_thread =
+        thread::spawn(move || receive_and_inject(input_stream, target_id, rel_scale, device));
 
     sc.start_capture()?;
     let result = stream_to_client(stream, &rx, width, height, &dead);
@@ -244,14 +265,24 @@ fn serve_video(
 /// trackpad (no video), and points-per-stream-pixel in a video session, where
 /// Remote control sends its motion in the stream's pixels (a Retina capture has
 /// two per point, so unscaled the pointer would run twice as far as the finger).
-fn receive_and_inject(mut stream: Conn, bounds: Bounds, rel_scale: f64) {
-    let mut cursor = current_cursor(bounds);
+///
+/// `device` is set for a virtual-display session: its client may then move the
+/// display with [`Input::PlaceDisplay`].
+fn receive_and_inject(mut stream: Conn, id: u32, rel_scale: f64, device: Option<String>) {
+    let mut cursor = current_cursor(display_bounds(id));
     // Track whether the left button is held so moves can be posted as drags —
     // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
     // held-button move otherwise wouldn't select text / drag windows.
     let mut left_down = false;
     while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
-        inject(input, bounds, rel_scale, &mut cursor, &mut left_down);
+        if let Input::PlaceDisplay { side } = input {
+            if let Some(device) = &device {
+                place_display(id, device, side);
+                cursor = current_cursor(display_bounds(id));
+            }
+            continue;
+        }
+        inject(input, display_bounds(id), rel_scale, &mut cursor, &mut left_down);
     }
 }
 
@@ -353,6 +384,8 @@ fn inject(
         }
         // Slide deck / window picker are Windows-clicker-host features.
         Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } => {}
+        // Handled in `receive_and_inject`, which knows the display and device.
+        Input::PlaceDisplay { .. } => {}
     }
 }
 
@@ -419,9 +452,17 @@ pub(crate) fn ensure_display(
     if id == 0 {
         return Err("CGVirtualDisplay rejected the requested size".into());
     }
-    let bounds = wait_for_display(id)
+    let mut bounds = wait_for_display(id)
         .ok_or("virtual display did not register with the window server")?;
     println!("created virtual display {id}: \"{desired_name}\" {w}x{h} px");
+    // macOS puts a new display wherever it likes; put it back where this device
+    // was last placed.
+    if let Some(side) = crate::placement::saved(device_name) {
+        if let Err(e) = crate::placement::place(id, side) {
+            eprintln!("could not restore display {id} to the {}: {e}", side.as_str());
+        }
+        bounds = display_bounds(id);
+    }
     let d = Display {
         id,
         size: (w, h),

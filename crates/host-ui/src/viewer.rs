@@ -57,6 +57,9 @@ enum Phase {
 pub struct ViewerPanel {
     address: String,
     pin: String,
+    /// Which side of the other computer's main screen this one should sit on
+    /// as its second screen. `None` = leave it where that computer last put it.
+    side: Option<extender_protocol::DisplaySide>,
     /// Set by [`Self::choose`] so the next frame opens the collapsed panel.
     reveal: bool,
     phase: Arc<Mutex<Phase>>,
@@ -67,6 +70,7 @@ impl Default for ViewerPanel {
         Self {
             address: String::new(),
             pin: String::new(),
+            side: None,
             reveal: false,
             phase: Arc::new(Mutex::new(Phase::Idle { note: None })),
         }
@@ -120,13 +124,30 @@ impl ViewerPanel {
                     Mode::Mirror => format!("Showing {addr} in its own window."),
                     Mode::SecondScreen => format!(
                         "This is now a second screen for {addr}. Move windows onto it there; \
-                         press F in that window for full screen."
+                         press F in that window for full screen, or an arrow key to move it to \
+                         that side of {addr}'s screen."
                     ),
                 };
                 ui.label(format!("{what} Close that window to stop."));
             }
             Phase::Idle { note } => {
                 let ready = !self.address.trim().is_empty();
+                // Only meaningful for "Be its second screen"; asked for only when
+                // chosen, because a host older than 0.4.8 can't take it.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("As its second screen, this sits:");
+                    for (side, text) in [
+                        (None, "where it was"),
+                        (Some(extender_protocol::DisplaySide::Left), "left of it"),
+                        (Some(extender_protocol::DisplaySide::Right), "right of it"),
+                        (Some(extender_protocol::DisplaySide::Above), "above it"),
+                        (Some(extender_protocol::DisplaySide::Below), "below it"),
+                    ] {
+                        if ui.selectable_label(self.side == side, text).clicked() {
+                            self.side = side;
+                        }
+                    }
+                });
                 ui.horizontal_wrapped(|ui| {
                     if ui.add_enabled(ready, egui::Button::new("Show its screen")).clicked() {
                         self.launch(Mode::Mirror);
@@ -159,6 +180,9 @@ impl ViewerPanel {
         let addr = normalise_addr(&self.address);
         let mut cmd = Command::new(client);
         cmd.arg(&addr).args(mode.args());
+        if let (Mode::SecondScreen, Some(side)) = (mode, self.side) {
+            cmd.arg("--side").arg(side.as_str());
+        }
         let pin = self.pin.trim();
         if !pin.is_empty() {
             cmd.arg("--pin").arg(pin);

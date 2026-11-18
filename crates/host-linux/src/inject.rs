@@ -181,7 +181,7 @@ impl Injector {
             // and on real hardware, not as a side effect of adding video.
             Input::MouseMove { .. } | Input::Touch { .. } | Input::Gesture(_) => {}
             // Control requests, handled by the caller rather than injected.
-            Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } => {}
+            Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } | Input::PlaceDisplay { .. } => {}
         }
     }
 

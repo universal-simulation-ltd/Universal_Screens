@@ -47,3 +47,34 @@ you arrange and interact with that screen from the PC. Encoding is software
   display. Unplug it or make the virtual display the one you want extended.
 - True per-client display sizing (like the macOS `CGVirtualDisplay` host) isn't
   possible with a generic prebuilt driver; configure resolution in Windows.
+
+## Which side the second screen sits on (macOS host, 0.4.8)
+
+macOS places a new display wherever it remembers a display with the same
+vendor / product / serial sitting, and every virtual display the shim creates
+shares one serial (`0x0001`, `shim/virtual_display.m`). So a laptop to the
+right of the Mac could come up on its left (2026-11-18). The host now moves
+it with `CGConfigureDisplayOrigin` (`crates/host-macos/src/placement.rs`):
+edge to edge with the main display, centred along that edge, for the login
+session.
+
+- **From the Mac:** Virtual displays → each display has *Sits: ◀ Left /
+  Right ▶ / ▲ Above / ▼ Below*.
+- **From the client:** `--side left|right|above|below`, the viewer panel's
+  "this sits" choice, or an arrow key in the client window when not in
+  control mode. These send `Input::PlaceDisplay { side }` (appended to
+  `Input`; protocol stays v10).
+- The side is remembered per connecting device name in
+  `~/Library/Application Support/UniversalScreens/display-sides.txt`
+  (`side<TAB>device`) and reapplied whenever that device's display is created.
+- The input loop re-reads the display's bounds per event, so moving it
+  mid-session never misplaces the pointer.
+
+⚠️ A host older than 0.4.8 cannot decode `PlaceDisplay` and stops reading
+that session's input, so clients send it only when the user asks for a side.
+Windows and Linux hosts ignore it for now.
+
+⚠️ The shared serial also means a second host process on the same Mac cannot
+create a virtual display while another holds one ("CGVirtualDisplay rejected
+the requested size"). A per-device serial would fix that, and would let macOS
+remember each device's arrangement itself; not done.

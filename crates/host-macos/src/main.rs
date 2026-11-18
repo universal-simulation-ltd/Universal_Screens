@@ -7,6 +7,7 @@
 mod discovery;
 mod gui;
 mod host;
+mod placement;
 mod qr;
 mod wifi;
 

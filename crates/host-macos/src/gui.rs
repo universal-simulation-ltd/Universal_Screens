@@ -810,6 +810,7 @@ impl HostApp {
         .show(ui, |ui| {
             let mut remove_id: Option<u32> = None;
             let mut apply_name = false;
+            let mut place: Option<(u32, String, extender_protocol::DisplaySide)> = None;
 
             if entries.is_empty() {
                 ui.label(
@@ -851,6 +852,33 @@ impl HostApp {
                     }
                 });
 
+                // Where it sits relative to this Mac's main display, so nobody has
+                // to drag it into place in System Settings → Displays. Remembered
+                // for the device and reapplied whenever its display is created.
+                let current = crate::placement::saved(device_base);
+                ui.horizontal(|ui| {
+                    ui.small("Sits:");
+                    for (side, text) in [
+                        (extender_protocol::DisplaySide::Left, "◀ Left"),
+                        (extender_protocol::DisplaySide::Right, "Right ▶"),
+                        (extender_protocol::DisplaySide::Above, "▲ Above"),
+                        (extender_protocol::DisplaySide::Below, "▼ Below"),
+                    ] {
+                        if ui
+                            .selectable_label(current == Some(side), text)
+                            .on_hover_text(format!("Put this screen {} of the Mac's main screen", match side {
+                                extender_protocol::DisplaySide::Left => "to the left",
+                                extender_protocol::DisplaySide::Right => "to the right",
+                                extender_protocol::DisplaySide::Above => "above",
+                                extender_protocol::DisplaySide::Below => "below",
+                            }))
+                            .clicked()
+                        {
+                            place = Some((*id, device_base.clone(), side));
+                        }
+                    }
+                });
+
                 // Inline rename editor for this display — only when opened.
                 if self.renaming_id == Some(*id) {
                     ui.horizontal(|ui| {
@@ -870,6 +898,9 @@ impl HostApp {
                 }
             }
 
+            if let Some((id, device, side)) = place {
+                crate::host::place_display(id, &device, side);
+            }
             if let Some(id) = remove_id {
                 crate::host::remove_display(&self.vdisplays, id);
             }

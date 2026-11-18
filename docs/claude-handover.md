@@ -4,6 +4,31 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-18 (choose which side the second screen sits on)
+
+James's laptop (SPECTRE) sat to the right of the Mac but came up on its left,
+and he wanted to set the side from the app on either machine, not in System
+Settings → Displays. Shipped on main, **not released** (goes out with 0.4.8,
+which the signing session cuts):
+- `Input::PlaceDisplay { side: DisplaySide }` appended to the protocol (still
+  v10; wire index 11, pinned by a test). ⚠️ An older host stops reading input
+  on it, so clients send it only on request.
+- Mac host: `placement.rs` moves the virtual display with
+  `CGConfigureDisplayOrigin` (edge to edge, centred, for the session),
+  remembers the side per device in `display-sides.txt`, and reapplies it on
+  create. Virtual displays panel: *Sits: Left / Right / Above / Below*. The
+  input loop now reads the display's bounds per event.
+- Client: `--side …` and arrow keys (not in control mode). Viewer panel:
+  "As its second screen, this sits: where it was / left / right / above /
+  below of it".
+- Tested: unit tests (origin maths, store round trip, wire index); the real
+  `place()` call on SPECTRE's live display (moved to the computed origin,
+  then restored). Not tested live: the GUI buttons, arrow keys and `--side`
+  end to end, because a second host process can't create a virtual display
+  while the installed app holds one (shared serial `0x0001`; see
+  SECOND-SCREEN.md). Check them after installing 0.4.8 on both machines.
+  Windows/Linux builds: `tests.yml` on push.
+
 ## Update — 2026-11-18 (Windows as a Mac's second screen from the app; "stream ended" explained)
 
 James ran the Windows client against the Mac: it connected, the Mac created the

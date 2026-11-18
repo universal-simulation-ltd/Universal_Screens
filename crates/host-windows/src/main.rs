@@ -537,7 +537,7 @@ fn inject(input: Input) {
         // host doesn't have, so it's ignored.
         Input::MouseMove { .. } | Input::Touch { .. } | Input::Gesture(_) => {}
         // Handled in serve() (control requests, not injectable events).
-        Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } => {}
+        Input::ScanDeck | Input::ListWindows | Input::FocusWindow { .. } | Input::PlaceDisplay { .. } => {}
     }
 }
 

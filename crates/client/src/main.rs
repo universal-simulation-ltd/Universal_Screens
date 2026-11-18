@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use extender_core::{connect_problem, ConnectProblem, Session, StreamEvent};
-use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, Input};
+use extender_protocol::{self as protocol, Button, CaptureMode, ClientHello, DisplaySide, Input};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -144,6 +144,17 @@ fn decode_loop(session: &Session, shared: &Shared) -> Result<bool, Box<dyn std::
         }
     }
     Ok(started)
+}
+
+/// The side an arrow key asks for, when not in control mode.
+fn arrow_side(code: KeyCode) -> Option<DisplaySide> {
+    match code {
+        KeyCode::ArrowLeft => Some(DisplaySide::Left),
+        KeyCode::ArrowRight => Some(DisplaySide::Right),
+        KeyCode::ArrowUp => Some(DisplaySide::Above),
+        KeyCode::ArrowDown => Some(DisplaySide::Below),
+        _ => None,
+    }
 }
 
 /// Map a winit mouse button to the protocol button, ignoring extra buttons.
@@ -718,6 +729,16 @@ impl ApplicationHandler for App {
                                 .set_fullscreen((!fs).then(|| Fullscreen::Borderless(None)));
                         }
                         Some(KeyCode::Escape) => gpu.window.set_fullscreen(None),
+                        // Arrows put this second screen on that side of the
+                        // host's main display (the host remembers it). Only
+                        // sent when asked: a host older than PlaceDisplay
+                        // would stop reading this session's input.
+                        Some(code) if self.capture_mode == CaptureMode::VirtualDisplay => {
+                            if let Some(side) = arrow_side(code) {
+                                println!("asking the host to put this screen {}", side.as_str());
+                                let _ = self.input_tx.send(Input::PlaceDisplay { side });
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -740,20 +761,29 @@ impl ApplicationHandler for App {
 }
 
 /// Parse the command line: one positional `HOST_ADDR`, plus optional
-/// `--monitor N` / `-m N`, `--res N` / `-r N`, `--pin NNNN` / `-p NNNN`, and
-/// `--mirror` flags.
-fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32) {
+/// `--monitor N` / `-m N`, `--res N` / `-r N`, `--pin NNNN` / `-p NNNN`,
+/// `--side left|right|above|below`, and `--mirror` flags.
+#[allow(clippy::type_complexity)]
+fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32, Option<DisplaySide>) {
     let mut addr: Option<String> = None;
     let mut monitor_index = None;
     let mut res_index = None;
     let mut capture_mode = CaptureMode::VirtualDisplay;
     let mut pin = 0;
+    let mut side = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--monitor" | "-m" => monitor_index = args.next().and_then(|s| s.parse().ok()),
             "--res" | "-r" => res_index = args.next().and_then(|s| s.parse().ok()),
             "--mirror" => capture_mode = CaptureMode::MirrorPrimary,
+            "--side" | "-s" => {
+                let name = args.next().unwrap_or_default();
+                side = DisplaySide::parse(&name);
+                if side.is_none() {
+                    eprintln!("ignoring --side {name:?}: expected left, right, above or below");
+                }
+            }
             "--pin" | "-p" => {
                 let code = args.next().unwrap_or_default();
                 match code.trim().parse::<u32>() {
@@ -772,20 +802,28 @@ fn parse_args() -> (String, Option<usize>, Option<usize>, CaptureMode, u32) {
         res_index,
         capture_mode,
         pin,
+        side,
     )
 }
 
 fn main() {
     // The network thread starts in `resumed` once winit can enumerate monitors
     // (we need the chosen monitor's size before we can send the hello).
-    let (addr, monitor_index, res_index, capture_mode, pin) = parse_args();
+    let (addr, monitor_index, res_index, capture_mode, pin, side) = parse_args();
     let shared: Shared = Arc::new(Mutex::new(None));
     let (input_tx, input_rx) = mpsc::channel::<Input>();
+    // Queued now, sent as the first input once the session is up.
+    if let (Some(side), CaptureMode::VirtualDisplay) = (side, capture_mode) {
+        let _ = input_tx.send(Input::PlaceDisplay { side });
+    }
 
     if capture_mode == CaptureMode::MirrorPrimary {
         println!("mirror mode: requesting the host's primary display (remote control)");
     }
     println!("controls: click to grab control · Esc to release · F (when not grabbed) = fullscreen");
+    if capture_mode == CaptureMode::VirtualDisplay {
+        println!("          arrow keys (when not grabbed) = put this screen on that side of the host's main screen");
+    }
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
