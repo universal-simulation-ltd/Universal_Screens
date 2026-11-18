@@ -78,7 +78,12 @@ if [[ "${REQUIRE_SIGNING:-0}" == 1 && $NOTARISE == 0 ]]; then
   exit 1
 fi
 if [[ -n "$SIGN_ID" ]] && ! security find-identity -v -p codesigning | grep -qF "\"$SIGN_ID\""; then
+  # List what IS there: in CI the wanted name is masked as ***, and the usual
+  # mistake is exporting the neighbouring "Apple Development" certificate from
+  # Keychain Access instead of "Developer ID Application" (2026-11-18).
   echo "Signing identity not in any keychain: $SIGN_ID" >&2
+  echo "Code-signing identities found (want one whose name starts \"Developer ID Application\"):" >&2
+  security find-identity -v -p codesigning | sed -n 's/.*"\(.*\)".*/  \1/p' >&2
   exit 1
 fi
 
