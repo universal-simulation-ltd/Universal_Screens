@@ -90,6 +90,8 @@ struct HostApp {
     /// Virtual displays created for second-screen sessions — listed in the GUI so
     /// the user can rename / remove them. Shared with the serve loop.
     vdisplays: Arc<Mutex<crate::host::VDisplays>>,
+    /// Who is connected right now, each with a Disconnect button.
+    sessions: extender_host_ui::Sessions,
     /// In-progress friendly-name edit in the Virtual displays panel.
     rename_draft: String,
     /// The display id whose inline rename editor is open (None = closed). The
@@ -168,6 +170,7 @@ impl HostApp {
             beacon_stop: Arc::new(AtomicBool::new(true)), // starts in stopped state
             mdns_ad: None,
             vdisplays: Arc::new(Mutex::new(crate::host::VDisplays::default())),
+            sessions: extender_host_ui::Sessions::new(),
             rename_draft: String::new(),
             renaming_id: None,
             renaming_peer: None,
@@ -290,8 +293,9 @@ impl HostApp {
         let ctx = ctx.clone();
         let pin = self.pin;
         let vdisplays = self.vdisplays.clone();
+        let sessions = self.sessions.clone();
         thread::spawn(move || {
-            serve_loop(&listener, &stop, pin, &vdisplays, &|event| {
+            serve_loop(&listener, &stop, pin, &vdisplays, &sessions, &|event| {
                 match event {
                     HostEvent::Waiting => {
                         *status.lock().unwrap() = "Waiting for your phone…".to_owned();
@@ -499,6 +503,10 @@ impl HostApp {
                 }
             } else {
                 ui.label(format!("Status: {}", self.status.lock().unwrap()));
+            }
+            if self.running {
+                ui.add_space(6.0);
+                self.sessions.ui(ui);
             }
 
             ui.add_space(6.0);

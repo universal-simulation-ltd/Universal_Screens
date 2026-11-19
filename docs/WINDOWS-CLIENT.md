@@ -123,6 +123,11 @@ screen (blank at first — it's an empty second desktop).
     it all drives the virtual screen on the Mac.
   - **Esc** releases control.
   - **F** (when not in control mode) toggles fullscreen; **Esc** exits fullscreen.
+    `--fullscreen` (or the panel's **Open full screen** tick box) opens it full
+    screen. Whenever it goes full screen a pill at the top says **Press Esc to
+    exit full screen**, and in control mode **Press Esc to release the mouse and
+    keyboard** (then *Press Esc again…* if it is full screen). It shows for 3.5 s
+    from the first picture and fades; see `crates/client/src/hint.rs`.
 
 ---
 

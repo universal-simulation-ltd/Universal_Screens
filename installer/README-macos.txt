@@ -34,7 +34,15 @@ The client  --  "use THIS Mac as a screen for another computer"
 Open Universal Screens and expand "Show another computer here". Click the other
 computer under "Nearby" (or type its address), enter the PIN that computer
 shows, and click "Show its screen" -- or "Be its second screen" to extend
-that computer onto this Mac. It opens in a window of its own.
+that computer onto this Mac. It opens in a window of its own; tick "Open full
+screen" to have it fill this screen. Press F in that window to switch full
+screen on or off, and Esc to leave it: a reminder says so at the top whenever
+it goes full screen. "Disconnect" in the panel closes it.
+
+While the host runs, "Connected now" lists every device using this Mac, each
+with a "Disconnect" button. When a device that was this Mac's second screen
+disconnects (however it ends), its virtual display is removed, so no windows
+or pointer are left on a screen nobody can see.
 
 Or run the client from a terminal. It lives inside the app bundle and gets no
 icon of its own, because double-clicking it would have nowhere to connect:
@@ -46,8 +54,9 @@ needed the first time: the pairing is remembered, so later runs connect
 without it.
 
 Options: --monitor N to pick a display, --res N to drop the resolution if the
-stream is choppy, --mirror to view the host's primary display instead of a new
-virtual one (this is how you watch a PC's screen on this Mac).
+stream is choppy, --fullscreen to open full screen, --mirror to view the host's
+primary display instead of a new virtual one (this is how you watch a PC's
+screen on this Mac).
 
 
 Permissions macOS will ask for

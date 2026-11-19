@@ -48,6 +48,53 @@ you arrange and interact with that screen from the PC. Encoding is software
 - True per-client display sizing (like the macOS `CGVirtualDisplay` host) isn't
   possible with a generic prebuilt driver; configure resolution in Windows.
 
+## When the second screen disconnects (macOS host)
+
+Until 2026-11-19 the Mac kept a session's virtual display after the device
+left, to reuse it on reconnect. With the device gone, macOS still had the
+display, so windows and the pointer could wander onto a screen nobody could
+see, and the Mac could not be controlled properly (James, 2026-11-19).
+
+Now `host::serve_session` removes the virtual display whenever its session
+ends, however it ends: the device hung up, the stream failed, or **Disconnect**
+in the window. Reconnecting creates a new one (and puts it back on the side
+saved for that device).
+
+Two things had to change for the host to notice a device leaving at all:
+
+- **ScreenCaptureKit sends no frames while a display is idle**, so on a second
+  screen nobody was using no write ever failed, and the session (and its
+  display) outlived the client indefinitely. `serve_video` now ends the session
+  as soon as the input thread's read ends (`gone`), which is immediate when the
+  client closes the connection.
+- A client that **vanishes** without closing (Wi-Fi off, lid shut) never ends
+  that read. Video writes now time out after 10 s, and the socket is shut down
+  before joining the input thread so the join can't hang. On an idle display
+  nothing is written, so this case is still only noticed once something
+  changes on it; TCP keepalive would close that gap.
+
+The input loop reads and decodes separately (`protocol::decode_frame`), so an
+`Input` it doesn't understand (from a newer client) is skipped rather than
+ending the session.
+
+⚠️ Built and reviewed on Windows only: `host-macos` cannot compile there and
+`tests.yml` has no macOS job. Check it on the Mac.
+
+## Connected now (Windows and macOS hosts)
+
+Each host window lists its live sessions under **Connected now** (device
+name, address, what it's doing, how long), each with **Disconnect**
+(`crates/host-ui/src/sessions.rs`). Disconnect shuts the session's socket in
+both directions; the host's normal end-of-session path then runs, as if the
+device had hung up. ⚠️ On Windows a shutdown doesn't wake a `recv` blocked on
+another thread until the peer closes too. Every Screens client closes when its
+stream ends, so in practice it is immediate, but a peer that never reacts
+holds the session until it does. The Linux host's lean window doesn't have
+the list.
+
+The **Show another computer here** panel has its own **Disconnect** for the
+viewer it opened (it kills the client process).
+
 ## Which side the second screen sits on (macOS host, 0.4.8)
 
 macOS places a new display wherever it remembers a display with the same

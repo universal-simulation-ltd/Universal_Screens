@@ -11,6 +11,10 @@ openh264 = "0.9"
 pollster = "0.4.0"
 wgpu = "29.0.3"
 winit = "0.30.13"
+# The "Press Esc to exit full screen" reminder (hint.rs): a glyph rasteriser and
+# the font the host window already uses. Both are in the tree via egui.
+ab_glyph = "0.2.32"
+epaint_default_fonts = "0.29.1"
 
 # Keep this screen awake while it shows another computer (keep_awake.rs).
 [target.'cfg(windows)'.dependencies]

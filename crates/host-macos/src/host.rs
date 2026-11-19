@@ -44,7 +44,9 @@ extern "C" {
 /// Global bounds of a display: origin x/y and width/height in points.
 type Bounds = (f64, f64, f64, f64);
 
-/// A live virtual display kept alive across client reconnects.
+/// A live virtual display. It belongs to one session: `serve_session` removes
+/// it when that session ends (until 2026-11-19 it was kept for the next
+/// reconnect, which left the Mac with a display nobody could see).
 #[derive(Clone)]
 pub(crate) struct Display {
     pub(crate) id: u32,
@@ -106,7 +108,9 @@ pub(crate) fn set_friendly_name(state: &Arc<Mutex<VDisplays>>, name: Option<Stri
 
 /// Serve a video/control session. Dispatches on `mode`: extend creates (or
 /// reuses) a virtual display, mirror captures the primary, control-only streams
-/// no video. The virtual display slot is kept alive in `display` across calls.
+/// no video. A virtual display is removed when the session ends, however it
+/// ends: a second screen that has gone away must not stay on the Mac, where
+/// windows and the pointer can wander onto it and be lost (James, 2026-11-19).
 pub(crate) fn serve_session(
     stream: Conn,
     mode: CaptureMode,
@@ -130,7 +134,14 @@ pub(crate) fn serve_session(
             receive_and_inject(stream, id, 1.0, None);
             Ok(())
         }
-        _ => serve_video(stream, id, size, bounds, device),
+        _ => {
+            let result = serve_video(stream, id, size, bounds, device);
+            if mode == CaptureMode::VirtualDisplay {
+                remove_display(vdisplays, id);
+                println!("removed virtual display {id}: its device disconnected");
+            }
+            result
+        }
     }
 }
 
@@ -249,19 +260,34 @@ fn serve_video(
     }
 
     let input_stream = stream.try_clone()?;
+    // Kept only to shut the socket down once streaming stops, so the input
+    // thread's blocking read returns even when the client vanished without
+    // closing the connection (it would otherwise hold this session forever).
+    let closer = stream.try_clone()?;
+    // Set when the client stops sending: it hung up, or Disconnect in the
+    // window shut the socket. ScreenCaptureKit sends no frames while a display
+    // is idle, so on a second screen nobody is looking at no write ever fails;
+    // without this the session (and its display) outlived the client.
+    let gone = Arc::new(AtomicBool::new(false));
     // Remote control sends relative motion in stream pixels; convert to points.
     let rel_scale = bounds.2 / f64::from(width);
-    let input_thread =
-        thread::spawn(move || receive_and_inject(input_stream, target_id, rel_scale, device));
+    let input_thread = {
+        let gone = gone.clone();
+        thread::spawn(move || {
+            receive_and_inject(input_stream, target_id, rel_scale, device);
+            gone.store(true, Ordering::Relaxed);
+        })
+    };
 
     sc.start_capture()?;
-    let result = stream_to_client(stream, &rx, width, height, &dead);
+    let result = stream_to_client(stream, &rx, width, height, &dead, &gone);
     let _ = sc.stop_capture();
     // Barrier: an empty block on the serial capture queue can only run once
     // every already-queued sample callback has finished, so after this returns
     // nothing can touch `tx` (or the closure) — safe to drop `sc` and the
     // channel without the use-after-free that crashed the host on disconnect.
     dispatch_async_and_wait(&capture_queue, || {});
+    let _ = closer.shutdown(std::net::Shutdown::Both);
     let _ = input_thread.join();
     result
 }
@@ -281,7 +307,12 @@ fn receive_and_inject(mut stream: Conn, id: u32, rel_scale: f64, device: Option<
     // Quartz only treats LeftMouseDragged (not MouseMoved) as a drag, so a
     // held-button move otherwise wouldn't select text / drag windows.
     let mut left_down = false;
-    while let Ok(input) = protocol::read_framed::<_, Input>(&mut stream) {
+    // Read and decode apart: a whole frame that isn't an `Input` this host knows
+    // (a newer client's) is skipped. In a video session this loop ending is
+    // what tells the session its client has gone, so only the connection
+    // ending may end it.
+    while let Ok(body) = protocol::read_frame(&mut stream) {
+        let Ok(input) = protocol::decode_frame::<Input>(&body) else { continue };
         if let Input::PlaceDisplay { side } = input {
             if let Some(device) = &device {
                 place_display(id, device, side);
@@ -540,7 +571,13 @@ fn stream_to_client(
     width: u32,
     height: u32,
     dead: &AtomicBool,
+    gone: &AtomicBool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // A client that vanished (Wi-Fi off, lid shut) never closes the socket, and
+    // the session cleared its timeouts after the handshake. Video flows
+    // continuously while anything changes, so a write stuck this long means
+    // nobody is reading.
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     let mut out = BufWriter::new(stream);
     let mut started = false;
     let mut count = 0u64;
@@ -552,13 +589,16 @@ fn stream_to_client(
         let frame = match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => {
-                if dead.load(Ordering::Relaxed) {
+                if dead.load(Ordering::Relaxed) || gone.load(Ordering::Relaxed) {
                     return Ok(());
                 }
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
+        if gone.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         if frame.data.is_empty() {
             continue;
         }

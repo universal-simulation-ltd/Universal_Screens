@@ -106,6 +106,8 @@ struct HostApp {
     running: bool,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<String>>,
+    /// Who is connected right now, each with a Disconnect button.
+    sessions: extender_host_ui::Sessions,
     recent: Arc<Mutex<Vec<RecentConn>>>,
     address: Option<String>,
     /// The UNI·SIM mark, lazily uploaded for the navbar changelog icon + QR.
@@ -198,6 +200,7 @@ impl HostApp {
             running: false,
             stop: Arc::new(AtomicBool::new(false)),
             status: Arc::new(Mutex::new("Not started".to_owned())),
+            sessions: extender_host_ui::Sessions::new(),
             recent: Arc::new(Mutex::new(recent)),
             address: None,
             logo: None,
@@ -311,8 +314,9 @@ impl HostApp {
         let recent = self.recent.clone();
         let ctx = ctx.clone();
         let pin = self.pin;
+        let sessions = self.sessions.clone();
         thread::spawn(move || {
-            serve_loop(&listener, &stop, pin, &|event| {
+            serve_loop(&listener, &stop, pin, &sessions, &|event| {
                 match event {
                     HostEvent::Waiting => {
                         *status.lock().unwrap() = "Waiting for your phone…".to_owned();
@@ -578,6 +582,10 @@ impl HostApp {
 
             ui.add_space(6.0);
             ui.label(format!("Status: {}", self.status.lock().unwrap()));
+            if self.running {
+                ui.add_space(6.0);
+                self.sessions.ui(ui);
+            }
 
             let recent = self.recent.lock().unwrap().clone();
             if !recent.is_empty() {

@@ -1525,6 +1525,8 @@ dependencies = [
 name = "extender-client"
 version = "0.4.8"
 dependencies = [
+ "ab_glyph",
+ "epaint_default_fonts",
  "extender-core",
  "extender-protocol",
  "openh264",

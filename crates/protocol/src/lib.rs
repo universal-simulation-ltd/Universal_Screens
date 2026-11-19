@@ -400,8 +400,19 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
 /// Returns an error if the stream ends, the length is invalid (including over
 /// [`MAX_FRAME_LEN`]), or decoding fails.
 pub fn read_framed<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
-    let body = read_frame(r)?;
-    postcard::from_bytes(&body).map_err(io::Error::other)
+    decode_frame(&read_frame(r)?)
+}
+
+/// Decode a frame body that [`read_frame`] returned. Reading and decoding
+/// apart lets a reader tell "the connection ended" (the read fails) from "a
+/// whole frame arrived that this build doesn't understand" (the decode fails),
+/// and carry on after the second: the macOS host's input loop skips an `Input`
+/// from a newer client rather than treating it as the client hanging up.
+///
+/// # Errors
+/// Returns an error if `body` isn't a postcard encoding of `T`.
+pub fn decode_frame<T: DeserializeOwned>(body: &[u8]) -> io::Result<T> {
+    postcard::from_bytes(body).map_err(io::Error::other)
 }
 
 /// Report whether an AVCC bitstream contains a keyframe (an IRAP access unit):

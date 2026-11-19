@@ -4,6 +4,48 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-19 (full screen + Esc reminder; second screen removed on disconnect; Connected now)
+
+James set SPECTRE (Windows, 2880×1800 @150%) up as the Mac's second screen,
+then asked for three things. All on main, **not released** (still 0.4.8):
+
+- **Seen working first, on 0.4.8:** the PC as the Mac's second screen,
+  2880×1800 at 150% (1920×1200 pt HiDPI), side right, picture end to end. It
+  needed the Mac's Screen Recording grant removed and re-added *and* the app
+  quit and reopened. The first re-grant alone still hung up before a picture,
+  in mirror mode too.
+- **Full screen option** (`crates/client/src/hint.rs`, client `--fullscreen`,
+  panel tick box "Open full screen", `ViewerPrefs.fullscreen`): the viewer
+  draws a pill, "Press Esc to exit full screen", whenever it goes full screen;
+  "Press Esc to release the mouse and keyboard" on grab; "…again to exit full
+  screen" on release while full screen. Rasterised on the CPU with `ab_glyph` +
+  egui's Ubuntu Light (`epaint_default_fonts`, both already in the lockfile),
+  blended top-centre through a second, alpha-blended pipeline. Its 3.5 s clock
+  starts at the first picture. Verified: unit tests, a rendered PNG of the
+  pill, and live against the Mac that `--fullscreen` opens borderless at
+  0,0–2880×1800 and Esc returns it to a window. ⚠️ **Not seen on screen over
+  the picture:** GDI `CopyFromScreen`/`PrintWindow` can't capture the wgpu
+  full-screen surface (black, or a stale frame), and James declined
+  computer-use access to the Screens window.
+- **Mac removes the virtual display when its session ends** (`host.rs`
+  `serve_session`), plus the fixes that let it notice: `gone` from the input
+  thread (ScreenCaptureKit sends nothing on an idle display, so writes never
+  failed), a 10 s video write timeout, socket shutdown before joining the input
+  thread, and `protocol::decode_frame` so an unknown `Input` is skipped, not
+  fatal. docs/SECOND-SCREEN.md has the detail.
+- **Connected now** (`crates/host-ui/src/sessions.rs`): the Windows and Mac host
+  windows list live sessions, each with Disconnect (shuts the socket). The
+  viewer panel has its own Disconnect (kills the client). Linux not wired.
+  ⚠️ On Windows a shutdown doesn't wake a recv blocked on another thread until
+  the peer closes. Screens clients always close, but the first test took 120 s
+  with a peer that never reacted.
+- ⚠️ **`host-macos` is unverified:** it doesn't compile on Windows and
+  `tests.yml` has no macOS job. Dispatch `macos-release.yml` (ad-hoc on a
+  non-tag run) or build on the Mac, then check that a dropped Windows viewer
+  takes the virtual display with it.
+- Installed on SPECTRE as a local 0.4.8 build (no version bump: 0.x). Not yet
+  on the Mac, which still runs the released 0.4.8 and keeps old displays.
+
 ## Update — 2026-11-18 (0.4.8 released: the first Developer ID signed, notarised Mac build)
 
 - **v0.4.8 is out on all three platforms** (tag on `412733c`; Windows, macOS

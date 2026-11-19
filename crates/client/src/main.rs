@@ -10,11 +10,17 @@
 //!
 //! `--pin` is the 4-digit code the host shows. It is only needed the first time:
 //! the pairing is remembered, so later runs reconnect without it.
+//!
+//! `--fullscreen` opens it full screen. Whenever the window goes full screen, or
+//! the mouse is captured, a pill at the top says which key gets you out
+//! (hint.rs), because a window launched from the app has no terminal to read.
 
+mod hint;
 mod keep_awake;
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use extender_core::{connect_problem, ConnectProblem, Session, StreamEvent};
 use extender_protocol::{
@@ -49,6 +55,17 @@ const SCALE_PRESETS: [u32; 4] = [100, 75, 67, 50];
 /// we advertise to this box. Phone clients decode in hardware (MediaCodec) and
 /// aren't bound by this.
 const MAX_DECODE_DIM: (u32, u32) = (3840, 2160);
+
+/// The reminders the window shows (hint.rs). Esc is the way out of both full
+/// screen and control mode; in control mode it releases the mouse first, so
+/// leaving full screen from there takes a second press, and the pill says so.
+const HINT_FULLSCREEN: &str = "Press Esc to exit full screen";
+const HINT_GRABBED: &str = "Press Esc to release the mouse and keyboard";
+const HINT_FULLSCREEN_AGAIN: &str = "Press Esc again to exit full screen";
+
+/// A reminder whose picture never arrives (the stream failed) starts its clock
+/// anyway after this long, rather than sitting on a black screen for good.
+const HINT_WAIT_FOR_PICTURE: Duration = Duration::from_secs(8);
 
 /// One decoded frame, tightly packed RGBA (stride == width * 4).
 struct Frame {
@@ -257,6 +274,19 @@ struct FrameTexture {
     height: u32,
 }
 
+/// The reminder pill currently on screen (see hint.rs).
+struct Overlay {
+    base: hint::Bitmap,
+    texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+    asked_at: Instant,
+    /// When the picture under it first showed: the reminder's clock.
+    shown_at: Option<Instant>,
+    /// The visibility last uploaded, so a steady pill isn't re-uploaded.
+    uploaded: f32,
+}
+
 struct Gpu {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -264,9 +294,12 @@ struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    /// The same shader, alpha-blended: draws the reminder over the picture.
+    overlay_pipeline: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     frame_tex: Option<FrameTexture>,
+    overlay: Option<Overlay>,
 }
 
 impl Gpu {
@@ -373,6 +406,32 @@ impl Gpu {
             cache: None,
         });
 
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay-pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             window,
             surface,
@@ -380,9 +439,76 @@ impl Gpu {
             queue,
             config,
             pipeline,
+            overlay_pipeline,
             bgl,
             sampler,
             frame_tex: None,
+            overlay: None,
+        }
+    }
+
+    /// Put a reminder pill at the top of the window (replacing any other).
+    fn show_hint(&mut self, text: &str) {
+        let base = hint::rasterise(text, self.window.scale_factor());
+        let size = wgpu::Extent3d { width: base.width, height: base.height, depth_or_array_layers: 1 };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hint-tex"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        write_rgba(&self.queue, &texture, base.width, base.height, &base.rgba);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hint-bg"),
+            layout: &self.bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            ],
+        });
+        self.overlay = Some(Overlay {
+            base,
+            texture,
+            _view: view,
+            bind_group,
+            asked_at: Instant::now(),
+            shown_at: None,
+            uploaded: 1.0,
+        });
+    }
+
+    fn clear_hint(&mut self) {
+        self.overlay = None;
+    }
+
+    /// Advance the reminder's clock; whether it should be drawn this frame.
+    fn tick_hint(&mut self) -> bool {
+        let has_picture = self.frame_tex.is_some();
+        let Some(ov) = self.overlay.as_mut() else { return false };
+        if ov.shown_at.is_none() && (has_picture || ov.asked_at.elapsed() >= HINT_WAIT_FOR_PICTURE) {
+            ov.shown_at = Some(Instant::now());
+        }
+        let visible = match ov.shown_at {
+            Some(t) => hint::visibility(t.elapsed()),
+            None => Some(1.0),
+        };
+        match visible {
+            Some(v) => {
+                if (v - ov.uploaded).abs() > 0.01 {
+                    write_rgba(&self.queue, &ov.texture, ov.base.width, ov.base.height, &ov.base.faded(v));
+                    ov.uploaded = v;
+                }
+                true
+            }
+            None => {
+                self.overlay = None;
+                false
+            }
         }
     }
 
@@ -457,6 +583,8 @@ impl Gpu {
             );
         }
 
+        let draw_hint = self.tick_hint();
+
         let surface_tex = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
@@ -493,6 +621,21 @@ impl Gpu {
                 pass.set_bind_group(0, &ft.bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
+            if let (true, Some(ov)) = (draw_hint, &self.overlay) {
+                // Top centre, 1:1 pixels; shrunk only if the window is narrower.
+                let (sw, sh) = (self.config.width as f32, self.config.height as f32);
+                let fit = (sw / ov.base.width as f32).min(1.0);
+                let (w, h) = (ov.base.width as f32 * fit, ov.base.height as f32 * fit);
+                if h <= sh {
+                    let top = hint::TOP_MARGIN * self.window.scale_factor() as f32;
+                    let y = top.min(sh - h).floor();
+                    let x = ((sw - w) / 2.0).floor();
+                    pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                    pass.set_pipeline(&self.overlay_pipeline);
+                    pass.set_bind_group(0, &ov.bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+            }
         }
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
@@ -507,6 +650,25 @@ impl Gpu {
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
     }
+}
+
+/// Upload tightly packed RGBA covering the whole of `texture`.
+fn write_rgba(queue: &wgpu::Queue, texture: &wgpu::Texture, width: u32, height: u32, rgba: &[u8]) {
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
 }
 
 /// Pick the monitor whose native (physical-pixel) size to base the resolution
@@ -647,6 +809,8 @@ struct App {
     pin: u32,
     /// Whether the pointer is locked and we're forwarding input to the host.
     grabbed: bool,
+    /// `--fullscreen`: open full screen (on `--monitor` if given).
+    start_fullscreen: bool,
 }
 
 impl ApplicationHandler for App {
@@ -694,7 +858,12 @@ impl ApplicationHandler for App {
             std::thread::spawn(move || run_network(addr, shared, input_rx, hello, extras));
         }
 
-        let gpu = pollster::block_on(Gpu::new(window.clone()));
+        let mut gpu = pollster::block_on(Gpu::new(window.clone()));
+        if self.start_fullscreen {
+            let monitor = self.monitor_index.and_then(|i| event_loop.available_monitors().nth(i));
+            window.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+            gpu.show_hint(HINT_FULLSCREEN);
+        }
         self.gpu = Some(gpu);
         window.request_redraw();
     }
@@ -712,6 +881,7 @@ impl ApplicationHandler for App {
                 let _ = gpu.window.set_cursor_grab(CursorGrabMode::None);
                 gpu.window.set_cursor_visible(true);
                 self.grabbed = false;
+                gpu.clear_hint();
                 println!("control mode OFF (focus lost)");
             }
             WindowEvent::Resized(size) => gpu.resize(size.width, size.height),
@@ -733,6 +903,7 @@ impl ApplicationHandler for App {
                         Ok(()) => {
                             gpu.window.set_cursor_visible(false);
                             self.grabbed = true;
+                            gpu.show_hint(HINT_GRABBED);
                             println!("control mode ON (pointer locked) — press Esc to release");
                         }
                         Err(e) => eprintln!("could not lock the pointer: {e}"),
@@ -758,6 +929,11 @@ impl ApplicationHandler for App {
                         let _ = gpu.window.set_cursor_grab(CursorGrabMode::None);
                         gpu.window.set_cursor_visible(true);
                         self.grabbed = false;
+                        if gpu.window.fullscreen().is_some() {
+                            gpu.show_hint(HINT_FULLSCREEN_AGAIN);
+                        } else {
+                            gpu.clear_hint();
+                        }
                         println!("control mode OFF");
                     } else if let Some(hid) = key.and_then(key_to_hid) {
                         // In control mode every other key goes to the host.
@@ -770,8 +946,16 @@ impl ApplicationHandler for App {
                             let fs = gpu.window.fullscreen().is_some();
                             gpu.window
                                 .set_fullscreen((!fs).then(|| Fullscreen::Borderless(None)));
+                            if fs {
+                                gpu.clear_hint();
+                            } else {
+                                gpu.show_hint(HINT_FULLSCREEN);
+                            }
                         }
-                        Some(KeyCode::Escape) => gpu.window.set_fullscreen(None),
+                        Some(KeyCode::Escape) => {
+                            gpu.window.set_fullscreen(None);
+                            gpu.clear_hint();
+                        }
                         // Arrows put this second screen on that side of the
                         // host's main display (the host remembers it). Only
                         // sent when asked: a host older than PlaceDisplay
@@ -819,11 +1003,13 @@ struct Args {
     side: Option<DisplaySide>,
     /// `--allow-sleep`: let this screen turn off while it shows the host.
     allow_sleep: bool,
+    /// `--fullscreen`: open full screen.
+    fullscreen: bool,
 }
 
 /// `--monitor N` / `-m N`, `--res N` / `-r N`, `--size WxH`, `--scale N`,
-/// `--pin NNNN` / `-p NNNN`, `--side left|right|above|below`, `--allow-sleep`
-/// and `--mirror` flags.
+/// `--pin NNNN` / `-p NNNN`, `--side left|right|above|below`, `--allow-sleep`,
+/// `--fullscreen` / `-f` and `--mirror` flags.
 fn parse_args() -> Args {
     let mut args = Args {
         addr: DEFAULT_ADDR.to_string(),
@@ -835,6 +1021,7 @@ fn parse_args() -> Args {
         pin: 0,
         side: None,
         allow_sleep: false,
+        fullscreen: false,
     };
     let mut addr: Option<String> = None;
     let mut it = std::env::args().skip(1);
@@ -860,6 +1047,7 @@ fn parse_args() -> Args {
             }
             "--mirror" => args.capture_mode = CaptureMode::MirrorPrimary,
             "--allow-sleep" => args.allow_sleep = true,
+            "--fullscreen" | "-f" => args.fullscreen = true,
             "--side" | "-s" => {
                 let name = it.next().unwrap_or_default();
                 args.side = DisplaySide::parse(&name);
@@ -917,7 +1105,7 @@ fn main() {
     if capture_mode == CaptureMode::MirrorPrimary {
         println!("mirror mode: requesting the host's primary display (remote control)");
     }
-    println!("controls: click to grab control · Esc to release · F (when not grabbed) = fullscreen");
+    println!("controls: click to grab control · Esc to release · F (when not grabbed) = full screen on/off · Esc = leave full screen");
     if capture_mode == CaptureMode::VirtualDisplay {
         println!("          arrow keys (when not grabbed) = put this screen on that side of the host's main screen");
     }
@@ -936,6 +1124,7 @@ fn main() {
         capture_mode,
         pin: args.pin,
         grabbed: false,
+        start_fullscreen: args.fullscreen,
     };
     event_loop.run_app(&mut app).expect("run app");
 }

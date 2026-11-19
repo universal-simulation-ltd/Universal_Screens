@@ -18,7 +18,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -67,6 +67,9 @@ pub struct ViewerPrefs {
     /// Let this screen turn off while it shows the other computer. Off (the
     /// screen is kept awake) unless ticked: James's laptop kept going black.
     pub allow_sleep: bool,
+    /// Open the viewer full screen (`--fullscreen`). Off unless ticked; the
+    /// viewer shows "Press Esc to exit full screen" when it opens.
+    pub fullscreen: bool,
 }
 
 /// The panel's state. Hold one in the host's app struct, call [`Self::ui`]
@@ -83,9 +86,12 @@ pub struct ViewerPanel {
     custom_size: bool,
     scale: Option<u16>,
     allow_sleep: bool,
+    fullscreen: bool,
     /// Set by [`Self::choose`] so the next frame opens the collapsed panel.
     reveal: bool,
     phase: Arc<Mutex<Phase>>,
+    /// The running viewer, so **Disconnect** can end it from this window.
+    child: Arc<Mutex<Option<Child>>>,
 }
 
 impl Default for ViewerPanel {
@@ -99,8 +105,10 @@ impl Default for ViewerPanel {
             custom_size: false,
             scale: None,
             allow_sleep: false,
+            fullscreen: false,
             reveal: false,
             phase: Arc::new(Mutex::new(Phase::Idle { note: None })),
+            child: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -114,6 +122,7 @@ impl ViewerPanel {
             size: self.size,
             scale: self.scale,
             allow_sleep: self.allow_sleep,
+            fullscreen: self.fullscreen,
         }
     }
 
@@ -124,6 +133,7 @@ impl ViewerPanel {
         self.size = prefs.size;
         self.scale = prefs.scale;
         self.allow_sleep = prefs.allow_sleep;
+        self.fullscreen = prefs.fullscreen;
         if let Some((w, h)) = self.size {
             self.size_draft = format!("{w}×{h}");
         }
@@ -175,11 +185,18 @@ impl ViewerPanel {
                     Mode::Mirror => format!("Showing {addr} in its own window."),
                     Mode::SecondScreen => format!(
                         "This is now a second screen for {addr}. Move windows onto it there; \
-                         press F in that window for full screen, or an arrow key to move it to \
-                         that side of {addr}'s screen."
+                         in that window, F switches full screen on and off (Esc leaves it), and \
+                         an arrow key moves it to that side of {addr}'s screen."
                     ),
                 };
-                ui.label(format!("{what} Close that window to stop."));
+                ui.label(format!("{what} Close that window, or disconnect here, to stop."));
+                if ui
+                    .button("Disconnect")
+                    .on_hover_text("Close the viewer and end the connection to the other computer")
+                    .clicked()
+                {
+                    self.disconnect();
+                }
             }
             Phase::Idle { note } => {
                 let ready = !self.address.trim().is_empty();
@@ -219,8 +236,9 @@ impl ViewerPanel {
         }
     }
 
-    /// Size and scaling for "Be its second screen", and whether this screen may
-    /// sleep while it shows the other computer.
+    /// Size and scaling for "Be its second screen", whether the viewer opens
+    /// full screen, and whether this screen may sleep while it shows the other
+    /// computer.
     fn second_screen_options(&mut self, ui: &mut egui::Ui) {
         // This screen, as egui sees it: size in points and pixels per point.
         let (native, own_scale) = ui.ctx().input(|i| {
@@ -301,6 +319,7 @@ impl ViewerPanel {
                 .response
                 .on_hover_text("How big things look on the second screen, like Windows' display scaling");
         });
+        ui.checkbox(&mut self.fullscreen, "Open full screen (press Esc to leave it)");
         ui.checkbox(&mut self.allow_sleep, "Let this screen turn off while it shows the other computer");
     }
 
@@ -331,6 +350,9 @@ impl ViewerPanel {
         if self.allow_sleep {
             cmd.arg("--allow-sleep");
         }
+        if self.fullscreen {
+            cmd.arg("--fullscreen");
+        }
         let pin = self.pin.trim();
         if !pin.is_empty() {
             cmd.arg("--pin").arg(pin);
@@ -348,10 +370,17 @@ impl ViewerPanel {
         self.pin.clear();
         self.set(Phase::Open { addr: addr.clone(), mode });
 
+        let stderr = child.stderr.take();
+        if let Ok(mut slot) = self.child.lock() {
+            *slot = Some(child);
+        }
+        let held = Arc::clone(&self.child);
         let phase = Arc::clone(&self.phase);
         thread::spawn(move || {
             let mut problem: Vec<String> = Vec::new();
-            if let Some(stderr) = child.stderr.take() {
+            // Runs until the client exits (or is killed by Disconnect): its
+            // stderr closes with it.
+            if let Some(stderr) = stderr {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                     if let Some(msg) = line.strip_prefix("client error: ") {
                         problem = vec![sentence(msg)];
@@ -361,12 +390,24 @@ impl ViewerPanel {
                     }
                 }
             }
-            let _ = child.wait();
+            if let Some(mut child) = held.lock().ok().and_then(|mut slot| slot.take()) {
+                let _ = child.wait();
+            }
             let note = (!problem.is_empty()).then(|| problem.join(" "));
             if let Ok(mut p) = phase.lock() {
                 *p = Phase::Idle { note };
             }
         });
+    }
+
+    /// End the running viewer, which closes its connection. The waiting thread
+    /// then puts the panel back to `Idle` as for any other exit.
+    fn disconnect(&self) {
+        if let Ok(mut slot) = self.child.lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
     }
 
     fn set(&self, phase: Phase) {
@@ -432,6 +473,7 @@ mod tests {
             size: Some((2560, 1600)),
             scale: Some(150),
             allow_sleep: true,
+            fullscreen: true,
         };
         let mut panel = ViewerPanel::default();
         panel.set_prefs(prefs.clone());

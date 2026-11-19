@@ -19,6 +19,10 @@ The host  --  "use my phone / another screen with THIS PC"
 Launch "Universal Screens" from the Start menu. The window shows the address to
 connect to and a 4-digit pairing PIN, plus a QR code your phone can scan.
 
+While it runs, "Connected now" lists every device using this PC, with what it
+is doing and for how long. Click "Disconnect" beside one to end it; that device
+can connect again whenever it likes.
+
 Run it from a terminal instead if you want it headless:
 
   extender-host-windows.exe 0.0.0.0:9000
@@ -30,7 +34,8 @@ The client  --  "use THIS PC as a screen for another computer"
 Open Universal Screens and expand "Show another computer here". Click the other
 computer under "Nearby" (or type its address), enter the PIN that computer
 shows, and click "Be its second screen" -- or "Show its screen" to watch its
-main screen instead. It opens in a window of its own; press F there for full
+main screen instead. It opens in a window of its own (tick "Open full screen"
+to have it fill this screen straight away); press F there for full
 screen. (This needs the desktop client component, ticked in the installer.)
 
 To choose which side of the other computer's screen this one sits on, pick
@@ -50,7 +55,8 @@ pairing is remembered, so later runs connect without it.
 Options: --size 2560x1600 for an exact size (or --res N for a preset, if the
 stream is choppy), --scale 150 for how big things look (default: the same as
 this PC's own display scaling), --side left|right|above|below to place the
-screen, --monitor N to pick a display, --allow-sleep to let this screen turn
+screen, --fullscreen to open full screen, --monitor N to pick a display,
+--allow-sleep to let this screen turn
 off (by default it stays on while it shows the other computer), --mirror to
 view the host's primary display instead of a new virtual one.
 

@@ -83,7 +83,7 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     );
     let stop = AtomicBool::new(false);
     // The headless CLI doesn't pair (PIN 0 = accept any); the GUI host pairs.
-    serve_loop(&listener, &stop, 0, &|event| match event {
+    serve_loop(&listener, &stop, 0, &extender_host_ui::Sessions::new(), &|event| match event {
         HostEvent::Waiting => println!("waiting for a client to connect..."),
         HostEvent::Connected { peer, platform } => {
             println!("client connected: {peer} ({platform:?})");
@@ -101,6 +101,7 @@ pub(crate) fn serve_loop(
     listener: &TcpListener,
     stop: &AtomicBool,
     expected_pin: u32,
+    sessions: &extender_host_ui::Sessions,
     on_event: &(dyn Fn(HostEvent) + Sync),
 ) {
     let _ = listener.set_nonblocking(true);
@@ -154,6 +155,9 @@ pub(crate) fn serve_loop(
                             let _ = conn.end_handshake();
                             extender_host_ui::name_paired_device(&mut store, conn.auth(), platform, &name);
                             on_event(HostEvent::Connected { peer: peer.clone(), platform });
+                            // Listed under "Connected now" (with Disconnect) until
+                            // this block ends.
+                            let _session = sessions.begin(&conn, &name, platform, &peer, mode);
                             if let Err(e) = serve(conn, mode) {
                                 on_event(HostEvent::Error(format!("session with {peer} ended: {e}")));
                             }

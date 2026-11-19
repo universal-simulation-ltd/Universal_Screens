@@ -46,7 +46,7 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     );
     let stop = AtomicBool::new(false);
     let vdisplays = Arc::new(Mutex::new(host::VDisplays::default()));
-    serve_loop(&listener, &stop, 0, &vdisplays, &|event| match event {
+    serve_loop(&listener, &stop, 0, &vdisplays, &extender_host_ui::Sessions::new(), &|event| match event {
         HostEvent::Waiting => println!("waiting for a client to connect..."),
         HostEvent::Connected { peer, platform } => {
             println!("client connected: {peer} ({platform:?})");
@@ -58,14 +58,15 @@ fn run_cli(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Accept and serve clients until `stop` is set. Non-blocking so the stop flag
-/// is checked promptly between connections. A virtual display, once created, is
-/// kept alive across reconnects and recreated only when the client needs a
-/// different size.
+/// is checked promptly between connections. A virtual display lasts as long as
+/// the session that made it: it is removed when that device disconnects (see
+/// `host::serve_session`). Each session is listed in `sessions` while it runs.
 pub(crate) fn serve_loop(
     listener: &TcpListener,
     stop: &AtomicBool,
     expected_pin: u32,
     vdisplays: &Arc<Mutex<host::VDisplays>>,
+    sessions: &extender_host_ui::Sessions,
     on_event: &(dyn Fn(HostEvent) + Sync),
 ) {
     let _ = listener.set_nonblocking(true);
@@ -142,6 +143,9 @@ pub(crate) fn serve_loop(
                         );
                     }
                     on_event(HostEvent::Connected { peer: peer.clone(), platform });
+                    // Listed under "Connected now" (with Disconnect) until this
+                    // block ends.
+                    let _session = sessions.begin(&conn, &name, platform, &peer, mode);
                     let result = match mode {
                         CaptureMode::ControlOnly => host::serve_control_only(conn),
                         _ => host::serve_session(conn, mode, w, h, scale, &name, vdisplays),
