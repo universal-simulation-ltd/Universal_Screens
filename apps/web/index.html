@@ -56,13 +56,13 @@
     color-scheme: light;
     --accent: #ff6a00;
     --accent-press: #e85f00;
-    --bg: #f4f4f6;
+    --bg: #f8fafc;
     --card: #ffffff;
-    --text: #18181b;
-    --muted: #6b6b76;
-    --line: #e4e4ea;
+    --text: #0f172a;
+    --muted: #475569;
+    --line: #e2e8f0;
   }
-  :root.dark { color-scheme: dark; --bg: #0f0f12; --card: #1b1b20; --text: #f4f4f6; --muted: #9a9aa6; --line: #2b2b33; }
+  :root.dark { color-scheme: dark; --bg: #0a0e16; --card: #121a2a; --text: #e6eaf2; --muted: #9fb0c6; --line: #334155; }
   * { box-sizing: border-box; }
   html { height: 100%; }
   /* A column: suite bar, then the connect card, then the footer. It used to be
@@ -760,8 +760,183 @@
     .conn-x line { animation: none; stroke-dashoffset: 0; }
   }
 
-  #log { font: 11px/1.4 ui-monospace, monospace; color: #cfcfd6; background: #000; max-height: 6.5rem; overflow: auto; padding: .35rem .6rem; border-top: 1px solid #222; white-space: pre-wrap; }
+  #log { font: 11px/1.4 ui-monospace, monospace; color: #cbd5e1; background: #000; max-height: 6.5rem; overflow: auto; padding: .35rem .6rem; border-top: 1px solid #222; white-space: pre-wrap; }
   .ok { color: #4ade80; } .err { color: #f87171; } .dim { opacity: .65; }
+  /* ---------- Boxes (suite) ---------- */
+  /* Copied from @unisim/sdk 0.227.0 BOX_CSS (packages/sdk/src/boxStyles.ts, unchanged since 0.203.1; BRANDING.md → Boxes). Don't edit here — change the SDK and re-copy from @unisim/sdk BOX_CSS. */
+@property --u-box-sweep { syntax: "<angle>"; inherits: false; initial-value: 24deg; }
+@property --u-box-reach { syntax: "<length-percentage>"; inherits: false; initial-value: 0%; }
+.u-box { --_b-ink: #0f172a; --_b-ring: #e2e8f0; --_b-fill: var(--u-box-fill, #ffffff); --_b-accent: var(--u-box-accent, #e05504); --_b-accent-from: var(--u-box-accent, #fe8c01); --_b-mute: #94a3b8; --_b-key: #0f172a; --_b-on-key: #ffffff; --_b-good-fill: #1f7a40; --_b-warn-fill: #e0a100; --_b-crit-fill: #b3261e; --_b-on-good: #ffffff; --_b-on-warn: #0f172a; --_b-on-crit: #ffffff; }
+[data-u-ground="dark"] .u-box, .dark .u-box, [data-theme="dark"] .u-box { --_b-ink: #e6eaf2; --_b-ring: rgba(255, 255, 255, 0.08); --_b-fill: var(--u-box-fill-dark, #151920); --_b-accent: var(--u-box-accent-dark, #ff9a1f); --_b-accent-from: var(--u-box-accent-dark, #ff9a1f); --_b-mute: rgba(255, 255, 255, 0.28); --_b-key: #e2e8f0; --_b-on-key: #0a0e16; --_b-good-fill: #4bbf78; --_b-warn-fill: #f2bb2e; --_b-crit-fill: #f0645a; --_b-on-good: #0a0e16; --_b-on-warn: #0a0e16; --_b-on-crit: #0a0e16; }
+.u-box[data-u-ground="light"] { --_b-ink: #0f172a; --_b-ring: #e2e8f0; --_b-fill: var(--u-box-fill, #ffffff); --_b-accent: var(--u-box-accent, #e05504); --_b-accent-from: var(--u-box-accent, #fe8c01); --_b-mute: #94a3b8; --_b-key: #0f172a; --_b-on-key: #ffffff; --_b-good-fill: #1f7a40; --_b-warn-fill: #e0a100; --_b-crit-fill: #b3261e; --_b-on-good: #ffffff; --_b-on-warn: #0f172a; --_b-on-crit: #ffffff; }
+.u-box[data-u-ground="dark"] { --_b-ink: #e6eaf2; --_b-ring: rgba(255, 255, 255, 0.08); --_b-fill: var(--u-box-fill-dark, #151920); --_b-accent: var(--u-box-accent-dark, #ff9a1f); --_b-accent-from: var(--u-box-accent-dark, #ff9a1f); --_b-mute: rgba(255, 255, 255, 0.28); --_b-key: #e2e8f0; --_b-on-key: #0a0e16; --_b-good-fill: #4bbf78; --_b-warn-fill: #f2bb2e; --_b-crit-fill: #f0645a; --_b-on-good: #0a0e16; --_b-on-warn: #0a0e16; --_b-on-crit: #0a0e16; }
+
+/* The box's own look, layered and at zero specificity: an app's classes and
+   Tailwind 4's utilities win, its preflight does not ("Cascade" above). */
+@layer theme, base, components, utilities;
+@layer components.unisim-box {
+:where(.u-box) {
+  --_b-r: 18px;
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  padding: 18px 20px;
+  border: 1px solid var(--_b-ring);
+  border-radius: var(--_b-r);
+  background: var(--_b-fill);
+  color: var(--_b-ink);
+  text-decoration: none;
+}
+:where(.u-box--row) { --_b-r: 14px; padding: 14px 16px; }
+:where(a.u-box, button.u-box) { cursor: pointer; font: inherit; text-align: inherit; width: 100%; }
+:where(.u-box--key) { --_b-r: 10px; padding-top: 22px; }
+:where(.u-box--frame) { --_b-r: 8px; border-color: transparent; }
+:where(.u-box--frame.u-box--empty) { background: transparent; padding: 26px 20px; text-align: center; }
+}
+
+/* ── A · Orbit: the arrow hugs the leading corner ── */
+.u-box--orbit::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  width: min(150px, 70%);
+  height: min(70px, calc(100% + 2px));
+  box-sizing: border-box;
+  border: 3px solid var(--_b-accent);
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: var(--_b-r);
+  -webkit-mask: linear-gradient(to top right, transparent 0%, #000 34%, #000 52%, transparent 100%);
+  mask: linear-gradient(to top right, transparent 0%, #000 34%, #000 52%, transparent 100%);
+  pointer-events: none;
+  transition: width 0.55s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.u-box--orbit.u-box--row::before { width: min(80px, 60%); height: min(44px, calc(100% + 2px)); border-width: 2px; }
+/* Pointers that really hover only: a touchscreen keeps :hover on the last tap. */
+@media (hover: hover) {
+  a.u-box--orbit:hover::before, button.u-box--orbit:hover::before { width: min(260px, 92%); height: calc(100% + 2px); }
+  a.u-box--orbit.u-box--row:hover::before, button.u-box--orbit.u-box--row:hover::before { width: min(160px, 80%); }
+}
+.u-box--orbit:focus-visible { outline: 2px solid var(--_b-accent); outline-offset: 2px; }
+
+/* ── C · Key: a solid tab across the top edge ── */
+.u-box__key {
+  position: absolute;
+  left: 16px;
+  top: -11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 32px);
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--_b-key);
+  color: var(--_b-on-key);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.u-box[data-tone="good"] > .u-box__key { background: var(--_b-good-fill); color: var(--_b-on-good); }
+.u-box[data-tone="warn"] > .u-box__key { background: var(--_b-warn-fill); color: var(--_b-on-warn); }
+.u-box[data-tone="crit"] > .u-box__key { background: var(--_b-crit-fill); color: var(--_b-on-crit); }
+
+/* ── D · Frame: four brackets, the leading one in the accent ── */
+.u-box--frame { --_b-k: 18px; }
+.u-box--frame.u-box--row { --_b-k: 14px; }
+.u-box--frame.u-box--empty { --_b-k: 22px; }
+.u-box--frame::before, .u-box--frame::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  box-sizing: border-box;
+  border-radius: var(--_b-r);
+  pointer-events: none;
+}
+.u-box--frame::before {
+  border: 2px solid var(--_b-mute);
+  -webkit-mask:
+    linear-gradient(#000 0 0) top right / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) bottom left / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) bottom right / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) top left / var(--_b-k) var(--_b-k) no-repeat;
+  mask:
+    linear-gradient(#000 0 0) top right / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) bottom left / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) bottom right / var(--_b-k) var(--_b-k) no-repeat,
+    linear-gradient(#000 0 0) top left / var(--_b-k) var(--_b-k) no-repeat;
+}
+.u-box--frame::after {
+  border: 3px solid var(--_b-accent);
+  -webkit-mask: linear-gradient(#000 0 0) top left / max(var(--_b-k), var(--u-box-reach)) var(--_b-k) no-repeat;
+  mask: linear-gradient(#000 0 0) top left / max(var(--_b-k), var(--u-box-reach)) var(--_b-k) no-repeat;
+}
+/* Nothing in frame yet: all four corners muted. */
+.u-box--frame.u-box--empty::after { display: none; }
+
+/* ── Next: the box to go to; its light runs along the top and back ──
+   The chips' way: their arc is a conic gradient round the outline, and a
+   registered angle sweeps it further round. Here a second ring (the orbit
+   box's free ::after) carries that gradient from the leading edge, and
+   --u-box-sweep runs it along the top border to the far corner and back.
+   At rest the ring is invisible, so the box is every other box until the
+   light moves. A frame's leading bracket stretches along the top the same way
+   (--u-box-reach). Both are registered, so they animate. */
+.u-box--orbit.u-box--next::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  box-sizing: border-box;
+  border-radius: var(--_b-r);
+  padding: 3px;
+  background: conic-gradient(from 270deg,
+    transparent 0deg, var(--_b-accent) 22deg,
+    var(--_b-accent) var(--u-box-sweep), transparent calc(var(--u-box-sweep) + 34deg));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: u-box-next 3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.u-box--orbit.u-box--row.u-box--next::after { padding: 2px; }
+@keyframes u-box-next {
+  0%, 100% { --u-box-sweep: 24deg; opacity: 0; }
+  50% { --u-box-sweep: 132deg; opacity: 1; }
+}
+@keyframes u-box-next-frame {
+  0%, 100% { --u-box-reach: 0%; }
+  50% { --u-box-reach: 55%; }
+}
+.u-box--frame.u-box--next:not(.u-box--empty)::after { animation: u-box-next-frame 3s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+/* Under a real pointer, hover takes over: the ring steps aside for the arc's
+   own sweep, and the loop picks up again on leave. */
+@media (hover: hover) {
+  a.u-box--orbit.u-box--next:hover::after, button.u-box--orbit.u-box--next:hover::after { animation: none; opacity: 0; }
+}
+
+/* The display rule above would otherwise beat the UA's [hidden] rule. */
+.u-box[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .u-box--orbit::before { transition: none; }
+  /* No loop; the light holds along the top, so the box still stands out. */
+  .u-box--orbit.u-box--next::after { animation: none; --u-box-sweep: 132deg; opacity: 1; }
+  .u-box--frame.u-box--next:not(.u-box--empty)::after { animation: none; --u-box-reach: 55%; }
+}
+  /* ---------- Boxes: this page's fit (edit here, not above) ----------
+     A · Orbit corner (row size) on the mode rows and the saved computers: each
+     is a row you tap to open a session (client.js renderModes / renderSaved).
+     The page's .row-btn is unlayered, so it keeps its own fill, border and
+     padding; these rules only seat the mark. */
+  /* The corner follows the arc's row radius (14px). */
+  .row-btn.u-box--orbit { border-radius: 14px; }
+  /* Hover is the arc's sweep, so the border stays its own colour. */
+  .row-btn.u-box--orbit:hover { border-color: var(--line); }
 </style>
 </head>
 <body>

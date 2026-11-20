@@ -164,7 +164,9 @@ function renderModes() {
   box.innerHTML = "";
   for (const m of MODES) {
     const btn = document.createElement("button");
-    btn.className = "row-btn";
+    // A row you tap to open a session: the suite's Orbit corner (BRANDING.md →
+    // Boxes, A), row size. The mark is CSS only; see the box block in index.html.
+    btn.className = "row-btn u-box u-box--orbit u-box--row";
     btn.innerHTML = `<span class="glyph">${m.glyph}</span><span class="body"><div class="title">${m.label}</div><div class="blurb">${m.blurb}</div></span>`;
     btn.addEventListener("click", () => connect($("addr").value.trim(), m));
     box.appendChild(btn);
@@ -237,7 +239,8 @@ function renderSaved() {
   box.innerHTML = "";
   for (const h of list) {
     const row = document.createElement("button");
-    row.className = "row-btn";
+    // Tap to reconnect: an Orbit row, as the mode rows above (BRANDING.md → Boxes, A).
+    row.className = "row-btn u-box u-box--orbit u-box--row";
     // Title: the user's friendly name with the host in brackets, e.g.
     // "Office Mac (Kyjams-iMac)"; else just the hostname (or address).
     const base = h.hostname || h.addr;
