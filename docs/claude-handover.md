@@ -4,6 +4,43 @@ Newest entry first. Each dated `## Update` overrides anything older that conflic
 A `SessionStart` hook injects the top ~150 lines into new sessions, so keep the
 newest entry at the top.
 
+## Update — 2026-11-20 (0.4.9 released)
+
+The 2026-11-19 entry below has the feature detail; this one is the release.
+
+- **v0.4.9 is out on all three platforms** (tag on `6a3a7c5`; features
+  `1f9890c`, plus another session's browser-client box marks + slate palette
+  `11b482c`). Windows, macOS (Developer ID signed + notarised,
+  `REQUIRE_SIGNING` on the tag) and Linux workflows green; the GitHub release
+  has six assets and all three `.sha256` files matched the downloaded assets.
+- **downloads.unisim.co.uk/universal-screens/** carries the three 0.4.9
+  installers + `latest.json` (0.4.9) in R2 bucket `unisim-downloads`; fetched
+  back live: HTTP 200, right content types, sha256 match; the listing shows only
+  0.4.9. SHA-256: `Setup-0.4.9.exe` `e47ee9b3f79a3c601650e16a683e498d950ba47218c7e0e77cbac27045d4745f`,
+  `0.4.9.dmg` `87a06b33a9e3f0f64018c607937e9fe371192a9dde01b963aa9bf5dea4af05c1`,
+  `0.4.9-x86_64.AppImage` `a40724159681d8065485378f47390cd22d4c9c7832de5bf8cbf6ae7f37e5de1f`.
+- Download page checksums swapped to 0.4.9 in opensource-portal `be54ed1`.
+  Suite changelog `2026.11.20.69` (`universal-suite-changelog@f91bf09`).
+- **Installed on SPECTRE:** the released 0.4.9 (Add/Remove Programs and the
+  exe's FileVersion read 0.4.9; the window opens).
+- ⚠️ **Not verified:**
+  - `host-macos` has only compiled in CI and 0.4.9 is **not on the Mac yet**:
+    nobody has seen a dropped Windows viewer take the virtual display with it,
+    nor the Mac's Connected now list.
+  - The Esc pill has not been seen drawn over a live picture (the GPU
+    full-screen surface can't be screen-grabbed; James declined computer-use
+    access to the Screens window). Connected now and the Disconnect buttons
+    have not been seen on screen: unit tests only.
+  - Known gaps, unchanged: a client that vanishes without closing (Wi-Fi off)
+    on an idle display is noticed only once something changes on that display
+    (TCP keepalive would close it); on Windows a socket shutdown doesn't wake a
+    recv blocked on another thread until the peer closes (Screens clients
+    always close). The Linux host has no Connected now.
+- Next on the Mac: install 0.4.9 over 0.4.8 (first update since signing: do
+  the Screen Recording and Accessibility grants survive?), then the checks
+  above. They are listed in the suite backlog's "Things to test — Screens
+  0.4.9" block.
+
 ## Update — 2026-11-19 (full screen + Esc reminder; second screen removed on disconnect; Connected now)
 
 James set SPECTRE (Windows, 2880×1800 @150%) up as the Mac's second screen,
